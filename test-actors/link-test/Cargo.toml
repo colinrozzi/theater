@@ -1,5 +1,5 @@
 [package]
-name = "shutdown-test-actor"
+name = "link-test-actor"
 version = "0.1.0"
 edition = "2021"
 

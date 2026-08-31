@@ -109,9 +109,9 @@ checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
 
 [[package]]
 name = "packr-abi"
-version = "0.21.0"
+version = "0.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bd1347bee36d4c1a5a0299143ff549b53f80c4eed070012aab7ec02ad8d6fc3f"
+checksum = "b395c4f437aeeea15c55123b736cb1dcf29145023da0174de3a002d795f6d868"
 dependencies = [
  "hashbrown",
  "sha2",
@@ -119,9 +119,9 @@ dependencies = [
 
 [[package]]
 name = "packr-derive"
-version = "0.21.0"
+version = "0.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ca819e98b330439a911f9b10b48c8265630fcfb75b39d7103513734be4d24c7f"
+checksum = "4aaff28273cf9a2e4c18c0b4ee58ddeff3d69d878e7f57ed301c7cd53033b8e8"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -130,9 +130,9 @@ dependencies = [
 
 [[package]]
 name = "packr-guest"
-version = "0.21.0"
+version = "0.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dc53e24a0369b915148c8b971aaa2c213f543ef71d1d177981bfc2d7e0109f88"
+checksum = "c5393dd395f681b6ff1aed17deb2fe0096d7389036f3e58b76eb04552e75643b"
 dependencies = [
  "dlmalloc",
  "packr-abi",
@@ -142,9 +142,9 @@ dependencies = [
 
 [[package]]
 name = "packr-guest-macros"
-version = "0.21.0"
+version = "0.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "25fc374caccaf65b4ec3febea1483a9f8f7d59de0d5b156c864d32a7f86dc93d"
+checksum = "2f130940e274633ff5b9c205ca3224f75c3787bd141c45795a5842fc84723ef5"
 dependencies = [
  "packr-abi",
  "proc-macro2",

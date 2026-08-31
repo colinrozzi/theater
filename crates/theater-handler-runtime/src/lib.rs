@@ -189,7 +189,7 @@ impl Handler for RuntimeHandler {
                     async move {
                         require(&permissions, true)?;
                         let tx = ctx.data().theater_tx.clone();
-                        if tx.send(TheaterCommand::ShutdownRuntime).await.is_err() {
+                        if tx.send(TheaterCommand::ShutdownRuntime).is_err() {
                             return Err(Value::from(RuntimeError::RuntimeUnavailable));
                         }
                         Ok(Value::Tuple(vec![]))
@@ -208,7 +208,6 @@ impl Handler for RuntimeHandler {
                         let tx = ctx.data().theater_tx.clone();
                         if tx
                             .send(TheaterCommand::SubscribeToSpawns { event_tx })
-                            .await
                             .is_err()
                         {
                             return Err(Value::from(RuntimeError::RuntimeUnavailable));
@@ -229,7 +228,6 @@ impl Handler for RuntimeHandler {
                         let tx = ctx.data().theater_tx.clone();
                         if tx
                             .send(TheaterCommand::UnsubscribeFromSpawns { event_tx })
-                            .await
                             .is_err()
                         {
                             return Err(Value::from(RuntimeError::RuntimeUnavailable));

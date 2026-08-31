@@ -272,12 +272,11 @@ fn parse_actor_id(id: &str) -> Result<TheaterId, SupervisorError> {
 
 /// Fetch the runtime's actor list: (id, name, parent-id).
 async fn get_actors(
-    theater_tx: &mpsc::Sender<TheaterCommand>,
+    theater_tx: &mpsc::UnboundedSender<TheaterCommand>,
 ) -> Result<Vec<(TheaterId, String, Option<TheaterId>)>, SupervisorError> {
     let (tx, rx) = oneshot::channel();
     theater_tx
         .send(TheaterCommand::GetActors { response_tx: tx })
-        .await
         .map_err(|_| SupervisorError::RuntimeUnavailable)?;
     match rx.await {
         Ok(Ok(v)) => Ok(v),
@@ -291,7 +290,7 @@ async fn get_actors(
 /// runtime owns the supervision tree and walks it from its own actor map, so the
 /// handler no longer fetches the full actor list and rebuilds the tree per op.
 async fn is_descendant(
-    theater_tx: &mpsc::Sender<TheaterCommand>,
+    theater_tx: &mpsc::UnboundedSender<TheaterCommand>,
     ancestor: TheaterId,
     target: TheaterId,
 ) -> Result<bool, SupervisorError> {
@@ -302,7 +301,6 @@ async fn is_descendant(
             target,
             response_tx: tx,
         })
-        .await
         .map_err(|_| SupervisorError::RuntimeUnavailable)?;
     match rx.await {
         Ok(Ok(b)) => Ok(b),
@@ -314,7 +312,7 @@ async fn is_descendant(
 /// Ask the runtime for `root`'s strict descendants as `(id, name, parent-id)`
 /// rows — the scope: subtree `list-actors` view, walked from the runtime's tree.
 async fn get_descendants(
-    theater_tx: &mpsc::Sender<TheaterCommand>,
+    theater_tx: &mpsc::UnboundedSender<TheaterCommand>,
     root: TheaterId,
 ) -> Result<Vec<(TheaterId, String, Option<TheaterId>)>, SupervisorError> {
     let (tx, rx) = oneshot::channel();
@@ -323,7 +321,6 @@ async fn get_descendants(
             root,
             response_tx: tx,
         })
-        .await
         .map_err(|_| SupervisorError::RuntimeUnavailable)?;
     match rx.await {
         Ok(Ok(v)) => Ok(v),
@@ -358,7 +355,7 @@ fn require_capability(
 /// The full gate for a single-target op: capability (via [`require_capability`])
 /// AND view — the target must be in the caller's view.
 async fn authorize(
-    theater_tx: &mpsc::Sender<TheaterCommand>,
+    theater_tx: &mpsc::UnboundedSender<TheaterCommand>,
     perms: &Option<SupervisorPermissions>,
     caller: TheaterId,
     target: TheaterId,
@@ -425,7 +422,7 @@ pub struct SupervisorHandler {
     /// Set of currently active child actor IDs
     children: Arc<Mutex<HashSet<TheaterId>>>,
     /// Theater command sender for stopping children on shutdown
-    theater_tx: Arc<Mutex<Option<mpsc::Sender<TheaterCommand>>>>,
+    theater_tx: Arc<Mutex<Option<mpsc::UnboundedSender<TheaterCommand>>>>,
     /// Optional shared URL-bytes cache. When present, spawns of children
     /// whose manifest sets `static_package = true` fetch the wasm
     /// through this cache instead of re-resolving every time.
@@ -879,7 +876,7 @@ impl Handler for SupervisorHandler {
                         // detached init fires response_tx. The latency here is
                         // the runtime command loop's serialized cost per spawn.
                         let phase_start = Instant::now();
-                        if theater_tx.send(cmd).await.is_err() {
+                        if theater_tx.send(cmd).is_err() {
                             return Err(Value::from(SupervisorError::RuntimeUnavailable));
                         }
 
@@ -1040,7 +1037,7 @@ impl Handler for SupervisorHandler {
                             parent_id: Some(store.id),
                         };
 
-                        if theater_tx.send(cmd).await.is_err() {
+                        if theater_tx.send(cmd).is_err() {
                             return Err(Value::from(SupervisorError::RuntimeUnavailable));
                         }
 
@@ -1082,7 +1079,7 @@ impl Handler for SupervisorHandler {
                                 let _ = theater_tx.send(TheaterCommand::StopActor {
                                     actor_id,
                                     response_tx: stop_tx,
-                                }).await;
+                                });
                                 Err(Value::from(SupervisorError::SpawnFailed(SpawnFailure::Timeout(format!("timeout waiting for child actor {} to complete", actor_id)))))
                             }
                         }
@@ -1145,7 +1142,6 @@ impl Handler for SupervisorHandler {
                             actor_id: target,
                             response_tx: rtx,
                         })
-                        .await
                         .map_err(|_| SupervisorError::RuntimeUnavailable)?;
                         match rrx.await {
                             Ok(Ok(status)) => Ok(Value::String(format!("{:?}", status))),
@@ -1169,7 +1165,6 @@ impl Handler for SupervisorHandler {
                             actor_id: target,
                             response_tx: rtx,
                         })
-                        .await
                         .map_err(|_| SupervisorError::RuntimeUnavailable)?;
                         match rrx.await {
                             Ok(Ok(state)) => Ok(state),
@@ -1193,7 +1188,6 @@ impl Handler for SupervisorHandler {
                             actor_id: target,
                             response_tx: rtx,
                         })
-                        .await
                         .map_err(|_| SupervisorError::RuntimeUnavailable)?;
                         match rrx.await {
                             Ok(Ok(m)) => serde_json::to_string(&m).map(Value::String).map_err(|e| {
@@ -1219,7 +1213,6 @@ impl Handler for SupervisorHandler {
                             actor_id: target,
                             response_tx: rtx,
                         })
-                        .await
                         .map_err(|_| SupervisorError::RuntimeUnavailable)?;
                         match rrx.await {
                             Ok(Ok(m)) => serde_json::to_string(&m).map(Value::String).map_err(|e| {
@@ -1245,7 +1238,6 @@ impl Handler for SupervisorHandler {
                             actor_id: target,
                             response_tx: rtx,
                         })
-                        .await
                         .map_err(|_| SupervisorError::RuntimeUnavailable)?;
                         match rrx.await {
                             Ok(Ok(())) => Ok(Value::Tuple(vec![])),
@@ -1269,7 +1261,6 @@ impl Handler for SupervisorHandler {
                             actor_id: target,
                             response_tx: rtx,
                         })
-                        .await
                         .map_err(|_| SupervisorError::RuntimeUnavailable)?;
                         match rrx.await {
                             Ok(Ok(())) => Ok(Value::Tuple(vec![])),
@@ -1299,7 +1290,6 @@ impl Handler for SupervisorHandler {
                                 actor_id: target,
                                 event_tx,
                             })
-                            .await
                             .is_err()
                         {
                             return Err(Value::from(SupervisorError::RuntimeUnavailable));
@@ -1327,7 +1317,6 @@ impl Handler for SupervisorHandler {
                                 actor_id: target,
                                 event_tx,
                             })
-                            .await
                             .is_err()
                         {
                             return Err(Value::from(SupervisorError::RuntimeUnavailable));
@@ -1464,7 +1453,7 @@ impl Handler for SupervisorHandler {
                             actor_id: *child_id,
                             response_tx,
                         };
-                        if let Err(e) = theater_tx.send(cmd).await {
+                        if let Err(e) = theater_tx.send(cmd) {
                             warn!("Failed to send stop command for child {}: {}", child_id, e);
                         }
                     }

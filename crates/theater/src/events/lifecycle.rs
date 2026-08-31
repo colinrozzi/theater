@@ -40,6 +40,10 @@ pub enum TerminationCause {
     Stopped,
     /// Brutally force-killed (`TerminateActor`).
     Killed,
+    /// Stopped because a fate-linked peer terminated — `peer` is that peer's id.
+    /// As the fate cascade ripples, each level records `PeerKilled` naming the
+    /// one above it, so the terminal chain reads as a causal chain.
+    PeerKilled { peer: String },
 }
 
 impl ActorLifecycleEvent {
@@ -64,6 +68,7 @@ impl IntoValue for TerminationCause {
             TerminationCause::Failed { error } => (1, "failed", vec![Value::String(error)]),
             TerminationCause::Stopped => (2, "stopped", vec![]),
             TerminationCause::Killed => (3, "killed", vec![]),
+            TerminationCause::PeerKilled { peer } => (4, "peer-killed", vec![Value::String(peer)]),
         };
         Value::Variant {
             type_name: "termination-cause".into(),
@@ -99,6 +104,13 @@ impl TryFrom<Value> for TerminationCause {
                 }
                 "stopped" => Ok(TerminationCause::Stopped),
                 "killed" => Ok(TerminationCause::Killed),
+                "peer-killed" => {
+                    let peer = match payload.into_iter().next() {
+                        Some(v) => String::try_from(v)?,
+                        None => String::new(),
+                    };
+                    Ok(TerminationCause::PeerKilled { peer })
+                }
                 other => Err(ConversionError::ExpectedVariant(format!(
                     "unknown case: {}",
                     other
@@ -190,6 +202,11 @@ mod tests {
         });
         roundtrip(ActorLifecycleEvent::Terminated {
             cause: TerminationCause::Killed,
+        });
+        roundtrip(ActorLifecycleEvent::Terminated {
+            cause: TerminationCause::PeerKilled {
+                peer: "peer-id".into(),
+            },
         });
     }
 }

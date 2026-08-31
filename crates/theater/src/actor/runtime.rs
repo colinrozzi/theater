@@ -25,7 +25,7 @@ use crate::ShutdownController;
 use crate::ShutdownType;
 use crate::StateChain;
 use std::sync::Arc;
-use tokio::sync::mpsc::{self, Receiver, Sender};
+use tokio::sync::mpsc::{self, Receiver, Sender, UnboundedSender};
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
@@ -192,7 +192,7 @@ impl ActorRuntime {
         pack_runtime: Arc<CachingPackRuntime>,
         chain: Arc<RwLock<StateChain>>,
         handler_registry: HandlerRegistry,
-        theater_tx: Sender<TheaterCommand>,
+        theater_tx: UnboundedSender<TheaterCommand>,
         operation_tx: Sender<ActorOperation>,
         info_tx: Sender<ActorInfo>,
         control_tx: Sender<ActorControl>,
@@ -618,7 +618,7 @@ impl ActorRuntime {
         pack_runtime: Arc<CachingPackRuntime>,
         chain: Arc<RwLock<StateChain>>,
         handler_registry: HandlerRegistry,
-        theater_tx: Sender<TheaterCommand>,
+        theater_tx: UnboundedSender<TheaterCommand>,
         operation_rx: Receiver<ActorOperation>,
         operation_tx: Sender<ActorOperation>,
         info_rx: Receiver<ActorInfo>,
@@ -737,10 +737,22 @@ impl ActorRuntime {
                     actor_phase_manager.set_phase(ActorPhase::ShuttingDown);
 
                     // Signal handlers FIRST so they can cancel any blocking operations
-                    // (e.g., TCP receive() calls that are waiting for data)
+                    // (e.g., TCP receive() calls that are waiting for data). Bounded:
+                    // the actor task owns its whole teardown deadline, and a wedged
+                    // handler that never acks must not hang it — so cap the wait. A
+                    // handler acks automatically on drop, so this only bites a truly
+                    // stuck one, whose task is abandoned when this task exits.
                     match handlers_shutdown_controller.write().await.take() {
                         Some(controller) => {
-                            controller.signal_shutdown(ShutdownType::Graceful).await;
+                            if tokio::time::timeout(
+                                std::time::Duration::from_secs(5),
+                                controller.signal_shutdown(ShutdownType::Graceful),
+                            )
+                            .await
+                            .is_err()
+                            {
+                                error!("Handler shutdown did not complete within 5s - proceeding");
+                            }
                         }
                         None => {
                             warn!("No handlers shutdown controller found");
@@ -857,6 +869,12 @@ impl ActorRuntime {
         let final_metrics = metrics.get_metrics().await;
         info!("Final metrics at shutdown: {:?}", final_metrics);
 
+        // Self-report: the task has finished its own bounded teardown (loops
+        // stopped, handlers signalled, resources released). This is the single
+        // signal the runtime keys the terminal event + fate cascade off, for
+        // every death path (stop / kill / crash / self-exit).
+        let _ = theater_tx.send(TheaterCommand::ActorShutdownComplete { actor_id: id });
+
         info!("Actor runtime cleanup complete");
     }
 
@@ -864,7 +882,7 @@ impl ActorRuntime {
         mut operation_rx: Receiver<ActorOperation>,
         actor_instance_wrapper: Arc<RwLock<Option<PackInstance>>>,
         metrics: Arc<RwLock<MetricsCollector>>,
-        theater_tx: Sender<TheaterCommand>,
+        theater_tx: UnboundedSender<TheaterCommand>,
         actor_phase_manager: ActorPhaseManager,
     ) {
         // Wait for actor to be ready or fail during setup
@@ -901,7 +919,7 @@ impl ActorRuntime {
         op: ActorOperation,
         actor_instance_wrapper: &Arc<RwLock<Option<PackInstance>>>,
         metrics: &Arc<RwLock<MetricsCollector>>,
-        theater_tx: &Sender<TheaterCommand>,
+        theater_tx: &UnboundedSender<TheaterCommand>,
         actor_phase_manager: ActorPhaseManager,
     ) {
         match op {
@@ -919,9 +937,7 @@ impl ActorRuntime {
                             message: "Actor instance not found".to_string(),
                         };
 
-                        let _ = theater_tx
-                            .send(TheaterCommand::ActorRuntimeError { error: err })
-                            .await;
+                        let _ = theater_tx.send(TheaterCommand::ActorRuntimeError { error: err });
 
                         let actor_err =
                             ActorError::UnexpectedError("Actor instance not found".to_string());
@@ -948,12 +964,10 @@ impl ActorRuntime {
                         }
                     }
                     Err(actor_error) => {
-                        let _ = theater_tx
-                            .send(TheaterCommand::ActorError {
-                                actor_id: actor_instance.id(),
-                                error: actor_error.clone(),
-                            })
-                            .await;
+                        let _ = theater_tx.send(TheaterCommand::ActorError {
+                            actor_id: actor_instance.id(),
+                            error: actor_error.clone(),
+                        });
 
                         error!("Operation '{}' failed with error: {}", name, actor_error);
                         if let Err(send_err) = response_tx.send(Err(actor_error)) {
@@ -1071,7 +1085,7 @@ impl ActorRuntime {
         actor_instance: &mut PackInstance,
         name: &String,
         params: Vec<u8>,
-        _theater_tx: &mpsc::Sender<TheaterCommand>,
+        _theater_tx: &mpsc::UnboundedSender<TheaterCommand>,
         metrics: &MetricsCollector,
     ) -> Result<Vec<u8>, ActorError> {
         let start = Instant::now();

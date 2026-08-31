@@ -110,7 +110,7 @@ fn format_event_json(event: &ChainEvent, actor_id: &TheaterId) -> String {
 
 /// Create a handler registry with all Theater handlers
 fn create_handler_registry(
-    theater_tx: mpsc::Sender<TheaterCommand>,
+    theater_tx: mpsc::UnboundedSender<TheaterCommand>,
     show_actor_logs: bool,
     resource_cache: Arc<ResourceCache>,
 ) -> Result<HandlerRegistry, CliError> {
@@ -121,6 +121,12 @@ fn create_handler_registry(
     registry.register(
         SelfHandler::new(self_config, theater_tx.clone(), None).with_show_logs(show_actor_logs),
     );
+
+    // Lifecycle handler - actor-facing link / monitor over the subscription
+    // substrate (fate-sharing + watching between actors).
+    registry.register(theater_handler_lifecycle::LifecycleHandler::new(
+        theater_tx.clone(),
+    ));
 
     // Store handler - provides content storage
     let store_config = StoreHandlerConfig::default();
@@ -218,7 +224,7 @@ async fn run(args: &SpawnArgs, ctx: &CommandContext, call_init: bool) -> Result<
         .map_err(|e| CliError::invalid_manifest(format!("Failed to parse manifest: {}", e)))?;
 
     // Create the TheaterRuntime in-process
-    let (theater_tx, theater_rx) = mpsc::channel::<TheaterCommand>(32);
+    let (theater_tx, theater_rx) = mpsc::unbounded_channel::<TheaterCommand>();
     // One URL→bytes cache shared across every entry point in this CLI
     // invocation: the top-level wasm fetch below and the supervisor host
     // fn (via `create_handler_registry`). Lasts until the CLI process exits.
@@ -330,7 +336,6 @@ async fn run(args: &SpawnArgs, ctx: &CommandContext, call_init: bool) -> Result<
 
     theater_tx
         .send(cmd)
-        .await
         .map_err(|e| CliError::server_error(format!("Failed to send spawn command: {}", e)))?;
 
     // Wait for the actor to start (and, for SpawnActor, for init to complete).
@@ -430,7 +435,7 @@ async fn run(args: &SpawnArgs, ctx: &CommandContext, call_init: bool) -> Result<
                 let _ = theater_tx.send(TheaterCommand::StopActor {
                     actor_id,
                     response_tx: stop_tx,
-                }).await;
+                });
 
                 // Wait briefly for graceful shutdown
                 match tokio::time::timeout(

@@ -32,6 +32,7 @@ const DEFAULT_EPOCH_DEADLINE_TICKS: u64 = 300;
 // Re-export Pack types for convenient use throughout Theater
 // Now unified: pack re-exports from pack_abi, so Value/FromValue/ConversionError are consistent
 pub use packr::abi::{ConversionError, FromValue, Value, ValueType};
+pub use packr_abi::Pattern;
 
 pub use packr::{
     AsyncCompiledModule, AsyncCtx, AsyncInstance, AsyncRuntime, CallInterceptor, Ctx,

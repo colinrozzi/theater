@@ -36,7 +36,7 @@ async fn create_instance() -> PackInstance {
 
     let runtime = AsyncRuntime::new();
     let actor_id = TheaterId::generate();
-    let (theater_tx, _theater_rx) = mpsc::channel::<TheaterCommand>(10);
+    let (theater_tx, _theater_rx) = mpsc::unbounded_channel::<TheaterCommand>();
     let (operation_tx, _operation_rx) = mpsc::channel(10);
     let (info_tx, _info_rx) = mpsc::channel(10);
     let (control_tx, _control_rx) = mpsc::channel(10);

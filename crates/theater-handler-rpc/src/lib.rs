@@ -29,7 +29,7 @@ use theater::handler::{Handler, HandlerContext, SharedActorInstance};
 use theater::id::TheaterId;
 use theater::messages::TheaterCommand;
 use theater::shutdown::ShutdownReceiver;
-use tokio::sync::mpsc::Sender;
+use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot;
 
 // Pack integration
@@ -107,11 +107,11 @@ impl CallOptions {
 /// Handler for providing RPC capabilities to actors
 #[derive(Clone)]
 pub struct RpcHandler {
-    theater_tx: Sender<TheaterCommand>,
+    theater_tx: UnboundedSender<TheaterCommand>,
 }
 
 impl RpcHandler {
-    pub fn new(theater_tx: Sender<TheaterCommand>) -> Self {
+    pub fn new(theater_tx: UnboundedSender<TheaterCommand>) -> Self {
         Self { theater_tx }
     }
 
@@ -207,7 +207,6 @@ impl Handler for RpcHandler {
                             actor_id: target_id,
                             response_tx,
                         })
-                        .await
                     {
                         return Ok::<Value, String>(make_error(&format!("Failed to send to theater: {}", e)));
                     }
@@ -285,7 +284,6 @@ impl Handler for RpcHandler {
                                 actor_id: target_id,
                                 response_tx,
                             })
-                            .await
                         {
                             return Ok::<Value, String>(make_error(&format!("Failed to send to theater: {}", e)));
                         }
@@ -344,7 +342,6 @@ impl Handler for RpcHandler {
                                 actor_id: target_id,
                                 response_tx,
                             })
-                            .await
                         {
                             return Ok::<Value, String>(make_error(&format!("Failed to send to theater: {}", e)));
                         }
@@ -437,7 +434,7 @@ mod tests {
 
     #[test]
     fn test_rpc_handler_creation() {
-        let (tx, _rx) = mpsc::channel(100);
+        let (tx, _rx) = mpsc::unbounded_channel();
         let handler = RpcHandler::new(tx);
         assert_eq!(handler.name(), "rpc");
     }
@@ -451,7 +448,7 @@ mod tests {
 
     #[test]
     fn test_rpc_handler_interface_hashes() {
-        let (tx, _rx) = mpsc::channel(100);
+        let (tx, _rx) = mpsc::unbounded_channel();
         let handler = RpcHandler::new(tx);
 
         let hashes = handler.interface_hashes();

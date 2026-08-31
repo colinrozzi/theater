@@ -96,7 +96,7 @@ async fn test_actor_shutdown_timing() {
     info!("Loaded shutdown-test WASM: {} bytes", wasm_bytes.len());
 
     // Create theater runtime channels
-    let (theater_tx, theater_rx) = mpsc::channel::<TheaterCommand>(100);
+    let (theater_tx, theater_rx) = mpsc::unbounded_channel::<TheaterCommand>();
     let theater_tx_clone = theater_tx.clone();
 
     // Create handler registry with runtime handler
@@ -138,7 +138,6 @@ async fn test_actor_shutdown_timing() {
             subscription_tx: None,
             parent_id: None,
         })
-        .await
         .expect("Failed to send spawn command");
 
     let actor_id = tokio::time::timeout(Duration::from_secs(5), spawn_rx)
@@ -162,7 +161,6 @@ async fn test_actor_shutdown_timing() {
             actor_id,
             response_tx: stop_tx,
         })
-        .await
         .expect("Failed to send stop command");
 
     // Wait for stop to complete
@@ -229,7 +227,7 @@ async fn test_multiple_actor_shutdown_timing() {
     let wasm_bytes = link_self_contained(member);
 
     // Create theater runtime
-    let (theater_tx, theater_rx) = mpsc::channel::<TheaterCommand>(100);
+    let (theater_tx, theater_rx) = mpsc::unbounded_channel::<TheaterCommand>();
     let theater_tx_clone = theater_tx.clone();
     let mut handler_registry = HandlerRegistry::new();
     let runtime_config = SelfHostConfig {};
@@ -269,7 +267,6 @@ async fn test_multiple_actor_shutdown_timing() {
                 subscription_tx: None,
                 parent_id: None,
             })
-            .await
             .expect("Failed to send spawn command");
 
         let actor_id = tokio::time::timeout(Duration::from_secs(5), spawn_rx)
@@ -297,7 +294,6 @@ async fn test_multiple_actor_shutdown_timing() {
                 actor_id: *actor_id,
                 response_tx: stop_tx,
             })
-            .await
             .expect("Failed to send stop command");
 
         let _ = tokio::time::timeout(TEST_TIMEOUT, stop_rx)
@@ -370,7 +366,7 @@ async fn test_actor_shutdown_with_supervisor_handler() {
     info!("Loaded shutdown-test WASM: {} bytes", wasm_bytes.len());
 
     // Create theater runtime channels
-    let (theater_tx, theater_rx) = mpsc::channel::<TheaterCommand>(100);
+    let (theater_tx, theater_rx) = mpsc::unbounded_channel::<TheaterCommand>();
     let theater_tx_clone = theater_tx.clone();
 
     // Create handler registry with runtime AND supervisor handlers
@@ -432,7 +428,6 @@ async fn test_actor_shutdown_with_supervisor_handler() {
             subscription_tx: None,
             parent_id: None,
         })
-        .await
         .expect("Failed to send spawn command");
 
     let actor_id = tokio::time::timeout(Duration::from_secs(5), spawn_rx)
@@ -455,7 +450,6 @@ async fn test_actor_shutdown_with_supervisor_handler() {
             actor_id,
             response_tx: stop_tx,
         })
-        .await
         .expect("Failed to send stop command");
 
     let stop_result = tokio::time::timeout(TEST_TIMEOUT, stop_rx)
@@ -517,7 +511,7 @@ async fn test_actor_shutdown_with_all_handlers() {
     info!("Loaded shutdown-test WASM: {} bytes", wasm_bytes.len());
 
     // Create theater runtime channels
-    let (theater_tx, theater_rx) = mpsc::channel::<TheaterCommand>(100);
+    let (theater_tx, theater_rx) = mpsc::unbounded_channel::<TheaterCommand>();
     let theater_tx_clone = theater_tx.clone();
 
     // Create handler registry with ALL handlers
@@ -588,7 +582,6 @@ async fn test_actor_shutdown_with_all_handlers() {
             subscription_tx: None,
             parent_id: None,
         })
-        .await
         .expect("Failed to send spawn command");
 
     let actor_id = tokio::time::timeout(Duration::from_secs(5), spawn_rx)
@@ -611,7 +604,6 @@ async fn test_actor_shutdown_with_all_handlers() {
             actor_id,
             response_tx: stop_tx,
         })
-        .await
         .expect("Failed to send stop command");
 
     let stop_result = tokio::time::timeout(TEST_TIMEOUT, stop_rx)

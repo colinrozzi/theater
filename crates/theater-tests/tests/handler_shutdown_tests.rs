@@ -107,7 +107,7 @@ async fn verify_handler_shutdown<H: Handler>(
 async fn test_runtime_handler_shutdown() {
     use theater_handler_self::SelfHandler;
 
-    let (theater_tx, _): (mpsc::Sender<TheaterCommand>, _) = mpsc::channel(10);
+    let (theater_tx, _): (mpsc::UnboundedSender<TheaterCommand>, _) = mpsc::unbounded_channel();
     let config = SelfHostConfig {};
     let handler = SelfHandler::new(config, theater_tx, None);
 
@@ -141,7 +141,7 @@ async fn test_store_handler_shutdown() {
 async fn test_rpc_handler_shutdown() {
     use theater_handler_rpc::RpcHandler;
 
-    let (theater_tx, _): (mpsc::Sender<TheaterCommand>, _) = mpsc::channel(10);
+    let (theater_tx, _): (mpsc::UnboundedSender<TheaterCommand>, _) = mpsc::unbounded_channel();
     let handler = RpcHandler::new(theater_tx);
 
     verify_handler_shutdown(handler, "RPC")

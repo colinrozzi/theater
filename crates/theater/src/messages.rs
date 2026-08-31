@@ -410,6 +410,38 @@ pub enum TheaterCommand {
         event_tx: Sender<(TheaterId, ChainEvent)>,
     },
 
+    /// # Register a lifecycle subscription on a subject
+    ///
+    /// Adds `subscription` to `subject`'s `subscribers` map (see
+    /// [`crate::subscription`]) — the one primitive behind the `lifecycle`
+    /// handler's `link` (target = `StopSelf`) and `monitor` (target =
+    /// `DeliverToWasm`). Keyed by `subscription.subscriber`, so re-subscribing
+    /// replaces. No-op if `subject` is not a live actor.
+    Subscribe {
+        subject: TheaterId,
+        subscription: crate::subscription::Subscription,
+    },
+
+    /// # Remove a lifecycle subscription
+    ///
+    /// Removes `subscriber`'s subscription from `subject`. Backs `unlink` /
+    /// `unmonitor`. No-op if absent or `subject` is gone.
+    Unsubscribe {
+        subject: TheaterId,
+        subscriber: TheaterId,
+    },
+
+    /// # A fate-linked peer terminated — stop the linking actor
+    ///
+    /// Sent by an actor's `lifecycle` handler when it matches a `StopSelf`
+    /// (link) subscription against `peer`'s terminal event: stop `actor_id`
+    /// with cause `PeerKilled { peer }`. This is the handler-driven fate
+    /// cascade (vs the runtime's auto child→parent cascade).
+    PeerTerminated {
+        actor_id: TheaterId,
+        peer: TheaterId,
+    },
+
     /// # Subscribe to actor-spawned notifications (runtime-wide)
     ///
     /// After this call, every actor spawned ANYWHERE in the runtime is
@@ -530,6 +562,15 @@ impl TheaterCommand {
             }
             TheaterCommand::UnsubscribeFromActor { actor_id, .. } => {
                 format!("UnsubscribeFromActor: {:?}", actor_id)
+            }
+            TheaterCommand::Subscribe { subject, .. } => {
+                format!("Subscribe: {:?}", subject)
+            }
+            TheaterCommand::Unsubscribe { subject, .. } => {
+                format!("Unsubscribe: {:?}", subject)
+            }
+            TheaterCommand::PeerTerminated { actor_id, peer } => {
+                format!("PeerTerminated: {:?} (peer {:?})", actor_id, peer)
             }
             TheaterCommand::SubscribeToSpawns { .. } => "SubscribeToSpawns".to_string(),
             TheaterCommand::UnsubscribeFromSpawns { .. } => "UnsubscribeFromSpawns".to_string(),
@@ -986,12 +1027,15 @@ pub enum MessageCommand {
 /// - Errors or crashes transition to Failed
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum ActorStatus {
-    /// Actor is active and processing messages
+    /// Actor is active and processing messages.
     Running,
-    /// Actor has been stopped gracefully
-    Stopped,
-    /// Actor has experienced an error or crash
-    Failed,
+    /// Teardown has been initiated. Carries *why* — the terminal cause the
+    /// runtime stamps on the actor's final lifecycle event when it completes.
+    /// Also the idempotency guard: a second stop while already `Stopping` is a
+    /// no-op, so an actor reached by two death paths emits one terminal.
+    /// (A fully-torn-down actor is deregistered, so it leaves the map rather
+    /// than holding a terminal status.)
+    Stopping(crate::events::lifecycle::TerminationCause),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
