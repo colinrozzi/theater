@@ -86,18 +86,6 @@ pub struct ChainEventData {
 }
 
 impl ChainEventData {
-    /// Gets the event type identifier string.
-    #[allow(dead_code)]
-    pub fn event_type(&self) -> String {
-        self.event_type.clone()
-    }
-
-    /// Serializes the event data to JSON.
-    #[allow(dead_code)]
-    pub fn to_json(&self) -> Result<Vec<u8>, serde_json::Error> {
-        serde_json::to_vec(self)
-    }
-
     /// Converts the typed event data to a chain event.
     ///
     /// ## Parameters

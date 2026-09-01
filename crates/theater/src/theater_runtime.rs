@@ -1022,14 +1022,6 @@ impl TheaterRuntime {
         Ok(())
     }
 
-    /// Actor is shutting itself down
-    #[allow(dead_code)]
-    async fn shutdown_actor(&mut self, actor_id: TheaterId, _data: Option<Vec<u8>>) -> Result<()> {
-        debug!("Shutting down actor: {:?}", actor_id);
-        self.stop_actor(actor_id, ShutdownType::Graceful).await?;
-        Ok(())
-    }
-
     /// Actor is shut down externally
     /// note: external might not be the right word here. External to the actor, not external to the
     /// system, so if a parent actor stops it, it still shows up as an external stop. What this

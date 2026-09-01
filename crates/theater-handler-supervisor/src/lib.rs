@@ -389,7 +389,6 @@ pub struct SupervisorHandler {
     /// Constructed once at server bootstrap and shared across every
     /// supervisor-capable actor; see [`Self::with_resource_cache`].
     resource_cache: Option<Arc<ResourceCache>>,
-    #[allow(dead_code)]
     permissions: Option<SupervisorPermissions>,
 }
 
