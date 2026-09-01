@@ -2204,8 +2204,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b395c4f437aeeea15c55123b736cb1dcf29145023da0174de3a002d795f6d868"
 dependencies = [
  "hashbrown 0.14.5",
+ "packr-derive",
  "serde",
  "sha2",
+]
+
+[[package]]
+name = "packr-derive"
+version = "0.23.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4aaff28273cf9a2e4c18c0b4ee58ddeff3d69d878e7f57ed301c7cd53033b8e8"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
 ]
 
 [[package]]

@@ -25,20 +25,22 @@ pub enum Target {
 /// Pattern matching **any** lifecycle event of the subject (spawned / paused /
 /// resumed / terminated), regardless of contents.
 ///
-/// The event `Value` is `Variant("chain-event-payload", "lifecycle", [inner])`,
-/// so this pins the outer kind and wildcards the inner event.
+/// The event `Value` is `Variant(_, "Lifecycle", [inner])` — case-names come
+/// from the `#[derive(GraphValue)]` variant idents (`ChainEventPayload::Lifecycle`)
+/// — so this pins the outer kind and wildcards the inner event.
 pub fn any_lifecycle_event() -> Pattern {
-    Pattern::variant("lifecycle", [Pattern::any()])
+    Pattern::variant("Lifecycle", [Pattern::any()])
 }
 
 /// Pattern matching any `Terminated` lifecycle event of the subject (any
 /// cause) — the fate filter a supervision link keys on. Because a variant's
 /// payload arity is pinned by its type, the single termination-cause slot is an
-/// explicit [`Pattern::any`].
+/// explicit [`Pattern::any`]. Case-names are the derived variant idents
+/// (`Lifecycle` → `Terminated`).
 pub fn any_termination() -> Pattern {
     Pattern::variant(
-        "lifecycle",
-        [Pattern::variant("terminated", [Pattern::any()])],
+        "Lifecycle",
+        [Pattern::variant("Terminated", [Pattern::any()])],
     )
 }
 
@@ -47,10 +49,10 @@ mod tests {
     use super::*;
     use crate::events::lifecycle::{ActorLifecycleEvent, TerminationCause};
     use crate::events::ChainEventPayload;
-    use crate::pack_bridge::{IntoValue, Value};
+    use crate::pack_bridge::Value;
 
     fn lifecycle_value(evt: ActorLifecycleEvent) -> Value {
-        ChainEventPayload::Lifecycle(evt).into_value()
+        Value::from(ChainEventPayload::Lifecycle(evt))
     }
 
     #[test]
