@@ -116,7 +116,6 @@ pub enum StoreError {
 /// Handler for providing content storage access to WebAssembly actors
 #[derive(Clone)]
 pub struct StoreHandler {
-    #[allow(dead_code)]
     permissions: Option<StorePermissions>,
     /// Custom base path for content storage. If None, uses the default theater home location.
     base_path: Option<std::path::PathBuf>,

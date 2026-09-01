@@ -503,7 +503,6 @@ pub struct MessageServerHandler {
     // Request-response tracking for this actor
     outstanding_requests: Arc<Mutex<HashMap<String, tokio::sync::oneshot::Sender<Vec<u8>>>>>,
 
-    #[allow(dead_code)]
     permissions: Option<MessageServerPermissions>,
 }
 
