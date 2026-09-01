@@ -26,18 +26,6 @@ exclude = [
     "crates/theater-handler-tcp/examples/tcp-echo",
     "crates/theater-cli/templates/*",
 ]
-# DEPRECATED: WASI handlers moved to crates/deprecated/
-# These use wasmtime Component Model and will be redesigned for Composite later
-# - theater-handler-environment
-# - theater-handler-filesystem
-# - theater-handler-http
-# - theater-handler-http-client
-# - theater-handler-http-framework
-# - theater-handler-io
-# - theater-handler-process
-# - theater-handler-random
-# - theater-handler-sockets
-# - theater-handler-timing
 resolver = "2"
 
 [workspace.package]
@@ -83,17 +71,6 @@ theater-handler-rpc = { version = "0.3.11", path = "crates/theater-handler-rpc" 
 theater-handler-loop = { version = "0.3.11", path = "crates/theater-handler-loop" }
 theater-handler-podman = { version = "0.3.13", path = "crates/theater-handler-podman" }
 theater-handler-http-client = { version = "0.3.0", path = "crates/theater-handler-http-client" }
-# DEPRECATED: WASI handlers (moved to crates/deprecated/)
-# theater-handler-environment = { version = "0.3.9", path = "crates/deprecated/theater-handler-environment" }
-# theater-handler-filesystem = { version = "0.3.9", path = "crates/deprecated/theater-handler-filesystem" }
-# theater-handler-http = { version = "0.3.9", path = "crates/deprecated/theater-handler-http" }
-# theater-handler-http-client = { version = "0.3.9", path = "crates/deprecated/theater-handler-http-client" }
-# theater-handler-http-framework = { version = "0.3.9", path = "crates/deprecated/theater-handler-http-framework" }
-# theater-handler-io = { version = "0.3.9", path = "crates/deprecated/theater-handler-io" }
-# theater-handler-process = { version = "0.3.9", path = "crates/deprecated/theater-handler-process" }
-# theater-handler-random = { version = "0.3.9", path = "crates/deprecated/theater-handler-random" }
-# theater-handler-sockets = { version = "0.3.9", path = "crates/deprecated/theater-handler-sockets" }
-# theater-handler-timing = { version = "0.3.9", path = "crates/deprecated/theater-handler-timing" }
 
 # Pack runtime integration (Graph ABI-based WASM runtime)
 # 0.10.4: decoder fix — caches only shared (multi-parent) nodes instead of

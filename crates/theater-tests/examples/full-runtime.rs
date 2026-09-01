@@ -3,9 +3,9 @@
 //! This example demonstrates how to create a Theater runtime with the
 //! Theater-specific handler crates.
 //!
-//! NOTE: WASI handlers (environment, filesystem, http, io, timing, random, process)
-//! have been deprecated and moved to crates/deprecated/. They will be redesigned
-//! for Composite runtime support later.
+//! NOTE: the old WASI handlers (environment, filesystem, http, io, timing,
+//! random, process) have been removed. They may be redesigned for the Composite
+//! runtime later.
 //!
 //! ## Usage
 //!
@@ -60,7 +60,7 @@ fn create_handler_registry(
 
     info!("Successfully registered 4 Theater-specific handlers!");
     info!("");
-    info!("NOTE: WASI handlers are deprecated - see crates/deprecated/");
+    info!("NOTE: the old WASI handlers were removed");
 
     registry
 }
@@ -82,8 +82,8 @@ async fn main() -> Result<()> {
     info!("  - supervisor      - Actor supervision");
     info!("  - message-server  - Inter-actor messaging");
     info!("");
-    info!("WASI handlers (environment, filesystem, http, timing, random, process)");
-    info!("have been deprecated and moved to crates/deprecated/.");
+    info!("The old WASI handlers (environment, filesystem, http, timing, random,");
+    info!("process) have been removed.");
     info!("");
 
     // Create communication channels
