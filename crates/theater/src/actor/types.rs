@@ -84,63 +84,6 @@ pub enum ActorError {
     HandlerError(String),
 }
 
-#[derive(Debug, Clone, ComponentType, Lift, Lower, Serialize, Deserialize)]
-#[component(record)]
-pub struct WitActorError {
-    #[component(name = "error-type")]
-    error_type: WitErrorType,
-    data: Option<Vec<u8>>,
-}
-
-#[derive(Debug, Clone, ComponentType, Lift, Lower, Serialize, Deserialize, Copy)]
-#[component(enum)]
-#[repr(u8)]
-pub enum WitErrorType {
-    #[component(name = "operation-timeout")]
-    OperationTimeout,
-    #[component(name = "channel-closed")]
-    ChannelClosed,
-    #[component(name = "shutting-down")]
-    ShuttingDown,
-    #[component(name = "function-not-found")]
-    FunctionNotFound,
-    #[component(name = "type-mismatch")]
-    TypeMismatch,
-    #[component(name = "internal")]
-    Internal,
-    #[component(name = "serialization-error")]
-    SerializationError,
-    #[component(name = "paused")]
-    Paused,
-}
-
-impl From<ActorError> for WitActorError {
-    fn from(error: ActorError) -> Self {
-        let (error_type, data) = match error {
-            ActorError::OperationTimeout(data) => (
-                WitErrorType::OperationTimeout,
-                Some(data.to_le_bytes().to_vec()),
-            ),
-            ActorError::ChannelClosed => (WitErrorType::ChannelClosed, None),
-            ActorError::ShuttingDown => (WitErrorType::ShuttingDown, None),
-            ActorError::FunctionNotFound(data) => {
-                (WitErrorType::FunctionNotFound, Some(data.into_bytes()))
-            }
-            ActorError::TypeMismatch(data) => (WitErrorType::TypeMismatch, Some(data.into_bytes())),
-            ActorError::Internal(data) => (
-                WitErrorType::Internal,
-                Some(serde_json::to_vec(&data).unwrap()),
-            ),
-            ActorError::SerializationError => (WitErrorType::SerializationError, None),
-            ActorError::Paused => (WitErrorType::Paused, None),
-            ActorError::NotPaused => (WitErrorType::Paused, None),
-            ActorError::UnexpectedError(data) => (WitErrorType::Internal, Some(data.into_bytes())),
-            ActorError::HandlerError(data) => (WitErrorType::Internal, Some(data.into_bytes())),
-        };
-        Self { error_type, data }
-    }
-}
-
 /// # ActorOperation
 ///
 /// Represents the different types of operations that can be performed on an actor.
