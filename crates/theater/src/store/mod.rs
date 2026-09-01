@@ -8,13 +8,11 @@ use std::path::{Path, PathBuf};
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
 use tracing::debug;
-use wasmtime::component::{ComponentType, Lift, Lower};
 
 use crate::utils;
 
 /// A reference to content in the store
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ComponentType, Lift, Lower)]
-#[component(record)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ContentRef {
     hash: String,
 }
