@@ -103,6 +103,14 @@ symbol — absence *is* the "opaque" signal. `get-state` returns a bare `value`
 (the state serialized); "can't serialize" is expressed by not exporting it, so no
 `option`/`result` wrapper is needed for that case.
 
+**One wiring detail** (learned building this): `has_export` reads the actor's
+embedded `__pack_types` **metadata**, not the raw wasm export table. So a
+`#[derive(State)]` actor must *also* declare `theater:simple/actor.get-state:
+func() -> value` in its `pack_types!` exports block — the derive emits the callable
+export, but the metadata entry is what the runtime discovers. (A derive can't
+inject into the separate `pack_types!` invocation; a future ergonomic could fuse
+the two.) Omitting the declaration makes the actor silently opaque.
+
 ### `#[derive(State)]` — the blessed opt-in (a Theater guest macro)
 
 `#[derive(State)]` is a **Theater** concern, not a packr one — "an actor holds
