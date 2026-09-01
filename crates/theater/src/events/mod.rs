@@ -1,4 +1,4 @@
-use crate::pack_bridge::{ConversionError, IntoValue, Value};
+use crate::pack_bridge::{GraphValue, Value};
 use crate::replay::HostFunctionCall;
 use serde::{Deserialize, Serialize};
 
@@ -25,7 +25,7 @@ use crate::chain::ChainEvent;
 ///
 /// This is sufficient to replay any actor execution with cryptographically
 /// verifiable results.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, GraphValue)]
 #[serde(tag = "category")]
 pub enum ChainEventPayload {
     /// Standardized host function call with full I/O (for replay)
@@ -39,6 +39,8 @@ pub enum ChainEventPayload {
 
     /// A structural actor-lifecycle transition (spawned / paused / resumed /
     /// terminated). The typed vocabulary that fate-links and monitors key on.
+    /// The derived `"Lifecycle"` case-name is what the fate/monitor `Pattern`s
+    /// match on (see [`crate::subscription`]).
     Lifecycle(lifecycle::ActorLifecycleEvent),
 }
 
@@ -63,72 +65,6 @@ impl From<replay::ReplaySummary> for ChainEventPayload {
 impl From<lifecycle::ActorLifecycleEvent> for ChainEventPayload {
     fn from(event: lifecycle::ActorLifecycleEvent) -> Self {
         ChainEventPayload::Lifecycle(event)
-    }
-}
-
-impl IntoValue for ChainEventPayload {
-    fn into_value(self) -> Value {
-        match self {
-            ChainEventPayload::HostFunction(call) => Value::Variant {
-                type_name: String::from("chain-event-payload"),
-                case_name: String::from("host-function"),
-                tag: 0,
-                payload: vec![call.into_value()],
-            },
-            ChainEventPayload::Wasm(data) => Value::Variant {
-                type_name: String::from("chain-event-payload"),
-                case_name: String::from("wasm"),
-                tag: 1,
-                payload: vec![data.into_value()],
-            },
-            ChainEventPayload::ReplaySummary(summary) => Value::Variant {
-                type_name: String::from("chain-event-payload"),
-                case_name: String::from("replay-summary"),
-                tag: 2,
-                payload: vec![summary.into_value()],
-            },
-            ChainEventPayload::Lifecycle(event) => Value::Variant {
-                type_name: String::from("chain-event-payload"),
-                case_name: String::from("lifecycle"),
-                tag: 3,
-                payload: vec![event.into_value()],
-            },
-        }
-    }
-}
-
-impl TryFrom<Value> for ChainEventPayload {
-    type Error = ConversionError;
-
-    fn try_from(v: Value) -> Result<Self, Self::Error> {
-        match v {
-            Value::Variant {
-                case_name, payload, ..
-            } => {
-                let inner = payload
-                    .into_iter()
-                    .next()
-                    .ok_or_else(|| ConversionError::MissingField("payload".into()))?;
-                match case_name.as_str() {
-                    "host-function" => Ok(ChainEventPayload::HostFunction(
-                        HostFunctionCall::try_from(inner)?,
-                    )),
-                    "wasm" => Ok(ChainEventPayload::Wasm(wasm::WasmEventData::try_from(
-                        inner,
-                    )?)),
-                    "replay-summary" => Ok(ChainEventPayload::ReplaySummary(
-                        replay::ReplaySummary::try_from(inner)?,
-                    )),
-                    "lifecycle" => Ok(ChainEventPayload::Lifecycle(
-                        lifecycle::ActorLifecycleEvent::try_from(inner)?,
-                    )),
-                    other => Err(ConversionError::ExpectedVariant(format!(
-                        "unknown chain-event-payload case: {other}"
-                    ))),
-                }
-            }
-            other => Err(ConversionError::ExpectedVariant(format!("{:?}", other))),
-        }
     }
 }
 
@@ -174,7 +110,7 @@ impl ChainEventData {
     /// The hash field will be empty - it's filled in by `StateChain::add_event`.
     pub fn to_chain_event(&self, parent_hash: Option<Vec<u8>>) -> ChainEvent {
         let encoded_data =
-            packr::abi::encode(&self.data.clone().into_value()).unwrap_or_else(|_| vec![]);
+            packr::abi::encode(&Value::from(self.data.clone())).unwrap_or_else(|_| vec![]);
         ChainEvent {
             parent_hash,
             hash: vec![],

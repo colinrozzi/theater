@@ -32,7 +32,7 @@ const DEFAULT_EPOCH_DEADLINE_TICKS: u64 = 300;
 // Re-export Pack types for convenient use throughout Theater
 // Now unified: pack re-exports from pack_abi, so Value/FromValue/ConversionError are consistent
 pub use packr::abi::{ConversionError, FromValue, Value, ValueType};
-pub use packr_abi::Pattern;
+pub use packr_abi::{GraphValue, Pattern};
 
 pub use packr::{
     AsyncCompiledModule, AsyncCtx, AsyncInstance, AsyncRuntime, CallInterceptor, Ctx,
@@ -848,137 +848,14 @@ fn decode_actor_ok_payload<T: FromValue>(
 // =============================================================================
 
 /// Trait for converting Theater types to Pack Values.
-pub trait IntoValue {
-    fn into_value(self) -> Value;
-}
-
-// Note: FromValue is now imported from Pack (packr::abi::FromValue)
-
-// Implement for common types
-
-impl IntoValue for () {
-    fn into_value(self) -> Value {
-        Value::Tuple(vec![])
-    }
-}
-
-// Result type conversion for WIT result<T, E>
-impl<T: IntoValue, E: IntoValue> IntoValue for Result<T, E> {
-    fn into_value(self) -> Value {
-        match self {
-            Ok(v) => Value::Variant {
-                type_name: String::from("result"),
-                case_name: String::from("ok"),
-                tag: 0,
-                payload: vec![v.into_value()],
-            },
-            Err(e) => Value::Variant {
-                type_name: String::from("result"),
-                case_name: String::from("err"),
-                tag: 1,
-                payload: vec![e.into_value()],
-            },
-        }
-    }
-}
-
-// Implement IntoValue for primitives
-impl IntoValue for String {
-    fn into_value(self) -> Value {
-        Value::String(self)
-    }
-}
-
-impl IntoValue for &str {
-    fn into_value(self) -> Value {
-        Value::String(self.to_string())
-    }
-}
-
-impl IntoValue for bool {
-    fn into_value(self) -> Value {
-        Value::Bool(self)
-    }
-}
-
-impl IntoValue for i64 {
-    fn into_value(self) -> Value {
-        Value::S64(self)
-    }
-}
-
-impl IntoValue for u64 {
-    fn into_value(self) -> Value {
-        Value::U64(self)
-    }
-}
-
-impl IntoValue for Vec<u8> {
-    fn into_value(self) -> Value {
-        use packr::abi::ValueType;
-        Value::List {
-            elem_type: ValueType::U8,
-            items: self.into_iter().map(Value::U8).collect(),
-        }
-    }
-}
-
-impl<T: IntoValue> IntoValue for Option<T> {
-    fn into_value(self) -> Value {
-        let (inner_type, value) = match self {
-            Some(v) => {
-                let val = v.into_value();
-                let ty = val.infer_type();
-                (ty, Some(Box::new(val)))
-            }
-            None => {
-                // For None, we don't have a value to infer from, use a placeholder
-                use packr::abi::ValueType;
-                (ValueType::Bool, None)
-            }
-        };
-        Value::Option { inner_type, value }
-    }
-}
-
-impl IntoValue for Value {
-    fn into_value(self) -> Value {
-        self
-    }
-}
-
-impl<T: IntoValue> IntoValue for Vec<T> {
-    fn into_value(self) -> Value {
-        let items: Vec<Value> = self.into_iter().map(|v| v.into_value()).collect();
-        let elem_type = items.first().map(|v| v.infer_type()).unwrap_or_else(|| {
-            use packr::abi::ValueType;
-            ValueType::Bool // placeholder for empty lists
-        });
-        Value::List { elem_type, items }
-    }
-}
+// Type→Value conversion is packr's job now: primitives, `Option<T>`, `Vec<T>`,
+// etc. impl `From<T> for Value` in packr-abi, and domain types derive it with
+// `#[derive(GraphValue)]`. Use `Value::from(x)` / `x.into()` rather than a
+// theater-local trait.
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_into_value_result() {
-        let ok: Result<String, String> = Ok("success".to_string());
-        let value = ok.into_value();
-
-        match value {
-            Value::Variant {
-                tag: 0,
-                ref payload,
-                ..
-            } if !payload.is_empty() => match &payload[0] {
-                Value::String(s) => assert_eq!(s, "success"),
-                _ => panic!("Expected String"),
-            },
-            _ => panic!("Expected Ok variant"),
-        }
-    }
 
     #[test]
     fn module_cache_hits_on_identical_bytes() {

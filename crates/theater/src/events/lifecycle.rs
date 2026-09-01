@@ -7,11 +7,16 @@
 //! relationship-scoped `ActorResult` (`Success`/`Error`/`ExternalStop`) into one
 //! place. See `docs/actor-relationships-and-lifecycle.md`.
 
-use crate::pack_bridge::{ConversionError, FromValue, IntoValue, Value};
+use crate::pack_bridge::GraphValue;
 use serde::{Deserialize, Serialize};
 
 /// A structural transition in an actor's lifecycle.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+///
+/// `#[derive(GraphValue)]` gives the `Value` case-names from the variant idents
+/// (`Terminated`, `Spawned`, …) and tag-encodes them on the wire; the lifecycle
+/// `Pattern`s in [`crate::subscription`] key on those idents (`Lifecycle` →
+/// `Terminated`).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, GraphValue)]
 pub enum ActorLifecycleEvent {
     /// Setup + init completed; the actor is now live.
     Spawned,
@@ -26,7 +31,7 @@ pub enum ActorLifecycleEvent {
 /// Why an actor terminated. This is neutral data — *which* causes a given
 /// subscriber reacts to (errors only, any termination, …) is a per-subscription
 /// filter decision, made where dispatch happens, not a property of the event.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, GraphValue)]
 pub enum TerminationCause {
     /// Clean, self-driven exit: init returned, self-shutdown, or a graceful stop
     /// that ran to completion. `final_state` = the actor's last state, if any.
@@ -59,122 +64,13 @@ impl ActorLifecycleEvent {
     }
 }
 
-impl IntoValue for TerminationCause {
-    fn into_value(self) -> Value {
-        let (tag, case, payload) = match self {
-            TerminationCause::Completed { final_state } => {
-                (0, "completed", vec![final_state.into_value()])
-            }
-            TerminationCause::Failed { error } => (1, "failed", vec![Value::String(error)]),
-            TerminationCause::Stopped => (2, "stopped", vec![]),
-            TerminationCause::Killed => (3, "killed", vec![]),
-            TerminationCause::PeerKilled { peer } => (4, "peer-killed", vec![Value::String(peer)]),
-        };
-        Value::Variant {
-            type_name: "termination-cause".into(),
-            case_name: case.into(),
-            tag,
-            payload,
-        }
-    }
-}
-
-impl TryFrom<Value> for TerminationCause {
-    type Error = ConversionError;
-    fn try_from(v: Value) -> Result<Self, Self::Error> {
-        match v {
-            Value::Variant {
-                case_name, payload, ..
-            } => match case_name.as_str() {
-                "completed" => {
-                    let v = payload
-                        .into_iter()
-                        .next()
-                        .ok_or_else(|| ConversionError::MissingField("final_state".into()))?;
-                    Ok(TerminationCause::Completed {
-                        final_state: Option::<Vec<u8>>::from_value(v)?,
-                    })
-                }
-                "failed" => {
-                    let error = match payload.into_iter().next() {
-                        Some(v) => String::try_from(v)?,
-                        None => String::new(),
-                    };
-                    Ok(TerminationCause::Failed { error })
-                }
-                "stopped" => Ok(TerminationCause::Stopped),
-                "killed" => Ok(TerminationCause::Killed),
-                "peer-killed" => {
-                    let peer = match payload.into_iter().next() {
-                        Some(v) => String::try_from(v)?,
-                        None => String::new(),
-                    };
-                    Ok(TerminationCause::PeerKilled { peer })
-                }
-                other => Err(ConversionError::ExpectedVariant(format!(
-                    "unknown case: {}",
-                    other
-                ))),
-            },
-            other => Err(ConversionError::ExpectedVariant(format!("{:?}", other))),
-        }
-    }
-}
-
-impl IntoValue for ActorLifecycleEvent {
-    fn into_value(self) -> Value {
-        let (tag, case, payload) = match self {
-            ActorLifecycleEvent::Spawned => (0, "spawned", vec![]),
-            ActorLifecycleEvent::Paused => (1, "paused", vec![]),
-            ActorLifecycleEvent::Resumed => (2, "resumed", vec![]),
-            ActorLifecycleEvent::Terminated { cause } => {
-                (3, "terminated", vec![cause.into_value()])
-            }
-        };
-        Value::Variant {
-            type_name: "actor-lifecycle-event".into(),
-            case_name: case.into(),
-            tag,
-            payload,
-        }
-    }
-}
-
-impl TryFrom<Value> for ActorLifecycleEvent {
-    type Error = ConversionError;
-    fn try_from(v: Value) -> Result<Self, Self::Error> {
-        match v {
-            Value::Variant {
-                case_name, payload, ..
-            } => match case_name.as_str() {
-                "spawned" => Ok(ActorLifecycleEvent::Spawned),
-                "paused" => Ok(ActorLifecycleEvent::Paused),
-                "resumed" => Ok(ActorLifecycleEvent::Resumed),
-                "terminated" => {
-                    let cause = payload
-                        .into_iter()
-                        .next()
-                        .ok_or_else(|| ConversionError::MissingField("cause".into()))?;
-                    Ok(ActorLifecycleEvent::Terminated {
-                        cause: TerminationCause::try_from(cause)?,
-                    })
-                }
-                other => Err(ConversionError::ExpectedVariant(format!(
-                    "unknown case: {}",
-                    other
-                ))),
-            },
-            other => Err(ConversionError::ExpectedVariant(format!("{:?}", other))),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::pack_bridge::Value;
 
     fn roundtrip(e: ActorLifecycleEvent) {
-        let v = e.clone().into_value();
+        let v = Value::from(e.clone());
         let back = ActorLifecycleEvent::try_from(v).expect("decode");
         assert_eq!(e, back);
     }

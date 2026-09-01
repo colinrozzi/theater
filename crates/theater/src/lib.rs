@@ -77,6 +77,6 @@ pub use theater_runtime::TheaterRuntime;
 // Pack integration
 pub use interceptor::{RecordingInterceptor, ReplayRecordingInterceptor};
 pub use pack_bridge::{
-    AsyncCtx, AsyncRuntime, CallInterceptor, Ctx, HostLinkerBuilder, IntoValue, LinkerError,
+    AsyncCtx, AsyncRuntime, CallInterceptor, Ctx, GraphValue, HostLinkerBuilder, LinkerError,
     PackInstance, Value, ValueType,
 };

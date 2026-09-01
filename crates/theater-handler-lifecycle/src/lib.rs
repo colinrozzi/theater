@@ -41,8 +41,8 @@ use tokio::sync::mpsc;
 use tokio::sync::mpsc::UnboundedSender;
 
 use theater::pack_bridge::{
-    parse_pact, AsyncCtx, HostLinkerBuilder, InterfaceImpl, IntoValue, LinkerError, Pattern,
-    TypeHash, Value, ValueType,
+    parse_pact, AsyncCtx, HostLinkerBuilder, InterfaceImpl, LinkerError, Pattern, TypeHash, Value,
+    ValueType,
 };
 
 /// Import side: `link`/`monitor` host functions the actor calls.
@@ -180,7 +180,7 @@ impl Handler for LifecycleHandler {
                             continue;
                         }
                         let value = match decode_chain_event_payload(&event.data) {
-                            Some(payload) => payload.into_value(),
+                            Some(payload) => Value::from(payload),
                             None => continue,
                         };
                         // Collect the matched targets, then drop the lock before
