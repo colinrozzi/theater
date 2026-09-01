@@ -1162,7 +1162,6 @@ impl TheaterRuntime {
                 );
 
                 // Store the replay chain in the registry for handlers that need it
-                // (e.g., WasiHttpHandler for replaying HTTP events)
                 registry.set_replay_chain(chain_events.clone());
 
                 // Prepend ReplayHandler to intercept imports

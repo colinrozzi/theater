@@ -979,16 +979,6 @@ impl ActorRuntime {
                     }
                 }
             }
-            ActorOperation::HandleWasiHttpRequest { response_tx, .. } => {
-                // WASI HTTP incoming requests are handled directly by the http handler
-                // via the SharedActorInstance, not through this operation channel.
-                // If this operation is received, it indicates a configuration error.
-                let err = ActorError::UnexpectedError(
-                    "HandleWasiHttpRequest should be handled by the HTTP handler directly"
-                        .to_string(),
-                );
-                let _ = response_tx.send(Err(err));
-            }
         }
     }
 

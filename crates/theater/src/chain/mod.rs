@@ -40,26 +40,6 @@ use crate::TheaterId;
 
 pub use theater_chain::ChainEvent;
 
-/// Wrapper type for replay chain events stored in ActorStore extensions.
-/// Used by handlers like WasiHttpHandler to detect replay mode and access recorded events.
-#[derive(Debug, Clone)]
-pub struct HttpReplayChain(pub Vec<ChainEvent>);
-
-impl HttpReplayChain {
-    /// Get events filtered by event type.
-    pub fn events_by_type(&self, event_type: &str) -> Vec<&ChainEvent> {
-        self.0
-            .iter()
-            .filter(|e| e.event_type == event_type)
-            .collect()
-    }
-
-    /// Get all HTTP incoming handler events.
-    pub fn http_incoming_events(&self) -> Vec<&ChainEvent> {
-        self.events_by_type("wasi:http/incoming-handler@0.2.0/handle")
-    }
-}
-
 /// Per-actor chain state.
 ///
 /// Holds the head hash and a list of direct mpsc subscribers populated via
