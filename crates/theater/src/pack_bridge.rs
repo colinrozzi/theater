@@ -491,11 +491,7 @@ impl PackInstance {
     /// ## Returns
     ///
     /// The function's result encoded as bytes.
-    pub async fn call_function(
-        &mut self,
-        function_name: &str,
-        params: Vec<u8>,
-    ) -> Result<Vec<u8>> {
+    pub async fn call_function(&mut self, function_name: &str, params: Vec<u8>) -> Result<Vec<u8>> {
         let params_value = bytes_to_value(&params);
         self.call_function_with_value(function_name, params_value)
             .await
@@ -561,8 +557,19 @@ impl PackInstance {
                 )
             })?;
 
-        // Validate return value against the function's declared result types.
-        if !self.function_types.is_empty() {
+        // Validate the return against the function's declared result type — with
+        // one exception: an `ok(())` (unit ok). A `result<_, E>` return carries no
+        // ok payload to type-check, and packr's metadata surfaces that empty
+        // ok-type to the validator as `bool`, so validating a unit ok spuriously
+        // fails ("expected bool, got tuple<0>"). A unit ok has no data to get
+        // wrong, so it always conforms — skip it. Typed and error returns still
+        // validate.
+        let is_unit_ok = matches!(
+            &output,
+            Value::Result { value: Ok(inner), .. }
+                if matches!(inner.as_ref(), Value::Tuple(items) if items.is_empty())
+        );
+        if !is_unit_ok && !self.function_types.is_empty() {
             if let Some(info) = self.function_types.get(function_name) {
                 if let Some(result_type) = info.result_types.first() {
                     validate_value_in_type_space(&output, result_type, &info.type_defs).map_err(
@@ -586,7 +593,6 @@ impl PackInstance {
             .await
             .context(format!("Failed to call function '{}'", function_name))
     }
-
 }
 
 // =============================================================================
@@ -657,7 +663,6 @@ fn decode_function_result(value: Value) -> Result<Vec<u8>> {
         other => encode_value(&other),
     }
 }
-
 
 // =============================================================================
 // Trait Implementations for Theater Types

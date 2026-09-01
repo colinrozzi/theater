@@ -140,6 +140,16 @@ theater-guest = "0.1"
 *(Flag to pack-dev: ideally guest `GraphValue` would target packr-guest's
 re-export so this extra dep isn't needed.)*
 
+**Second pack-dev flag — `result<_, E>` (unit ok):** an export declared
+`result<_, string>` parses correctly to `ok: None`, but packr's metadata
+round-trip surfaces that empty ok-type to the host's return-type validator as
+`bool`, so validating a `ok(())` return spuriously fails ("expected bool, got
+tuple<0>"). Since the runtime caches function types and validates returns in the
+real spawn path, this would break *every* migrated actor's `init`. Worked around
+host-side: the return validator skips the check when the return is a unit `ok`
+(`Value::Result{ Ok(()) }`) — a unit ok has no payload to type-check anyway. The
+clean upstream fix is for packr to round-trip `ok: None` faithfully.
+
 [`StateCell<T>`]: ../crates/theater-guest/src/lib.rs
 
 Using it gives you a managed, serializable state cell plus an auto-generated

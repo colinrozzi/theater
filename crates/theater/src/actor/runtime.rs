@@ -220,7 +220,8 @@ impl ActorRuntime {
 
         let handle_operation_tx = operation_tx.clone();
         let actor_handle = ActorHandle::new(handle_operation_tx, info_tx, control_tx);
-        let actor_store = ActorStore::new(id, theater_tx.clone(), actor_handle.clone(), chain.clone());
+        let actor_store =
+            ActorStore::new(id, theater_tx.clone(), actor_handle.clone(), chain.clone());
 
         // ----------------- Checkpoint Store Manifest ----------------
 
