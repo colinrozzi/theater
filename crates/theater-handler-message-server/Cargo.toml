@@ -16,7 +16,6 @@ theater = { workspace = true }
 anyhow.workspace = true
 tracing.workspace = true
 tokio = { workspace = true, features = ["sync", "time"] }
-chrono = "0.4"
 thiserror = "2.0"
 serde = { workspace = true }
 serde_json.workspace = true

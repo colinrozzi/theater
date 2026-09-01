@@ -16,7 +16,6 @@ description = "Outbound HTTP client handler for Theater WebAssembly runtime"
 theater = { workspace = true }
 anyhow.workspace = true
 tracing.workspace = true
-tokio.workspace = true
 
 # Outbound HTTP via reqwest. rustls-tls (NOT native-tls/openssl) so the crate
 # stays free of a system OpenSSL dependency. default-features are off so we do

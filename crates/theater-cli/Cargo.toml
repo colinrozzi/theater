@@ -40,10 +40,6 @@ theater-handler-http-client.workspace = true
 
 # Core dependencies
 anyhow.workspace = true
-# Self-contained composition: `theater build` links the actor member + the
-# bundled allocator (packr::link / DEFAULT_ALLOCATOR_WASM) into a self-contained
-# composite (packr 0.10.x cutover).
-packr.workspace = true
 tokio.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -52,21 +48,16 @@ tracing.workspace = true
 # CLI-specific dependencies
 clap = { version = "4.4", features = ["derive"] }
 clap_complete = "4.4"
-dialoguer = "0.11.0"
 console = "0.15.7"
 indicatif = "0.17.7"
-ctrlc = { version = "3.4.1", features = ["termination"] }
-term_size = "0.3.2"
 
 # Additional CLI deps
 toml = "0.8"
 serde_yaml = "0.9.34"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tokio-util = { version = "0.7.13", features = ["codec"] }
-chrono = { version = "0.4", features = ["serde"] }
 dirs = "5.0"
 thiserror = "1.0"
-shellexpand = "3.1.1"
 handlebars = "6.0"
 hex = "0.4"
 
