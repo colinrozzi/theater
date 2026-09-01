@@ -1,0 +1,10 @@
+name = "store"
+version = "0.1.0"
+package = "target/wasm32-unknown-unknown/release/store_actor.wasm"
+
+[[handler]]
+type = "runtime"
+
+# Content-addressed storage.
+[[handler]]
+type = "store"

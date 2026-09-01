@@ -141,6 +141,29 @@
             echo "All test actors built."
           '';
 
+          # Rebuild every canonical example actor. The guardrail that keeps the
+          # examples honest: if one drifts from the current interfaces it stops
+          # compiling and this fails loudly. Run: `nix run .#build-examples`.
+          build-examples = pkgs.writeShellScriptBin "build-examples" ''
+            set -e
+            echo "Building examples..."
+            failed=""
+            for dir in examples/*/; do
+              if [ -f "$dir/Cargo.toml" ]; then
+                name=$(basename "$dir")
+                echo "  Building $name..."
+                if ! (cd "$dir" && cargo build --target wasm32-unknown-unknown --release); then
+                  failed="$failed $name"
+                fi
+              fi
+            done
+            if [ -n "$failed" ]; then
+              echo "Examples FAILED to build:$failed"
+              exit 1
+            fi
+            echo "All examples built."
+          '';
+
           # Script to build test actors then run tests
           test = pkgs.writeShellScriptBin "theater-test" ''
             set -e

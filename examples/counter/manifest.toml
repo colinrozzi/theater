@@ -1,0 +1,10 @@
+name = "counter"
+version = "0.1.0"
+package = "target/wasm32-unknown-unknown/release/counter_actor.wasm"
+
+[[handler]]
+type = "runtime"
+
+# Inter-actor messaging (register / send / handle-send).
+[[handler]]
+type = "message-server"

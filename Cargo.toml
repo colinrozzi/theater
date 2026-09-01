@@ -22,7 +22,6 @@ members = [
     "crates/theater-tests",
 ]
 exclude = [
-    "crates/theater-handler-tcp/examples/tcp-echo",
     "crates/theater-cli/templates/*",
 ]
 resolver = "2"
