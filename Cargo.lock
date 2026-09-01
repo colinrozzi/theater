@@ -3356,6 +3356,7 @@ dependencies = [
  "lazy_static",
  "md5",
  "packr",
+ "packr-abi",
  "pin-utils",
  "rand 0.8.6",
  "rand_chacha 0.3.1",
@@ -3365,16 +3366,6 @@ dependencies = [
  "tokio-util",
  "toml",
  "tracing",
-]
-
-[[package]]
-name = "theater-chain-format"
-version = "0.3.12"
-dependencies = [
- "hex",
- "packr",
- "packr-abi",
- "theater-chain",
 ]
 
 [[package]]
