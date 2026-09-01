@@ -1,3 +1,0 @@
-name = "sockets-dns-test"
-version = "0.1.0"
-package = "./target/sockets_dns_test_manual.wasm"

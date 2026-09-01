@@ -1,3 +1,0 @@
-name = "sockets-tcp-test"
-version = "0.1.0"
-package = "./target/sockets_tcp_test_manual.wasm"
