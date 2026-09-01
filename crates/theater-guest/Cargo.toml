@@ -1,0 +1,13 @@
+[package]
+name = "theater-guest"
+description = "Guest-side ergonomics for writing Theater actors on top of packr-guest"
+version = "0.1.0"
+edition = "2021"
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+# Re-exported so actors depend on one crate. packr-guest is the generic Graph-ABI
+# guest (export/import macros, Value); theater-guest adds Theater's domain model.
+packr-guest = "0.23.0"
+theater-guest-macros = { version = "0.1.0", path = "../theater-guest-macros" }

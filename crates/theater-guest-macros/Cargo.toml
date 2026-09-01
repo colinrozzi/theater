@@ -1,0 +1,15 @@
+[package]
+name = "theater-guest-macros"
+description = "Derive macros for theater-guest (#[derive(State)])"
+version = "0.1.0"
+edition = "2021"
+license.workspace = true
+repository.workspace = true
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = { version = "2", features = ["full"] }
+quote = "1"
+proc-macro2 = "1"
