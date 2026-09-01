@@ -3353,7 +3353,6 @@ dependencies = [
  "tokio-util",
  "toml",
  "tracing",
- "wasmtime 31.0.0",
 ]
 
 [[package]]

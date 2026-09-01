@@ -8,7 +8,6 @@
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
-use wasmtime::component::{ComponentType, Lift, Lower};
 
 use crate::event::EventType;
 
@@ -17,16 +16,13 @@ use crate::event::EventType;
 /// Each event carries the hash of its parent, forming a cryptographically
 /// linked chain. The runtime computes the hash and broadcasts the event;
 /// retention is the subscriber's responsibility.
-#[derive(Debug, Clone, Serialize, Deserialize, ComponentType, Lift, Lower, Eq)]
-#[component(record)]
+#[derive(Debug, Clone, Serialize, Deserialize, Eq)]
 pub struct ChainEvent {
     /// Content hash of this event (over `parent_hash`, `event_type`, `data`).
     pub hash: Vec<u8>,
     /// Hash of the parent event, or `None` for the first event in the chain.
-    #[component(name = "parent-hash")]
     pub parent_hash: Option<Vec<u8>>,
     /// Type identifier for the event (e.g. `"state_change"`, `"http_request"`).
-    #[component(name = "event-type")]
     pub event_type: String,
     /// Event payload, serialized.
     pub data: Vec<u8>,
