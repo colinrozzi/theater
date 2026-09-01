@@ -31,4 +31,5 @@ hex = "0.4.3"
 md5 = "0.7.0"
 serde = { workspace = true, features = ["derive"] }
 packr.workspace = true
+packr-abi.workspace = true
 console = "0.15"
