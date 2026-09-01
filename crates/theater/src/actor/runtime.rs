@@ -198,7 +198,6 @@ impl ActorRuntime {
         control_tx: Sender<ActorControl>,
         actor_phase_manager: ActorPhaseManager,
         actor_instance_wrapper: Arc<RwLock<Option<PackInstance>>>,
-        initial_state: Value,
     ) -> Result<(ShutdownController, Vec<JoinHandle<()>>), ActorRuntimeError> {
         // ---------------- Checkpoint Setup Initial ----------------
 
@@ -221,13 +220,7 @@ impl ActorRuntime {
 
         let handle_operation_tx = operation_tx.clone();
         let actor_handle = ActorHandle::new(handle_operation_tx, info_tx, control_tx);
-        let actor_store = ActorStore::new(
-            id,
-            theater_tx.clone(),
-            actor_handle.clone(),
-            chain.clone(),
-            initial_state,
-        );
+        let actor_store = ActorStore::new(id, theater_tx.clone(), actor_handle.clone(), chain.clone());
 
         // ----------------- Checkpoint Store Manifest ----------------
 
@@ -625,7 +618,6 @@ impl ActorRuntime {
         info_tx: Sender<ActorInfo>,
         control_rx: Receiver<ActorControl>,
         control_tx: Sender<ActorControl>,
-        initial_state: Value,
         setup_result_tx: Option<tokio::sync::oneshot::Sender<Result<(), ActorRuntimeError>>>,
     ) {
         info!("Actor runtime starting communication loops");
@@ -663,7 +655,6 @@ impl ActorRuntime {
                     control_tx,
                     actor_phase_manager.clone(),
                     actor_instance_wrapper,
-                    initial_state,
                 )
                 .await
                 {
@@ -1008,9 +999,35 @@ impl ActorRuntime {
                         }
                     }
                     ActorInfo::GetState { response_tx } => {
-                        match &*actor_instance_wrapper.read().await {
+                        // State lives inside the module now. Inspect it by calling
+                        // the actor's optional `theater:simple/actor.get-state`
+                        // export (has_export-gated, like the other optional actor
+                        // exports); an actor that doesn't export it is opaque and
+                        // reports unit.
+                        match &mut *actor_instance_wrapper.write().await {
                             Some(instance) => {
-                                let state = instance.actor_store.get_state();
+                                let has_get_state = instance
+                                    .has_export("theater:simple/actor", "get-state")
+                                    .await
+                                    .unwrap_or(false);
+                                let state = if has_get_state {
+                                    match instance
+                                        .call_value(
+                                            "theater:simple/actor.get-state",
+                                            &Value::Tuple(vec![]),
+                                        )
+                                        .await
+                                    {
+                                        Ok(v) => v,
+                                        Err(e) => {
+                                            error!("get-state export failed: {:#}", e);
+                                            Value::Tuple(vec![])
+                                        }
+                                    }
+                                } else {
+                                    // Opaque: actor exposes no get-state export.
+                                    Value::Tuple(vec![])
+                                };
                                 if let Err(e) = response_tx.send(Ok(state)) {
                                     error!("Failed to send state response: {:?}", e);
                                 }
@@ -1080,11 +1097,7 @@ impl ActorRuntime {
     ) -> Result<Vec<u8>, ActorError> {
         let start = Instant::now();
 
-        let state = actor_instance.actor_store.get_state();
-        debug!(
-            "Executing pack call to function '{}' with state: {:?}",
-            name, state
-        );
+        debug!("Executing pack call to function '{}'", name);
 
         let params_value = crate::pack_bridge::decode_value(&params).map_err(|e| {
             error!("Failed to decode pack params: {}", e);
@@ -1105,16 +1118,16 @@ impl ActorRuntime {
 
         let exec_start = Instant::now();
         let call_result = actor_instance
-            .call_function_with_value(name, state, params_value)
+            .call_function_with_value(name, params_value)
             .await;
         let exec_ms = exec_start.elapsed().as_millis() as u64;
 
-        let (new_state, results) = match call_result {
+        let results = match call_result {
             Ok(result) => {
-                let response_value = if result.1.is_empty() {
+                let response_value = if result.is_empty() {
                     Value::Tuple(vec![])
                 } else {
-                    crate::pack_bridge::decode_value(&result.1).unwrap_or(Value::Tuple(vec![]))
+                    crate::pack_bridge::decode_value(&result).unwrap_or(Value::Tuple(vec![]))
                 };
                 actor_instance
                     .actor_store
@@ -1122,7 +1135,6 @@ impl ActorRuntime {
                         event_type: "wasm".to_string(),
                         data: WasmEventData::WasmResult {
                             function_name: name.clone(),
-                            state: result.0.clone(),
                             response: response_value,
                         }
                         .into(),
@@ -1157,8 +1169,6 @@ impl ActorRuntime {
                 return Err(ActorError::Internal(event));
             }
         };
-
-        actor_instance.actor_store.set_state(new_state);
 
         let duration = start.elapsed();
         debug!(
