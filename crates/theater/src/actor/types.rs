@@ -12,7 +12,6 @@ use std::fmt::Debug;
 use thiserror::Error;
 use tokio::sync::oneshot;
 use tokio::time::Duration;
-use wasmtime::component::{ComponentType, Lift, Lower};
 
 /// Default timeout for actor operations (50 minutes)
 pub const DEFAULT_OPERATION_TIMEOUT: Duration = Duration::from_secs(3000);
@@ -24,63 +23,49 @@ pub const DEFAULT_OPERATION_TIMEOUT: Duration = Duration::from_secs(3000);
 /// This enum provides detailed error information for various failure modes that
 /// might occur when interacting with an actor. These errors are propagated back
 /// to callers to help diagnose and handle problems.
-#[derive(
-    Error, Debug, Clone, ComponentType, Lift, Lower, Serialize, Deserialize, PartialEq, Hash, Eq,
-)]
-#[component(variant)]
+#[derive(Error, Debug, Clone, Serialize, Deserialize, PartialEq, Hash, Eq)]
 pub enum ActorError {
     /// Operation exceeded the maximum allowed execution time
     #[error("Operation timed out after {0:?}")]
-    #[component(name = "operation-timeout")]
     OperationTimeout(u64),
 
     /// Communication channel to the actor was closed unexpectedly
     #[error("Operation channel closed")]
-    #[component(name = "channel-closed")]
     ChannelClosed,
 
     /// Actor is in the process of shutting down and cannot accept new operations
     #[error("Actor is shutting down")]
-    #[component(name = "shutting-down")]
     ShuttingDown,
 
     /// The requested WebAssembly function was not found in the actor
     #[error("Function not found: {0}")]
-    #[component(name = "function-not-found")]
     FunctionNotFound(String),
 
     /// Parameter or return types did not match the WebAssembly function signature
     #[error("Type mismatch for function {0}")]
-    #[component(name = "type-mismatch")]
     TypeMismatch(String),
 
     /// An internal error occurred during execution
     #[error("Internal error: {0}")]
-    #[component(name = "internal-error")]
     Internal(ChainEvent),
 
     /// Unexpected error
     #[error("Unexpected error: {0}")]
-    #[component(name = "unexpected-error")]
     UnexpectedError(String),
 
     /// Failed to serialize or deserialize data
     #[error("Serialization error")]
-    #[component(name = "serialization-error")]
     SerializationError,
 
     /// Actor is paused
     #[error("Actor is paused")]
-    #[component(name = "actor-paused")]
     Paused,
 
     /// Actor is not paused
     #[error("Actor is not paused")]
-    #[component(name = "actor-not-paused")]
     NotPaused,
 
     #[error("Handler error: {0}")]
-    #[component(name = "handler-error")]
     HandlerError(String),
 }
 
