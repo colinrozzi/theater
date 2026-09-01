@@ -25,7 +25,6 @@ theater-chain.workspace = true
 
 # WebAssembly runtime
 wasmtime = { version = "31.0", features = ["component-model", "async"] }
-wit-bindgen = "0.36.0"
 
 # Pack runtime (Graph ABI-based WASM runtime)
 packr.workspace = true
@@ -37,36 +36,14 @@ sha2.workspace = true
 chrono = { version = "0.4", features = ["serde"] }
 thiserror = "1.0"
 toml = "0.8"
-lazy_static = "1.4"
-futures = "0.3"
-pin-utils = "0.1"
 rand = "0.8.5"
-rand_chacha = "0.3"
-tokio-util = { version = "0.7.13", features = ["codec"] }
-bytes = "1.0"
-base64 = "0.21"
 sha1 = "0.10"
 hex = "0.4.3"
-md5 = "0.7.0"
 
 # Variable substitution
 handlebars = "6.0"
-
-# Dependencies that are currently used by core but should be moved
-axum = { version = "0.8.1", features = ["ws"] }
-axum-server = { version = "0.7", features = ["tls-rustls"] }
-
-# TLS support
-tokio-rustls = "0.26"
-rustls = "0.23"
-rustls-pemfile = "2.0"
 reqwest = { version = "0.11", features = ["json"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-console = "0.15.7"
-libc = "0.2.172"
-
-# Path utilities for secure path handling
-dunce = "1.0"
 
 [dev-dependencies]
 test-log = "0.2"
