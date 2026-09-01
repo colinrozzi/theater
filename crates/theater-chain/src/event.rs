@@ -2,11 +2,8 @@ use serde::{Deserialize, Serialize};
 use sha1::{Digest, Sha1};
 use std::fmt::{Debug, Display, Formatter, Result};
 use std::hash::Hash;
-use wasmtime::component::{ComponentType, Lift, Lower};
 
-pub trait EventType:
-    Display + Debug + Send + Sync + ComponentType + Lift + Lower + Hash + Eq + Clone
-{
+pub trait EventType: Display + Debug + Send + Sync + Hash + Eq + Clone {
     fn event_type(&self) -> String;
     fn len(&self) -> usize;
     fn is_empty(&self) -> bool {
@@ -14,11 +11,9 @@ pub trait EventType:
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ComponentType, Lift, Lower, Eq)]
-#[component(record)]
+#[derive(Debug, Clone, Serialize, Deserialize, Eq)]
 pub struct Event<D: EventType> {
     pub hash: Vec<u8>,
-    #[component(name = "parent-hash")]
     pub parent_hash: Option<Vec<u8>>,
     pub data: D,
 }

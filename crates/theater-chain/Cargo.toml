@@ -14,9 +14,6 @@ rust-version.workspace = true
 [dependencies]
 tracing.workspace = true
 
-# WebAssembly runtime
-wasmtime = { version = "31.0", features = ["component-model", "async"] }
-
 # Additional core deps
 chrono = { version = "0.4", features = ["serde"] }
 thiserror = "1.0"

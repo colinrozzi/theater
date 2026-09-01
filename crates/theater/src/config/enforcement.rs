@@ -118,11 +118,6 @@ pub fn validate_manifest_permissions(
                     });
                 }
             }
-            HandlerConfig::WasiHttp { .. } => {
-                // WASI HTTP handler is allowed by default
-                // It provides both incoming (server) and outgoing (client) capabilities
-                // Permission enforcement for HTTP operations happens at a finer grain
-            }
             HandlerConfig::Replay { .. } => {
                 // Replay handler is always allowed - it's for debugging/testing
                 // The replay handler replays recorded event chains

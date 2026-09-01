@@ -12,7 +12,6 @@ use std::fmt::Debug;
 use thiserror::Error;
 use tokio::sync::oneshot;
 use tokio::time::Duration;
-use wasmtime::component::{ComponentType, Lift, Lower};
 
 /// Default timeout for actor operations (50 minutes)
 pub const DEFAULT_OPERATION_TIMEOUT: Duration = Duration::from_secs(3000);
@@ -24,121 +23,50 @@ pub const DEFAULT_OPERATION_TIMEOUT: Duration = Duration::from_secs(3000);
 /// This enum provides detailed error information for various failure modes that
 /// might occur when interacting with an actor. These errors are propagated back
 /// to callers to help diagnose and handle problems.
-#[derive(
-    Error, Debug, Clone, ComponentType, Lift, Lower, Serialize, Deserialize, PartialEq, Hash, Eq,
-)]
-#[component(variant)]
+#[derive(Error, Debug, Clone, Serialize, Deserialize, PartialEq, Hash, Eq)]
 pub enum ActorError {
     /// Operation exceeded the maximum allowed execution time
     #[error("Operation timed out after {0:?}")]
-    #[component(name = "operation-timeout")]
     OperationTimeout(u64),
 
     /// Communication channel to the actor was closed unexpectedly
     #[error("Operation channel closed")]
-    #[component(name = "channel-closed")]
     ChannelClosed,
 
     /// Actor is in the process of shutting down and cannot accept new operations
     #[error("Actor is shutting down")]
-    #[component(name = "shutting-down")]
     ShuttingDown,
 
     /// The requested WebAssembly function was not found in the actor
     #[error("Function not found: {0}")]
-    #[component(name = "function-not-found")]
     FunctionNotFound(String),
 
     /// Parameter or return types did not match the WebAssembly function signature
     #[error("Type mismatch for function {0}")]
-    #[component(name = "type-mismatch")]
     TypeMismatch(String),
 
     /// An internal error occurred during execution
     #[error("Internal error: {0}")]
-    #[component(name = "internal-error")]
     Internal(ChainEvent),
 
     /// Unexpected error
     #[error("Unexpected error: {0}")]
-    #[component(name = "unexpected-error")]
     UnexpectedError(String),
 
     /// Failed to serialize or deserialize data
     #[error("Serialization error")]
-    #[component(name = "serialization-error")]
     SerializationError,
 
     /// Actor is paused
     #[error("Actor is paused")]
-    #[component(name = "actor-paused")]
     Paused,
 
     /// Actor is not paused
     #[error("Actor is not paused")]
-    #[component(name = "actor-not-paused")]
     NotPaused,
 
     #[error("Handler error: {0}")]
-    #[component(name = "handler-error")]
     HandlerError(String),
-}
-
-#[derive(Debug, Clone, ComponentType, Lift, Lower, Serialize, Deserialize)]
-#[component(record)]
-pub struct WitActorError {
-    #[component(name = "error-type")]
-    error_type: WitErrorType,
-    data: Option<Vec<u8>>,
-}
-
-#[derive(Debug, Clone, ComponentType, Lift, Lower, Serialize, Deserialize, Copy)]
-#[component(enum)]
-#[repr(u8)]
-pub enum WitErrorType {
-    #[component(name = "operation-timeout")]
-    OperationTimeout,
-    #[component(name = "channel-closed")]
-    ChannelClosed,
-    #[component(name = "shutting-down")]
-    ShuttingDown,
-    #[component(name = "function-not-found")]
-    FunctionNotFound,
-    #[component(name = "type-mismatch")]
-    TypeMismatch,
-    #[component(name = "internal")]
-    Internal,
-    #[component(name = "serialization-error")]
-    SerializationError,
-    #[component(name = "paused")]
-    Paused,
-}
-
-impl From<ActorError> for WitActorError {
-    fn from(error: ActorError) -> Self {
-        let (error_type, data) = match error {
-            ActorError::OperationTimeout(data) => (
-                WitErrorType::OperationTimeout,
-                Some(data.to_le_bytes().to_vec()),
-            ),
-            ActorError::ChannelClosed => (WitErrorType::ChannelClosed, None),
-            ActorError::ShuttingDown => (WitErrorType::ShuttingDown, None),
-            ActorError::FunctionNotFound(data) => {
-                (WitErrorType::FunctionNotFound, Some(data.into_bytes()))
-            }
-            ActorError::TypeMismatch(data) => (WitErrorType::TypeMismatch, Some(data.into_bytes())),
-            ActorError::Internal(data) => (
-                WitErrorType::Internal,
-                Some(serde_json::to_vec(&data).unwrap()),
-            ),
-            ActorError::SerializationError => (WitErrorType::SerializationError, None),
-            ActorError::Paused => (WitErrorType::Paused, None),
-            ActorError::NotPaused => (WitErrorType::Paused, None),
-            ActorError::UnexpectedError(data) => (WitErrorType::Internal, Some(data.into_bytes())),
-            ActorError::HandlerError(data) => (WitErrorType::Internal, Some(data.into_bytes())),
-        };
-        Self { error_type, data }
-    }
 }
 
 /// # ActorOperation
@@ -162,36 +90,6 @@ pub enum ActorOperation {
         /// Channel to send the result back to the caller
         response_tx: oneshot::Sender<Result<Vec<u8>, ActorError>>,
     },
-    /// Handle a WASI HTTP incoming request
-    /// This operation creates resources in the actor's store and calls the exported
-    /// wasi:http/incoming-handler.handle function
-    HandleWasiHttpRequest {
-        /// HTTP method (GET, POST, etc.)
-        method: String,
-        /// URL scheme (http, https, etc.)
-        scheme: Option<String>,
-        /// Authority (host:port)
-        authority: Option<String>,
-        /// Path with query string
-        path_with_query: Option<String>,
-        /// Request headers as (name, value) pairs
-        headers: Vec<(String, Vec<u8>)>,
-        /// Request body
-        body: Vec<u8>,
-        /// Channel to send the response back
-        response_tx: oneshot::Sender<Result<WasiHttpResponse, ActorError>>,
-    },
-}
-
-/// Response from a WASI HTTP request
-#[derive(Debug, Clone)]
-pub struct WasiHttpResponse {
-    /// HTTP status code
-    pub status: u16,
-    /// Response headers
-    pub headers: Vec<(String, Vec<u8>)>,
-    /// Response body
-    pub body: Vec<u8>,
 }
 
 #[derive(Debug)]
