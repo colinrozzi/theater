@@ -3,6 +3,8 @@ members = [
     "crates/theater",
     "crates/theater-cli",
     "crates/theater-chain",
+    "crates/theater-guest",
+    "crates/theater-guest-macros",
     # Theater-specific handlers (to be migrated to Composite)
     "crates/theater-handler-message-server",
     "crates/theater-handler-runtime",

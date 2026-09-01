@@ -810,6 +810,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "dlmalloc"
+version = "0.2.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ad5208a115eaba24916f7456929832e310a81518c641f93fee4f89aa93aa3675"
+dependencies = [
+ "cfg-if",
+ "libc",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "downcast"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1877,6 +1888,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "packr-guest"
+version = "0.23.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c5393dd395f681b6ff1aed17deb2fe0096d7389036f3e58b76eb04552e75643b"
+dependencies = [
+ "dlmalloc",
+ "packr-abi",
+ "packr-derive",
+ "packr-guest-macros",
+]
+
+[[package]]
+name = "packr-guest-macros"
+version = "0.23.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2f130940e274633ff5b9c205ca3224f75c3787bd141c45795a5842fc84723ef5"
+dependencies = [
+ "packr-abi",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
 name = "parking_lot"
 version = "0.12.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2934,6 +2969,23 @@ dependencies = [
  "toml",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "theater-guest"
+version = "0.1.0"
+dependencies = [
+ "packr-guest",
+ "theater-guest-macros",
+]
+
+[[package]]
+name = "theater-guest-macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
 ]
 
 [[package]]

@@ -81,17 +81,58 @@ serializability, not even that it be exposed at all.
   state (handles, resources) or simply doesn't want to expose itself just doesn't
   export `get-state`. It is inert to inspection. Author's call.
 
+### `theater:simple/actor.get-state` — the export the runtime calls
+
+`get-state` lives **next to `init` in `theater:simple/actor`** — the actor's own
+*export* interface (the runtime calls it), not `theater:simple/self` (which the
+actor *imports* — `log`/`shutdown`). Same direction as `init`, so it belongs
+there:
+
+```
+// theater:simple/actor
+init:      func(...)          // runtime calls on spawn
+get-state: func() -> value    // OPTIONAL; runtime calls it for get-actor-state
+```
+
+It stays genuinely optional because **pact exports are declared per-function**,
+not per-interface: an actor lists exactly the `interface.function` symbols it
+exports (`hello` exports only `actor.init`; `counter` adds
+`message-server-client.handle-send`). So an actor includes `actor.get-state` only
+if it wants to be inspectable, and the runtime's `has_export` gate probes that one
+symbol — absence *is* the "opaque" signal. `get-state` returns a bare `value`
+(the state serialized); "can't serialize" is expressed by not exporting it, so no
+`option`/`result` wrapper is needed for that case.
+
 ### `#[derive(State)]` — the blessed opt-in (a Theater guest macro)
 
 `#[derive(State)]` is a **Theater** concern, not a packr one — "an actor holds
 state and optionally exposes it as `get-state` on `theater:simple`" is Theater's
-domain model. It should live in a new **`theater-guest`** crate (which we don't
-have yet — actors currently write raw `packr-guest`), which re-exports
-`packr-guest` and adds Theater ergonomics on top. This **largely decouples the
-change from pack-dev**: the macro needs only (a) a module-global cell — plain Rust
-`static`/`thread_local`, no packr change — and (b) to emit a `get-state` export,
-which uses packr-guest's *existing* export macro. pack-dev is pulled in only if
-we find packr-guest is missing a primitive we need.
+domain model. It lives in the new **`theater-guest`** crate (`crates/theater-guest`
++ `crates/theater-guest-macros`), which re-exports `packr-guest` and adds Theater
+ergonomics on top. This **largely decouples the change from pack-dev**: the derive
+needs only (a) a module-global cell — [`StateCell<T>`], a plain `static` over an
+`UnsafeCell` (sound because actor modules are single-threaded), no packr change —
+and (b) to emit the `get-state` export, which reuses packr-guest's *existing*
+`#[export]` macro (it supports the zero-param `func() -> value` shape directly).
+
+**Built and validated** (this brick): `#[derive(State)]` on a type emits the cell,
+the accessors (`set`/`is_set`/`with`/`with_mut`), and the `actor.get-state` export;
+a scratch actor compiles to wasm with the `theater:simple/actor.get-state` symbol
+present. One rough edge for the fleet: an actor that derives packr's `GraphValue`
+(to get `Into<Value>` for `get-state`) must add `packr-abi` with
+`default-features = false` — the GraphValue codegen references the `packr_abi`
+crate directly rather than packr-guest's re-export. Actor recipe:
+
+```toml
+packr-guest = { version = "0.23", features = ["derive"] }
+packr-abi   = { version = "0.23", default-features = false }
+theater-guest = "0.1"
+```
+
+*(Flag to pack-dev: ideally guest `GraphValue` would target packr-guest's
+re-export so this extra dep isn't needed.)*
+
+[`StateCell<T>`]: ../crates/theater-guest/src/lib.rs
 
 Using it gives you a managed, serializable state cell plus an auto-generated
 `get-state()` (so the actor stays inspectable and replay-verifiable). Skipping it
@@ -157,21 +198,26 @@ its state once in `init` and mutates it directly.
 A fleet-wide ABI break, same shape as the packr-0.23 wave, but **more
 self-serve** since the guest ergonomics are Theater's own:
 
-1. Stand up the `theater-guest` crate with `#[derive(State)]` + the state cell +
-   `get-state` wiring, on top of packr-guest.
+1. ✅ **Done** — `theater-guest` crate (`StateCell<T>`) + `theater-guest-macros`
+   (`#[derive(State)]` → cell + accessors + `actor.get-state` export), on top of
+   packr-guest. Validated to wasm.
 2. Runtime: drop state-threading from the call path, drop `WasmResult.state`,
-   re-home `get-actor-state` onto the optional `get-state` export.
+   re-home `get-actor-state` onto the optional `get-state` export. **Big-bang
+   brick** — the ABI break can't land incrementally across the boundary, so the
+   runtime flip + the example/test-actor migration ship together.
 3. Migrate the canonical examples + test-actors to the new ABI (they're the
-   reference; do them first, they gate the rest).
+   reference; do them first, they gate the rest — and they become the CI guardrail
+   that keeps `#[derive(State)]` compiling).
 4. Fleet actors migrate one wave.
 
 Coordination with pack-dev is only needed if step 1 surfaces a missing
-packr-guest primitive.
+packr-guest primitive. (Step 1 surfaced one minor rough edge — guest `GraphValue`
+needing a direct `packr-abi` dep — noted above; a nice-to-have, not a blocker.)
 
 ## Open questions
 
-- Exact interface/name for `get-state` (a `theater:simple` interface the runtime
-  calls; mirror the `handle-*` optional-export pattern).
+- ~~Exact interface/name for `get-state`.~~ **Resolved: `theater:simple/actor.get-state`,
+  `func() -> value`** — next to `init` in the actor's export interface (see above).
 - Whether to keep an **optional replay accelerator** — the runtime calling
   `get-state` every N events and recording a checkpoint, so restore doesn't always
   mean full replay. Pure-replay is the clean default; a checkpoint is an opt-in
