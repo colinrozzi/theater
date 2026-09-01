@@ -1,0 +1,10 @@
+name = "link"
+version = "0.1.0"
+package = "target/wasm32-unknown-unknown/release/link_actor.wasm"
+
+[[handler]]
+type = "runtime"
+
+# The lifecycle handler provides link / monitor.
+[[handler]]
+type = "lifecycle"
