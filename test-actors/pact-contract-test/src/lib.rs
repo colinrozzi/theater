@@ -3,7 +3,12 @@
 //! A simple todo list actor demonstrating:
 //! - External type definitions via pack_types!(file = "...")
 //! - Record types with list fields
-//! - Typed state that evolves across calls
+//! - In-module state that evolves across calls
+//!
+//! State lives inside the module now (`docs/in-module-state.md`): the todo list
+//! `actor-state` is held in a `StateCell` (a hand-built pack `Value`, so it uses
+//! the cell directly rather than `#[derive(State)]`), set in `init` and mutated
+//! in place. A manual `get-state` export keeps it inspectable.
 
 #![no_std]
 
@@ -15,6 +20,7 @@ use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
 use packr_guest::{export, import, pack_types, Value, ValueType};
+use theater_guest::StateCell;
 
 packr_guest::setup_guest!();
 
@@ -23,6 +29,9 @@ pack_types!(file = "types.pact");
 
 #[import(module = "theater:simple/self", name = "log")]
 fn log(msg: String);
+
+/// The actor's `actor-state`, held inside the module as a hand-built Value.
+static STATE: StateCell<Value> = StateCell::new();
 
 fn make_todo(id: u32, title: String, done: bool) -> Value {
     Value::Record {
@@ -82,6 +91,16 @@ fn ok_result(value: Value) -> Value {
     }
 }
 
+/// `result<_, string>::ok(())` — nothing to return but success.
+fn ok_unit() -> Value {
+    let unit = Value::Tuple(vec![]);
+    Value::Result {
+        ok_type: unit.infer_type(),
+        err_type: ValueType::String,
+        value: Ok(Box::new(unit)),
+    }
+}
+
 fn err_result(msg: &str) -> Value {
     Value::Result {
         ok_type: ValueType::Tuple(vec![]),
@@ -91,14 +110,21 @@ fn err_result(msg: &str) -> Value {
 }
 
 #[export(name = "theater:simple/actor.init")]
-fn init(_input: Value) -> Value {
+fn init(_config: Value) -> Value {
     log(String::from("[todo] init"));
-    ok_result(make_state(Vec::new(), 1))
+    STATE.set(make_state(Vec::new(), 1));
+    ok_unit()
+}
+
+/// Manual `get-state` export: serialize the current in-module state.
+#[export(name = "theater:simple/actor.get-state")]
+fn get_state() -> Value {
+    STATE.with(|s| s.clone())
 }
 
 #[export(name = "theater:todo/actions.add")]
-fn add(state: Value, title: Value) -> Value {
-    let (mut items, next_id) = extract_state(&state);
+fn add(title: Value) -> Value {
+    let (mut items, next_id) = STATE.with(|s| extract_state(s));
     let title_str = match &title {
         Value::String(s) => s.clone(),
         _ => return err_result("Expected string title"),
@@ -109,18 +135,18 @@ fn add(state: Value, title: Value) -> Value {
     let new_todo = make_todo(next_id, title_str, false);
     items.push(new_todo.clone());
 
-    let new_state = make_state(items, next_id + 1);
-    ok_result(Value::Tuple(vec![new_state, new_todo]))
+    STATE.set(make_state(items, next_id + 1));
+    ok_result(new_todo)
 }
 
 #[export(name = "theater:todo/actions.toggle")]
-fn toggle(state: Value, id_val: Value) -> Value {
+fn toggle(id_val: Value) -> Value {
     let target_id = match &id_val {
         Value::U32(n) => *n,
         _ => return err_result("Expected u32 id"),
     };
 
-    let (items, next_id) = extract_state(&state);
+    let (items, next_id) = STATE.with(|s| extract_state(s));
 
     log(format!("[todo] toggle id={}", target_id));
 
@@ -157,20 +183,20 @@ fn toggle(state: Value, id_val: Value) -> Value {
         }
     }).collect();
 
-    let new_state = make_state(new_items, next_id);
-    ok_result(Value::Tuple(vec![new_state]))
+    STATE.set(make_state(new_items, next_id));
+    ok_unit()
 }
 
 #[export(name = "theater:todo/actions.list")]
-fn list(state: Value) -> Value {
-    let (items, _next_id) = extract_state(&state);
+fn list() -> Value {
+    let (items, _next_id) = STATE.with(|s| extract_state(s));
 
     log(format!("[todo] list: {} items", items.len()));
 
     let items_list = Value::List {
         elem_type: ValueType::Record(String::from("todo-item")),
-        items: items.clone(),
+        items,
     };
 
-    ok_result(Value::Tuple(vec![state.clone(), items_list]))
+    ok_result(items_list)
 }

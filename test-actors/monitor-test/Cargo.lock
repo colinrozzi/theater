@@ -105,7 +105,9 @@ checksum = "3eaf3ede3fee6db1a4c2ee091bf8a8b4dccdc6d17f656fb07896ee72867612f2"
 name = "monitor-test-actor"
 version = "0.1.0"
 dependencies = [
+ "packr-abi",
  "packr-guest",
+ "theater-guest",
 ]
 
 [[package]]
@@ -197,6 +199,23 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-ident",
+]
+
+[[package]]
+name = "theater-guest"
+version = "0.1.0"
+dependencies = [
+ "packr-guest",
+ "theater-guest-macros",
+]
+
+[[package]]
+name = "theater-guest-macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]

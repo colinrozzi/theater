@@ -16,8 +16,9 @@ imports {
 }
 
 exports {
-    theater:simple/actor.init: func(state: value) -> result<actor-state, string>,
-    theater:todo/actions.add: func(state: actor-state, title: string) -> result<tuple<actor-state, todo-item>, string>,
-    theater:todo/actions.toggle: func(state: actor-state, id: u32) -> result<tuple<actor-state>, string>,
-    theater:todo/actions.list: func(state: actor-state) -> result<tuple<actor-state, list<todo-item>>, string>,
+    theater:simple/actor.init: func(config: value) -> result<_, string>,
+    theater:simple/actor.get-state: func() -> value,
+    theater:todo/actions.add: func(title: string) -> result<todo-item, string>,
+    theater:todo/actions.toggle: func(id: u32) -> result<_, string>,
+    theater:todo/actions.list: func() -> result<list<todo-item>, string>,
 }

@@ -1,9 +1,10 @@
 //! Link test actor — exercises `theater:simple/lifecycle.link` end-to-end.
 //!
-//! On init it is handed a subject actor id (in its init state) and calls
+//! On init it is handed a subject actor id (in its init config) and calls
 //! `link(subject)`. Fate-linking needs no callback: when the subject terminates,
 //! the runtime stops *this* actor (cause `PeerKilled`). A test spawns this actor,
-//! stops the subject, and observes this actor disappear.
+//! stops the subject, and observes this actor disappear. State lives inside the
+//! module now (`docs/in-module-state.md`); this actor holds none.
 
 #![no_std]
 
@@ -12,17 +13,12 @@ extern crate alloc;
 use alloc::boxed::Box;
 use alloc::format;
 use alloc::string::String;
-use alloc::vec;
 use alloc::vec::Vec;
 use packr_guest::{export, import, pack_types, Value, ValueType};
 
 packr_guest::setup_guest!();
 
 pack_types! {
-    record link-state {
-        subject: string,
-    }
-
     imports {
         theater:simple/self {
             log: func(msg: string),
@@ -32,7 +28,7 @@ pack_types! {
         }
     }
     exports {
-        theater:simple/actor.init: func(state: value) -> result<link-state, string>,
+        theater:simple/actor.init: func(config: value) -> result<_, string>,
     }
 }
 
@@ -42,23 +38,19 @@ fn log(msg: String);
 #[import(module = "theater:simple/lifecycle", name = "link")]
 fn link(subject: String) -> Result<(), String>;
 
-fn make_state(subject: &str) -> Value {
-    Value::Record {
-        type_name: String::from("link-state"),
-        fields: vec![(String::from("subject"), Value::String(String::from(subject)))],
-    }
-}
-
-fn ok_result(value: Value) -> Value {
+/// `result<_, string>::ok(())` — no state to return.
+fn ok_unit() -> Value {
+    let unit = Value::Tuple(Vec::new());
     Value::Result {
-        ok_type: value.infer_type(),
+        ok_type: unit.infer_type(),
         err_type: ValueType::String,
-        value: Ok(Box::new(value)),
+        value: Ok(Box::new(unit)),
     }
 }
 
-fn subject_from_init(init_state: &Value) -> Option<String> {
-    match init_state {
+/// The init config carries the subject id as UTF-8 bytes in `option<list<u8>>`.
+fn subject_from_config(config: &Value) -> Option<String> {
+    match config {
         Value::Option {
             value: Some(inner), ..
         } => match inner.as_ref() {
@@ -76,20 +68,20 @@ fn subject_from_init(init_state: &Value) -> Option<String> {
 }
 
 #[export(name = "theater:simple/actor.init")]
-fn init(input: Value) -> Value {
-    let init_state = match input {
+fn init(config: Value) -> Value {
+    // The subject id arrives as the manifest config; unwrap any tuple wrapping.
+    let config = match config {
         Value::Tuple(mut items) if !items.is_empty() => items.remove(0),
         other => other,
     };
-    match subject_from_init(&init_state) {
+    match subject_from_config(&config) {
         Some(subject) => {
             log(format!("link-test: linking to {}", subject));
-            let _ = link(subject.clone());
-            ok_result(make_state(&subject))
+            let _ = link(subject);
         }
         None => {
-            log(String::from("link-test: no subject id in init state"));
-            ok_result(make_state(""))
+            log(String::from("link-test: no subject id in config"));
         }
     }
+    ok_unit()
 }

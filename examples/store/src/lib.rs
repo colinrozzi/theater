@@ -3,7 +3,8 @@
 //! On init this actor demonstrates the store lifecycle: open a store, put some
 //! bytes (getting back a content hash), read them back, then attach a human
 //! label and resolve it. Content is addressed by hash, so identical bytes
-//! dedupe to the same ref.
+//! dedupe to the same ref. State lives inside the module now
+//! (`docs/in-module-state.md`); this actor holds none — it only acts on init.
 //!
 //! Only the store functions this actor uses are declared; the interface
 //! subset-hash lets an actor import a subset of the host interface.
@@ -14,16 +15,12 @@ extern crate alloc;
 use alloc::boxed::Box;
 use alloc::format;
 use alloc::string::String;
-use alloc::vec;
+use alloc::vec::Vec;
 use packr_guest::{export, import, pack_types, Value, ValueType};
 
 packr_guest::setup_guest!();
 
 pack_types! {
-    record store-state {
-        store-id: string,
-    }
-
     imports {
         theater:simple/self {
             log: func(msg: string),
@@ -37,7 +34,7 @@ pack_types! {
         }
     }
     exports {
-        theater:simple/actor.init: func(state: value) -> result<store-state, string>,
+        theater:simple/actor.init: func(config: value) -> result<_, string>,
     }
 }
 
@@ -78,28 +75,23 @@ fn bytes(content: &str) -> Value {
     }
 }
 
-fn ok_state(store_id: &str) -> Value {
-    let state = Value::Record {
-        type_name: String::from("store-state"),
-        fields: vec![(
-            String::from("store-id"),
-            Value::String(String::from(store_id)),
-        )],
-    };
+/// `result<_, string>::ok(())` — no state to return.
+fn ok_unit() -> Value {
+    let unit = Value::Tuple(Vec::new());
     Value::Result {
-        ok_type: state.infer_type(),
+        ok_type: unit.infer_type(),
         err_type: ValueType::String,
-        value: Ok(Box::new(state)),
+        value: Ok(Box::new(unit)),
     }
 }
 
 #[export(name = "theater:simple/actor.init")]
-fn init(_input: Value) -> Value {
+fn init(_config: Value) -> Value {
     let store_id = match as_string(ok_payload(store_new())) {
         Some(id) => id,
         None => {
             log(String::from("store: failed to open a store"));
-            return ok_state("");
+            return ok_unit();
         }
     };
     log(format!("store: opened store {}", store_id));
@@ -107,7 +99,7 @@ fn init(_input: Value) -> Value {
     // Put some content; the store returns its content hash.
     let content_ref = match as_string(ok_payload(store_put(store_id.clone(), bytes("hello, theater")))) {
         Some(r) => r,
-        None => return ok_state(&store_id),
+        None => return ok_unit(),
     };
     log(format!("store: stored content -> {}", content_ref));
 
@@ -126,5 +118,5 @@ fn init(_input: Value) -> Value {
         }
     }
 
-    ok_state(&store_id)
+    ok_unit()
 }

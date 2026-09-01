@@ -185,7 +185,9 @@ dependencies = [
 name = "supervisor-replay-test-actor"
 version = "0.1.0"
 dependencies = [
+ "packr-abi",
  "packr-guest",
+ "theater-guest",
 ]
 
 [[package]]
@@ -197,6 +199,23 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-ident",
+]
+
+[[package]]
+name = "theater-guest"
+version = "0.1.0"
+dependencies = [
+ "packr-guest",
+ "theater-guest-macros",
+]
+
+[[package]]
+name = "theater-guest-macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]

@@ -3,7 +3,9 @@
 //! This actor:
 //! 1. Exports `init` function for the theater:simple/actor interface
 //! 2. Imports `log` function from theater:simple/self interface
-//! 3. Demonstrates typed state — init receives empty state, returns a record
+//!
+//! State lives inside the module now (`docs/in-module-state.md`); this actor
+//! holds none — it just logs on init.
 
 #![no_std]
 
@@ -11,7 +13,7 @@ extern crate alloc;
 
 use alloc::boxed::Box;
 use alloc::string::String;
-use alloc::vec;
+use alloc::vec::Vec;
 use packr_guest::{export, import, pack_types, Value, ValueType};
 
 // Set up allocator and panic handler
@@ -25,7 +27,7 @@ pack_types! {
         }
     }
     exports {
-        theater:simple/actor.init: func(state: value) -> result<value, string>,
+        theater:simple/actor.init: func(config: value) -> result<_, string>,
     }
 }
 
@@ -35,21 +37,15 @@ fn log(msg: String);
 
 /// The init function for theater:simple/actor interface.
 #[export(name = "theater:simple/actor.init")]
-fn init(_input: Value) -> Value {
+fn init(_config: Value) -> Value {
     log(String::from("Composite test actor: init called!"));
     log(String::from("Composite test actor: init completed successfully!"));
 
-    // Return a typed state record
-    let state = Value::Record {
-        type_name: String::from("composite-state"),
-        fields: vec![
-            (String::from("initialized"), Value::Bool(true)),
-        ],
-    };
-
+    // result<_, string>::ok(()) — no state to return.
+    let unit = Value::Tuple(Vec::new());
     Value::Result {
-        ok_type: state.infer_type(),
+        ok_type: unit.infer_type(),
         err_type: ValueType::String,
-        value: Ok(Box::new(state)),
+        value: Ok(Box::new(unit)),
     }
 }
