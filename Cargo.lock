@@ -3164,23 +3164,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "theater-replay-experimenting"
-version = "0.3.13"
-dependencies = [
- "anyhow",
- "hex",
- "packr",
- "serde_json",
- "theater",
- "theater-handler-message-server",
- "theater-handler-self",
- "theater-handler-supervisor",
- "theater-handler-tcp",
- "tokio",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "theater-tests"
 version = "0.3.16"
 dependencies = [
