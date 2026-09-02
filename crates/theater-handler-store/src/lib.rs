@@ -64,7 +64,7 @@ use theater::config::actor_manifest::StoreHandlerConfig;
 use theater::config::permissions::StorePermissions;
 use theater::handler::{Handler, HandlerContext, SharedActorInstance};
 use theater::shutdown::ShutdownReceiver;
-use theater::store::{ContentRef, ContentStore, Label};
+use theater_store::{ContentRef, ContentStore, Label};
 
 // Pack integration
 use theater::pack_bridge::{

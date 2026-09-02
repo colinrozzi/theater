@@ -2911,6 +2911,7 @@ dependencies = [
  "tempfile",
  "test-log",
  "theater-chain",
+ "theater-store",
  "thiserror 1.0.69",
  "tokio",
  "toml",
@@ -3104,6 +3105,7 @@ dependencies = [
  "serde",
  "serde_json",
  "theater",
+ "theater-store",
  "thiserror 2.0.18",
  "tracing",
 ]
@@ -3161,6 +3163,19 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "theater-store"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "hex",
+ "serde",
+ "sha1",
+ "tokio",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]

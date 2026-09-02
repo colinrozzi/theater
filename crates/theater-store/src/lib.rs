@@ -1,3 +1,15 @@
+//! # theater-store
+//!
+//! Content-addressed storage for Theater, split out of the core runtime crate.
+//!
+//! Two concerns live here:
+//! - [`ContentRef`] / [`Label`] — the **addressing** primitive. The runtime's
+//!   chain is content-addressed (`ContentRef::from_content`), so core depends on
+//!   this.
+//! - [`ContentStore`] — the filesystem-backed **blob store**. It's a capability
+//!   reached through the `theater:simple/store` handler, not baked into the
+//!   runtime's own paths.
+
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use sha1::{Digest, Sha1};
@@ -9,7 +21,17 @@ use tokio::fs;
 use tokio::io::AsyncWriteExt;
 use tracing::debug;
 
-use crate::utils;
+/// Base directory for Theater's on-disk state, from `$THEATER_HOME` (or
+/// `$HOME/.theater`). The store roots its content under here.
+pub fn get_theater_home() -> String {
+    std::env::var("THEATER_HOME").unwrap_or_else(|_| {
+        format!(
+            "{}/{}",
+            std::env::var("HOME").unwrap_or_default(),
+            ".theater"
+        )
+    })
+}
 
 /// A reference to content in the store
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -297,7 +319,7 @@ impl ContentStore {
         if let Some(ref custom) = self.custom_base_path {
             custom.join(&self.id)
         } else {
-            let theater_home = utils::get_theater_home();
+            let theater_home = get_theater_home();
             PathBuf::from(&theater_home).join("store").join(&self.id)
         }
     }
