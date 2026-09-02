@@ -472,30 +472,28 @@ impl PackInstance {
         Ok(())
     }
 
-    /// Call an export function with the given state and parameters.
+    /// Call an export function with the given parameters.
     ///
     /// This is the primary way to invoke actor functions. It:
     /// 1. Encodes the input as a Graph ABI value
     /// 2. Calls the function using the full qualified name
     /// 3. Decodes the output
     ///
+    /// Actor state lives *inside* the module (see `docs/in-module-state.md`): the
+    /// runtime never threads it through the call, so only the function's own
+    /// parameters cross the boundary and only its own return comes back.
+    ///
     /// ## Parameters
     ///
     /// * `function_name` - The function name (e.g., "theater:simple/actor.init")
-    /// * `state` - Current actor state as a Value (optional)
     /// * `params` - Parameters encoded as bytes (will be decoded and re-encoded as Value)
     ///
     /// ## Returns
     ///
-    /// A tuple of (new_state, result_bytes).
-    pub async fn call_function(
-        &mut self,
-        function_name: &str,
-        state: Value,
-        params: Vec<u8>,
-    ) -> Result<(Value, Vec<u8>)> {
+    /// The function's result encoded as bytes.
+    pub async fn call_function(&mut self, function_name: &str, params: Vec<u8>) -> Result<Vec<u8>> {
         let params_value = bytes_to_value(&params);
-        self.call_function_with_value(function_name, state, params_value)
+        self.call_function_with_value(function_name, params_value)
             .await
     }
 
@@ -507,34 +505,14 @@ impl PackInstance {
     pub async fn call_function_with_value(
         &mut self,
         function_name: &str,
-        state: Value,
         params: Value,
-    ) -> Result<(Value, Vec<u8>)> {
-        // Validate state against the function's expected first parameter type.
-        // We guarantee to actors that values match their declared types.
-        if !self.function_types.is_empty() {
-            let info = self.function_types.get(function_name).ok_or_else(|| {
-                anyhow::anyhow!(
-                    "Function '{}' not found in cached type metadata",
-                    function_name
-                )
-            })?;
-            if let Some(first_param) = info.param_types.first() {
-                validate_value_in_type_space(&state, first_param, &info.type_defs).map_err(
-                    |e| anyhow::anyhow!("State type mismatch for '{}': {}", function_name, e),
-                )?;
-            }
-        }
-
-        // Flatten: prepend state to params
+    ) -> Result<Vec<u8>> {
+        // The guest export receives its parameters as a tuple; make sure a bare
+        // value is wrapped (a `Tuple` is passed through as-is). Nothing is
+        // prepended — state is the module's own, not the runtime's.
         let input = match params {
-            Value::Tuple(items) => {
-                let mut all = Vec::with_capacity(1 + items.len());
-                all.push(state);
-                all.extend(items);
-                Value::Tuple(all)
-            }
-            other => Value::Tuple(vec![state, other]),
+            t @ Value::Tuple(_) => t,
+            other => Value::Tuple(vec![other]),
         };
 
         // Arm the epoch deadline before entering the guest: with the 1/sec
@@ -553,18 +531,18 @@ impl PackInstance {
         // traps a runaway call at the deadline instead of pegging a core.
         self.instance.set_epoch_deadline(epoch_ticks);
 
-        // Diagnostic: capture the EXACT encoded actor.init input (the flattened
-        // Tuple[state, ..params] the guest's composite_abi decoder receives) so a
+        // Diagnostic: capture the EXACT encoded actor.init input (the
+        // Tuple[..params] the guest's composite_abi decoder receives) so a
         // hanging/pathological decode input can be handed to packr verbatim. This
-        // is the real wasm-boundary input — unlike the CLI's empty init params,
-        // it includes the actor's `state` (e.g. a restart's persisted state).
+        // is the real wasm-boundary input — the actor's init config (from the
+        // manifest's initial_state) is delivered here as the init argument.
         // Off by default; the hex-encode (and re-encode) only run when enabled:
         //   RUST_LOG=theater::init_encode_dump=trace
         if function_name == "theater:simple/actor.init" {
             tracing::trace!(
                 target: "theater::init_encode_dump",
                 hex = %hex::encode(encode_value(&input).unwrap_or_default()),
-                "actor.init encoded input bytes (packr encode of Tuple[state, ..params])"
+                "actor.init encoded input bytes (packr encode of Tuple[..params])"
             );
         }
 
@@ -579,8 +557,19 @@ impl PackInstance {
                 )
             })?;
 
-        // Validate return value against the function's declared result types.
-        if !self.function_types.is_empty() {
+        // Validate the return against the function's declared result type — with
+        // one exception: an `ok(())` (unit ok). A `result<_, E>` return carries no
+        // ok payload to type-check, and packr's metadata surfaces that empty
+        // ok-type to the validator as `bool`, so validating a unit ok spuriously
+        // fails ("expected bool, got tuple<0>"). A unit ok has no data to get
+        // wrong, so it always conforms — skip it. Typed and error returns still
+        // validate.
+        let is_unit_ok = matches!(
+            &output,
+            Value::Result { value: Ok(inner), .. }
+                if matches!(inner.as_ref(), Value::Tuple(items) if items.is_empty())
+        );
+        if !is_unit_ok && !self.function_types.is_empty() {
             if let Some(info) = self.function_types.get(function_name) {
                 if let Some(result_type) = info.result_types.first() {
                     validate_value_in_type_space(&output, result_type, &info.type_defs).map_err(
@@ -603,44 +592,6 @@ impl PackInstance {
             .call_with_value_async(function_name, input)
             .await
             .context(format!("Failed to call function '{}'", function_name))
-    }
-
-    /// Call an actor function with typed decoding.
-    ///
-    /// This provides a higher-level API that:
-    /// - Automatically wraps state and params into the expected tuple
-    /// - Decodes the result into `ActorResult<T>` with the new state and typed return value
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// let result: ActorResult<i32> = instance.call_typed(
-    ///     "increment",
-    ///     state,
-    ///     Value::Tuple(vec![]),
-    /// ).await?;
-    /// println!("New count: {}, state: {:?}", result.value, result.state);
-    /// ```
-    pub async fn call_typed<T: FromValue>(
-        &mut self,
-        function_name: &str,
-        state: Value,
-        params: Value,
-    ) -> Result<ActorResult<T>> {
-        let (new_state, result_bytes) = self
-            .call_function_with_value(function_name, state, params)
-            .await?;
-        let result_value = if result_bytes.is_empty() {
-            Value::Tuple(vec![]) // Unit when no return value
-        } else {
-            decode_value(&result_bytes)?
-        };
-        let value = T::from_value(result_value)
-            .map_err(|e| anyhow::anyhow!("Failed to decode result: {:?}", e))?;
-        Ok(ActorResult {
-            state: new_state,
-            value,
-        })
     }
 }
 
@@ -667,16 +618,17 @@ pub fn decode_value(bytes: &[u8]) -> Result<Value> {
     packr::decode(bytes).map_err(|e| anyhow::anyhow!("Failed to decode value: {:?}", e))
 }
 
-/// Decode a function result in the standard format.
+/// Decode a function result.
 ///
-/// Expected format: result<tuple<option<state>, R>, string>
-/// Where state is a Value and R is the function-specific result type.
-fn decode_function_result(value: Value) -> Result<(Value, Vec<u8>)> {
+/// Expected format: `result<R, string>` where `R` is the function's own return
+/// (no threaded state). The Ok payload *is* the return value; we encode it to
+/// bytes for the caller.
+fn decode_function_result(value: Value) -> Result<Vec<u8>> {
     match value {
         // Handle Value::Result (Pack's native result type)
         Value::Result {
             value: Ok(inner), ..
-        } => decode_ok_payload(*inner),
+        } => encode_value(&inner),
         Value::Result {
             value: Err(err), ..
         } => {
@@ -689,7 +641,9 @@ fn decode_function_result(value: Value) -> Result<(Value, Vec<u8>)> {
         // Handle Value::Variant (alternative encoding)
         Value::Variant {
             tag: 0, payload, ..
-        } if !payload.is_empty() => decode_ok_payload(payload.into_iter().next().unwrap()),
+        } if !payload.is_empty() => encode_value(&payload.into_iter().next().unwrap()),
+        // Ok with no payload = unit return
+        Value::Variant { tag: 0, .. } => Ok(vec![]),
         Value::Variant {
             tag: 1, payload, ..
         } if !payload.is_empty() => {
@@ -705,141 +659,8 @@ fn decode_function_result(value: Value) -> Result<(Value, Vec<u8>)> {
         Value::Variant { tag, .. } => {
             Err(anyhow::anyhow!("Unexpected result variant tag: {}", tag))
         }
-        // If it's not a variant or result, treat the whole value as the state
-        other => Ok((other, vec![])),
-    }
-}
-
-/// Helper to decode the Ok payload of a result.
-/// Expected format: tuple<state, R...> where first element is state
-fn decode_ok_payload(value: Value) -> Result<(Value, Vec<u8>)> {
-    match value {
-        Value::Tuple(mut items) if !items.is_empty() => {
-            // First element is state directly
-            let new_state = items.remove(0);
-
-            // Remaining elements are the return value
-            let result_value = if items.len() == 1 {
-                items.remove(0)
-            } else if items.is_empty() {
-                Value::Tuple(vec![])
-            } else {
-                Value::Tuple(items)
-            };
-            let result_bytes = encode_value(&result_value)?;
-
-            Ok((new_state, result_bytes))
-        }
-        // Single value — treat as state with no additional return
-        other => Ok((other, vec![])),
-    }
-}
-
-// =============================================================================
-// Actor Result Type - for typed decoding of actor function results
-// =============================================================================
-
-/// Result type for actor function calls.
-///
-/// Theater actors return `result<tuple<option<state>, R>, string>` where:
-/// - First tuple element is the updated state as a Value (or None)
-/// - Second element is the function's return value
-/// - Error case contains an error message
-///
-/// This type provides typed decoding via `FromValue`.
-///
-/// # Example
-///
-/// ```ignore
-/// // Call an actor function with typed result
-/// let result: ActorResult<i32> = instance.call_typed("increment", params).await?;
-/// let new_state = result.state;
-/// let count = result.value;
-/// ```
-#[derive(Debug, Clone)]
-pub struct ActorResult<T> {
-    /// The updated actor state
-    pub state: Value,
-    /// The function's return value
-    pub value: T,
-}
-
-impl<T: FromValue> FromValue for ActorResult<T> {
-    fn from_value(value: Value) -> std::result::Result<Self, ConversionError> {
-        match value {
-            // Handle Value::Result (Pack's native result type)
-            Value::Result {
-                value: Ok(inner), ..
-            } => decode_actor_ok_payload(*inner),
-            Value::Result {
-                value: Err(err), ..
-            } => {
-                let error_msg = match *err {
-                    Value::String(s) => s,
-                    other => format!("{:?}", other),
-                };
-                Err(ConversionError::TypeMismatch {
-                    expected: String::from("Ok result"),
-                    got: format!("Actor error: {}", error_msg),
-                })
-            }
-            // Handle Value::Variant (alternative encoding)
-            Value::Variant {
-                tag: 0, payload, ..
-            } if !payload.is_empty() => {
-                decode_actor_ok_payload(payload.into_iter().next().unwrap())
-            }
-            Value::Variant { tag: 0, .. } => Err(ConversionError::MissingPayload),
-            Value::Variant {
-                tag: 1, payload, ..
-            } => {
-                let error_msg = payload
-                    .into_iter()
-                    .next()
-                    .map(|v| match v {
-                        Value::String(s) => s,
-                        other => format!("{:?}", other),
-                    })
-                    .unwrap_or_else(|| "Unknown error".to_string());
-                Err(ConversionError::TypeMismatch {
-                    expected: String::from("Ok result"),
-                    got: format!("Actor error: {}", error_msg),
-                })
-            }
-            other => Err(ConversionError::TypeMismatch {
-                expected: String::from("Result or Variant"),
-                got: format!("{:?}", other),
-            }),
-        }
-    }
-}
-
-/// Helper to decode the Ok payload of an actor result.
-fn decode_actor_ok_payload<T: FromValue>(
-    value: Value,
-) -> std::result::Result<ActorResult<T>, ConversionError> {
-    match value {
-        Value::Tuple(mut items) if !items.is_empty() => {
-            // First element is state
-            let state = items.remove(0);
-
-            // Remaining elements are the return value
-            let return_value = if items.len() == 1 {
-                items.remove(0)
-            } else if items.is_empty() {
-                Value::Tuple(vec![])
-            } else {
-                Value::Tuple(items)
-            };
-
-            let value = T::from_value(return_value)?;
-            Ok(ActorResult { state, value })
-        }
-        // Single value — treat as state with no return
-        other => Ok(ActorResult {
-            state: other,
-            value: T::from_value(Value::Tuple(vec![]))?,
-        }),
+        // Not a variant or result — treat the whole value as the return.
+        other => encode_value(&other),
     }
 }
 

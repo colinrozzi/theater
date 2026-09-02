@@ -9,7 +9,6 @@ use crate::chain::{ChainEvent, StateChain};
 use crate::events::{ChainEventData, ChainEventPayload};
 use crate::id::TheaterId;
 use crate::messages::TheaterCommand;
-use crate::pack_bridge::Value;
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, RwLock as StdRwLock};
@@ -39,9 +38,6 @@ pub struct ActorStore {
 
     /// The event chain that records all actor operations for verification and audit
     pub chain: Arc<RwLock<StateChain>>,
-
-    /// The current state of the actor, stored as a Pack Value
-    pub state: Value,
 
     /// Handle to interact with the actor
     pub actor_handle: ActorHandle,
@@ -76,13 +72,11 @@ impl ActorStore {
         theater_tx: UnboundedSender<TheaterCommand>,
         actor_handle: ActorHandle,
         chain: Arc<RwLock<StateChain>>,
-        initial_state: Value,
     ) -> Self {
         Self {
             id,
             theater_tx: theater_tx.clone(),
             chain,
-            state: initial_state,
             actor_handle,
             resource_table: Arc::new(Mutex::new(ResourceTable::new())),
             extensions: Arc::new(StdRwLock::new(HashMap::new())),
@@ -109,28 +103,6 @@ impl ActorStore {
     /// A clone of the UnboundedSender<TheaterCommand> channel.
     pub fn get_theater_tx(&self) -> UnboundedSender<TheaterCommand> {
         self.theater_tx.clone()
-    }
-
-    /// # Get the actor's state
-    ///
-    /// Retrieves the current state data for this actor.
-    ///
-    /// ## Returns
-    ///
-    /// A clone of the actor's current state Value.
-    pub fn get_state(&self) -> Value {
-        self.state.clone()
-    }
-
-    /// # Set the actor's state
-    ///
-    /// Updates the current state data for this actor.
-    ///
-    /// ## Parameters
-    ///
-    /// * `state` - The new state Value
-    pub fn set_state(&mut self, state: Value) {
-        self.state = state;
     }
 
     /// # Record an event in the chain

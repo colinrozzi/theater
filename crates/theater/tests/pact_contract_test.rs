@@ -40,13 +40,7 @@ async fn create_instance() -> PackInstance {
     let chain = Arc::new(SyncRwLock::new(StateChain::new(actor_id)));
     let actor_handle = ActorHandle::new(operation_tx, info_tx, control_tx);
 
-    let actor_store = ActorStore::new(
-        actor_id,
-        theater_tx.clone(),
-        actor_handle,
-        chain,
-        Value::Tuple(vec![]),
-    );
+    let actor_store = ActorStore::new(actor_id, theater_tx.clone(), actor_handle, chain);
 
     let mut instance = PackInstance::new(
         "pact-contract-test",
@@ -78,104 +72,108 @@ async fn create_instance() -> PackInstance {
     instance
 }
 
+/// Count the todo items in a `list` return value or an `actor-state` record.
+fn todo_items(value: &Value) -> Vec<Value> {
+    match value {
+        // `list` returns list<todo-item> directly.
+        Value::List { items, .. } => items.clone(),
+        // `actor-state` holds them under the `items` field.
+        Value::Record { fields, .. } => fields
+            .iter()
+            .find(|(n, _)| n == "items")
+            .and_then(|(_, v)| match v {
+                Value::List { items, .. } => Some(items.clone()),
+                _ => None,
+            })
+            .unwrap_or_default(),
+        _ => Vec::new(),
+    }
+}
+
+fn item_done(item: &Value) -> bool {
+    match item {
+        Value::Record { fields, .. } => fields
+            .iter()
+            .find(|(n, _)| n == "done")
+            .map(|(_, v)| matches!(v, Value::Bool(true)))
+            .unwrap_or(false),
+        _ => false,
+    }
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_pact_file_todo_actor() {
     let _ = tracing_subscriber::fmt().with_env_filter("info").try_init();
 
     let mut instance = create_instance().await;
 
-    // Init
-    let state = Value::Tuple(vec![]);
-    let (state, _) = instance
-        .call_function("theater:simple/actor.init", state, vec![])
+    // init sets the actor's in-module todo-list state; returns unit.
+    instance
+        .call_function("theater:simple/actor.init", vec![])
         .await
         .expect("init should succeed");
 
-    info!("State after init: {:?}", state);
-    match &state {
-        Value::Record { type_name, .. } => assert_eq!(type_name, "actor-state"),
-        _ => panic!("Expected actor-state record"),
-    }
-
-    // Add first todo
-    let (state, result_bytes) = instance
+    // add(string) -> todo-item (types defined in the external types.pact).
+    let bytes = instance
         .call_function_with_value(
             "theater:todo/actions.add",
-            state,
             Value::Tuple(vec![Value::String("Buy milk".into())]),
         )
         .await
         .expect("add should succeed");
+    let added = packr::abi::decode(&bytes).expect("decode todo-item");
+    match &added {
+        Value::Record { type_name, .. } => assert_eq!(type_name, "todo-item"),
+        _ => panic!("add should return a todo-item, got {:?}", added),
+    }
 
-    assert!(!result_bytes.is_empty(), "Should return the new todo item");
-    info!("State after add 'Buy milk': {:?}", state);
-
-    // Add second todo
-    let (state, _) = instance
+    instance
         .call_function_with_value(
             "theater:todo/actions.add",
-            state,
             Value::Tuple(vec![Value::String("Write tests".into())]),
         )
         .await
         .expect("add should succeed");
 
-    // List todos
-    let (state, result_bytes) = instance
-        .call_function_with_value("theater:todo/actions.list", state, Value::Tuple(vec![]))
+    // list() -> list<todo-item>: both items present.
+    let bytes = instance
+        .call_function_with_value("theater:todo/actions.list", Value::Tuple(vec![]))
         .await
         .expect("list should succeed");
+    let listed = packr::abi::decode(&bytes).expect("decode list");
+    assert_eq!(todo_items(&listed).len(), 2, "two todos after two adds");
 
-    // Decode and check the list
-    let result_value = packr::abi::decode(&result_bytes).expect("decode result");
-    info!("Todo list: {:?}", result_value);
-
-    // Toggle first todo
-    let (state, _) = instance
+    // toggle(id=1), then confirm item 1 is done — both via list and get-state.
+    instance
         .call_function_with_value(
             "theater:todo/actions.toggle",
-            state,
             Value::Tuple(vec![Value::U32(1)]),
         )
         .await
         .expect("toggle should succeed");
 
-    // List again to verify toggle
-    let (_state, result_bytes) = instance
-        .call_function_with_value("theater:todo/actions.list", state, Value::Tuple(vec![]))
+    let bytes = instance
+        .call_function_with_value("theater:todo/actions.list", Value::Tuple(vec![]))
         .await
         .expect("list should succeed after toggle");
+    let listed = packr::abi::decode(&bytes).expect("decode list");
+    let items = todo_items(&listed);
+    assert!(items.iter().any(item_done), "toggled item should be done");
 
-    let result_value = packr::abi::decode(&result_bytes).expect("decode result");
-    info!("Todo list after toggle: {:?}", result_value);
+    // The in-module state agrees with the action returns.
+    let state = instance
+        .call_value("theater:simple/actor.get-state", &Value::Tuple(vec![]))
+        .await
+        .expect("get-state should succeed");
+    match &state {
+        Value::Record { type_name, .. } => assert_eq!(type_name, "actor-state"),
+        _ => panic!("Expected actor-state record, got {:?}", state),
+    }
+    assert_eq!(
+        todo_items(&state).len(),
+        2,
+        "get-state reflects the two adds"
+    );
 
     info!("Pact file contract test passed!");
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn test_pact_file_rejects_wrong_types() {
-    let _ = tracing_subscriber::fmt().with_env_filter("info").try_init();
-
-    let mut instance = create_instance().await;
-
-    // Get valid state
-    let state = Value::Tuple(vec![]);
-    let (state, _) = instance
-        .call_function("theater:simple/actor.init", state, vec![])
-        .await
-        .expect("init should succeed");
-
-    // Try to call add with wrong param type (u32 instead of string)
-    let result = instance
-        .call_function_with_value(
-            "theater:todo/actions.toggle",
-            Value::String("not a state".into()), // wrong state type
-            Value::Tuple(vec![Value::U32(1)]),
-        )
-        .await;
-
-    assert!(result.is_err(), "Should reject wrong state type");
-    let err = result.unwrap_err().to_string();
-    info!("Correctly rejected: {}", err);
-    assert!(err.contains("State type mismatch"));
 }

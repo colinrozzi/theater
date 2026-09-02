@@ -1,4 +1,4 @@
-//! Replay test actor for Pack runtime (self-contained / packr 0.10.0).
+//! Replay test actor for Pack runtime (in-module state).
 //!
 //! A simple deterministic actor that:
 //! - Imports `theater:simple/self.log`
@@ -10,8 +10,9 @@
 //! carry STATIC string literals on purpose: they exercise the .rodata/static-data
 //! marshalling path through the interceptor (numeric fixtures hide data bugs).
 //!
-//! Handlers use the flat/positional param ABI (0.8+): each pact param is a
-//! separate `Value` arg — `fn handler(state, ..params)` — not a wrapped tuple.
+//! State lives inside the module now (`docs/in-module-state.md`); this actor
+//! holds none — every export just acts and returns. The handlers take only their
+//! own params (no threaded state) and return only their own results.
 
 #![no_std]
 
@@ -34,12 +35,12 @@ pack_types! {
         }
     }
     exports {
-        theater:simple/actor.init: func(state: option<list<u8>>) -> result<tuple<option<list<u8>>>, string>,
-        theater:simple/message-server-client.handle-send: func(state: option<list<u8>>, params: tuple<string, list<u8>>) -> result<tuple<option<list<u8>>>, string>,
-        theater:simple/message-server-client.handle-request: func(state: option<list<u8>>, params: tuple<string, list<u8>>) -> result<tuple<option<list<u8>>, tuple<option<list<u8>>>>, string>,
-        theater:simple/message-server-client.handle-channel-open: func(state: option<list<u8>>, params: tuple<string, option<list<u8>>>) -> result<tuple<option<list<u8>>, tuple<bool, option<list<u8>>>>, string>,
-        theater:simple/message-server-client.handle-channel-message: func(state: option<list<u8>>, params: tuple<string, list<u8>>) -> result<tuple<option<list<u8>>>, string>,
-        theater:simple/message-server-client.handle-channel-close: func(state: option<list<u8>>, params: tuple<string>) -> result<tuple<option<list<u8>>>, string>,
+        theater:simple/actor.init: func(config: value) -> result<_, string>,
+        theater:simple/message-server-client.handle-send: func(params: value) -> result<_, string>,
+        theater:simple/message-server-client.handle-request: func(params: value) -> result<tuple<option<list<u8>>>, string>,
+        theater:simple/message-server-client.handle-channel-open: func(params: value) -> result<tuple<tuple<bool, option<list<u8>>>>, string>,
+        theater:simple/message-server-client.handle-channel-message: func(params: value) -> result<_, string>,
+        theater:simple/message-server-client.handle-channel-close: func(params: value) -> result<_, string>,
     }
 }
 
@@ -54,11 +55,11 @@ fn log(msg: String);
 fn message_server_register() -> Result<(), String>;
 
 // ============================================================================
-// Actor export: init  (pact: func(state))
+// Actor export: init
 // ============================================================================
 
 #[export(name = "theater:simple/actor.init")]
-fn init(state: Value) -> Value {
+fn init(_config: Value) -> Value {
     log(String::from("Replay test actor: init called"));
     log(String::from("Replay test actor: message 1"));
     log(String::from("Replay test actor: message 2"));
@@ -73,29 +74,27 @@ fn init(state: Value) -> Value {
 
     log(String::from("Replay test actor: init complete"));
 
-    // Return Ok((state,))
-    ok_state(state)
+    ok_unit()
 }
 
 // ============================================================================
-// Actor export: handle-send  (pact: func(state, params))
+// Actor export: handle-send
 // ============================================================================
 
 #[export(name = "theater:simple/message-server-client.handle-send")]
-fn handle_send(state: Value, _params: Value) -> Value {
+fn handle_send(_params: Value) -> Value {
     log(String::from("Replay test actor: handle-send called"));
     log(String::from("Replay test actor: processing message"));
 
-    // Return Ok((state,))
-    ok_state(state)
+    ok_unit()
 }
 
 // ============================================================================
-// Actor export: handle-request  (pact: func(state, params))
+// Actor export: handle-request  (params: tuple<request-id, list<u8>>)
 // ============================================================================
 
 #[export(name = "theater:simple/message-server-client.handle-request")]
-fn handle_request(state: Value, params: Value) -> Value {
+fn handle_request(params: Value) -> Value {
     log(String::from("Replay test actor: handle-request called"));
 
     // Extract data from params: tuple<string, list<u8>>
@@ -110,7 +109,7 @@ fn handle_request(state: Value, params: Value) -> Value {
     let mut response = alloc::vec::Vec::from(b"response:" as &[u8]);
     response.extend_from_slice(&data_bytes);
 
-    // Return Ok((state, (Some(response_bytes),)))
+    // Return Ok((Some(response_bytes),))
     let response_option = Value::Option {
         inner_type: ValueType::List(alloc::boxed::Box::new(ValueType::U8)),
         value: Some(alloc::boxed::Box::new(Value::List {
@@ -119,26 +118,23 @@ fn handle_request(state: Value, params: Value) -> Value {
         })),
     };
 
-    Value::Variant {
-        type_name: String::from("result"),
-        case_name: String::from("ok"),
-        tag: 0,
-        payload: alloc::vec![Value::Tuple(alloc::vec![
-            state,
-            Value::Tuple(alloc::vec![response_option]),
-        ])],
+    let payload = Value::Tuple(alloc::vec![response_option]);
+    Value::Result {
+        ok_type: payload.infer_type(),
+        err_type: ValueType::String,
+        value: Ok(alloc::boxed::Box::new(payload)),
     }
 }
 
 // ============================================================================
-// Actor export: handle-channel-open  (pact: func(state, params))
+// Actor export: handle-channel-open  (params: tuple<channel-id, list<u8>>)
 // ============================================================================
 
 #[export(name = "theater:simple/message-server-client.handle-channel-open")]
-fn handle_channel_open(state: Value, _params: Value) -> Value {
+fn handle_channel_open(_params: Value) -> Value {
     log(String::from("Replay test actor: handle-channel-open called"));
 
-    // Return Ok((state, (channel-accept,)))
+    // Return Ok((channel-accept,))
     // channel-accept record encoded as Tuple([Bool(true), Option(None)])
     let channel_accept = Value::Tuple(alloc::vec![
         Value::Bool(true),
@@ -148,39 +144,34 @@ fn handle_channel_open(state: Value, _params: Value) -> Value {
         },
     ]);
 
-    Value::Variant {
-        type_name: String::from("result"),
-        case_name: String::from("ok"),
-        tag: 0,
-        payload: alloc::vec![Value::Tuple(alloc::vec![
-            state,
-            Value::Tuple(alloc::vec![channel_accept]),
-        ])],
+    let payload = Value::Tuple(alloc::vec![channel_accept]);
+    Value::Result {
+        ok_type: payload.infer_type(),
+        err_type: ValueType::String,
+        value: Ok(alloc::boxed::Box::new(payload)),
     }
 }
 
 // ============================================================================
-// Actor export: handle-channel-message  (pact: func(state, params))
+// Actor export: handle-channel-message
 // ============================================================================
 
 #[export(name = "theater:simple/message-server-client.handle-channel-message")]
-fn handle_channel_message(state: Value, _params: Value) -> Value {
+fn handle_channel_message(_params: Value) -> Value {
     log(String::from("Replay test actor: handle-channel-message called"));
 
-    // Return Ok((state,))
-    ok_state(state)
+    ok_unit()
 }
 
 // ============================================================================
-// Actor export: handle-channel-close  (pact: func(state, params))
+// Actor export: handle-channel-close
 // ============================================================================
 
 #[export(name = "theater:simple/message-server-client.handle-channel-close")]
-fn handle_channel_close(state: Value, _params: Value) -> Value {
+fn handle_channel_close(_params: Value) -> Value {
     log(String::from("Replay test actor: handle-channel-close called"));
 
-    // Return Ok((state,))
-    ok_state(state)
+    ok_unit()
 }
 
 // ============================================================================
@@ -210,12 +201,12 @@ fn err_result(msg: &str) -> Value {
     }
 }
 
-/// Return an ok result wrapping the state tuple
-fn ok_state(state: Value) -> Value {
-    let inner = Value::Tuple(alloc::vec![state]);
+/// `result<_, string>::ok(())` — no state to return.
+fn ok_unit() -> Value {
+    let unit = Value::Tuple(alloc::vec![]);
     Value::Result {
-        ok_type: inner.infer_type(),
+        ok_type: unit.infer_type(),
         err_type: ValueType::String,
-        value: Ok(alloc::boxed::Box::new(inner)),
+        value: Ok(alloc::boxed::Box::new(unit)),
     }
 }

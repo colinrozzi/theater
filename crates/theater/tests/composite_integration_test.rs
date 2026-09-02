@@ -58,13 +58,7 @@ async fn test_composite_instance_basic() {
     let chain = Arc::new(SyncRwLock::new(StateChain::new(actor_id)));
     let actor_handle = ActorHandle::new(operation_tx, info_tx, control_tx);
 
-    let actor_store = ActorStore::new(
-        actor_id,
-        theater_tx.clone(),
-        actor_handle,
-        chain,
-        Value::Tuple(vec![]), // Empty initial state
-    );
+    let actor_store = ActorStore::new(actor_id, theater_tx.clone(), actor_handle, chain);
 
     // Create the PackInstance with host functions
     let result = PackInstance::new(
@@ -101,20 +95,19 @@ async fn test_composite_instance_basic() {
 
     info!("PackInstance created successfully");
 
-    // Call the init function with empty state
-    let state = Value::Tuple(vec![]);
+    // Call the init function. State lives in the module now, so init takes only
+    // its config argument (empty here) and returns just its own result.
     let params: Vec<u8> = vec![];
 
     info!("Calling init function...");
 
     let result = instance
-        .call_function("theater:simple/actor.init", state, params)
+        .call_function("theater:simple/actor.init", params)
         .await;
 
     match result {
-        Ok((new_state, result_bytes)) => {
+        Ok(result_bytes) => {
             info!("init succeeded!");
-            info!("New state: {:?}", new_state);
             info!("Result bytes: {} bytes", result_bytes.len());
         }
         Err(e) => {

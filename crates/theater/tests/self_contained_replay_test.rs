@@ -29,7 +29,7 @@ use theater::chain::{ChainEvent, StateChain};
 use theater::id::TheaterId;
 use theater::interceptor::{RecordingInterceptor, ReplayRecordingInterceptor};
 use theater::messages::TheaterCommand;
-use theater::pack_bridge::{ActorResult, AsyncRuntime, CallInterceptor, Ctx, PackInstance, Value};
+use theater::pack_bridge::{AsyncRuntime, CallInterceptor, Ctx, PackInstance, Value};
 
 use tokio::sync::mpsc;
 use tokio::sync::RwLock as SyncRwLock;
@@ -86,13 +86,7 @@ async fn drive_handle_send(
 
     let interceptor = make_interceptor(chain.clone());
     let handle = ActorHandle::new(op_tx, info_tx, ctl_tx);
-    let store = ActorStore::new(
-        actor_id,
-        theater_tx,
-        handle,
-        chain.clone(),
-        Value::Tuple(vec![]),
-    );
+    let store = ActorStore::new(actor_id, theater_tx, handle, chain.clone());
 
     let cap = captured.clone();
     let mut instance = PackInstance::new_with_interceptor(
@@ -131,12 +125,8 @@ async fn drive_handle_send(
     .await
     .expect("self-contained composite must load via the 0.10.x self-contained loader");
 
-    // `handle-send(state: option<list<u8>>, params: tuple<string, list<u8>>)`.
-    // The handler ignores params and echoes state; pass a well-typed none-state.
-    let none_state = Value::Option {
-        inner_type: ValueType::List(Box::new(ValueType::U8)),
-        value: None,
-    };
+    // `handle-send(params: tuple<string, list<u8>>)` — state lives in the module,
+    // so nothing is threaded in or out; the handler logs static strings.
     let params = Value::Tuple(vec![
         Value::String("test-sender".into()),
         Value::List {
@@ -144,12 +134,8 @@ async fn drive_handle_send(
             items: vec![],
         },
     ]);
-    let _res: ActorResult<()> = instance
-        .call_typed(
-            "theater:simple/message-server-client.handle-send",
-            none_state,
-            params,
-        )
+    let _res = instance
+        .call_function_with_value("theater:simple/message-server-client.handle-send", params)
         .await
         .expect("handle-send must succeed on the self-contained composite");
 

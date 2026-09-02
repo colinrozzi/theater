@@ -1,9 +1,16 @@
 //! Contract enforcement integration test.
 //!
-//! Tests that the runtime validates type contracts:
-//! 1. Valid typed calls succeed (records, variants, nested types)
-//! 2. Invalid state types are rejected before entering WASM
-//! 3. Return types are validated after the call
+//! State lives inside the module now, so the runtime validates a call's own
+//! params and return against the actor's pact declarations (records, variants,
+//! nested types). This drives the `contract-test` actor through its typed
+//! actions and confirms:
+//! 1. rich typed values (records, variants, nested types) round-trip across the
+//!    boundary and the actor's returns pass the runtime's return-type validation;
+//! 2. the actor's in-module state is inspectable via its `get-state` export and
+//!    reflects the mutations its actions make.
+//!
+//! (The old "wrong *state* type is rejected" tests are gone — state is no longer
+//! threaded through the call, so there is no state argument to validate.)
 
 use std::sync::Arc;
 use theater::actor::handle::ActorHandle;
@@ -11,7 +18,7 @@ use theater::actor::store::ActorStore;
 use theater::chain::StateChain;
 use theater::id::TheaterId;
 use theater::messages::TheaterCommand;
-use theater::pack_bridge::{AsyncRuntime, Ctx, PackInstance, Value};
+use theater::pack_bridge::{decode_value, AsyncRuntime, Ctx, PackInstance, Value};
 use tokio::sync::mpsc;
 use tokio::sync::RwLock as SyncRwLock;
 use tracing::info;
@@ -43,13 +50,7 @@ async fn create_instance() -> PackInstance {
     let chain = Arc::new(SyncRwLock::new(StateChain::new(actor_id)));
     let actor_handle = ActorHandle::new(operation_tx, info_tx, control_tx);
 
-    let actor_store = ActorStore::new(
-        actor_id,
-        theater_tx.clone(),
-        actor_handle,
-        chain,
-        Value::Tuple(vec![]),
-    );
+    let actor_store = ActorStore::new(actor_id, theater_tx.clone(), actor_handle, chain);
 
     let mut instance = PackInstance::new(
         "contract-test",
@@ -89,28 +90,35 @@ async fn test_valid_typed_calls() {
 
     let mut instance = create_instance().await;
 
-    // Init — takes value (anything), returns actor-state
-    let state = Value::Tuple(vec![]);
-    let (state, _) = instance
-        .call_function("theater:simple/actor.init", state, vec![])
+    // init sets the actor's in-module state and returns unit (no threaded state).
+    instance
+        .call_function("theater:simple/actor.init", vec![])
         .await
         .expect("init should succeed");
 
+    // The state is inspectable via the actor's get-state export — a rich nested
+    // record (record containing a record + a variant + a u32) must round-trip.
+    let state = instance
+        .call_value("theater:simple/actor.get-state", &Value::Tuple(vec![]))
+        .await
+        .expect("get-state should succeed");
     info!("State after init: {:?}", state);
-
-    // Verify we got a proper actor-state record
     match &state {
         Value::Record { type_name, fields } => {
             assert_eq!(type_name, "actor-state");
-            assert!(fields.iter().any(|(name, _)| name == "name"));
-            assert!(fields.iter().any(|(name, _)| name == "pos"));
-            assert!(fields.iter().any(|(name, _)| name == "status"));
-            assert!(fields.iter().any(|(name, _)| name == "step-count"));
+            for field in ["name", "pos", "status", "step-count"] {
+                assert!(
+                    fields.iter().any(|(name, _)| name == field),
+                    "actor-state missing field {}",
+                    field
+                );
+            }
         }
         _ => panic!("Expected actor-state record, got: {:?}", state),
     }
 
-    // move-to — takes actor-state + position, returns actor-state + status
+    // move-to(position) -> status. The runtime validates the return against the
+    // declared `result<status, string>`; a well-typed status variant passes.
     let target = Value::Record {
         type_name: "position".into(),
         fields: vec![
@@ -118,167 +126,68 @@ async fn test_valid_typed_calls() {
             ("y".into(), Value::F64(20.0)),
         ],
     };
-    let (state, result_bytes) = instance
+    let bytes = instance
         .call_function_with_value(
             "theater:contract-test/actions.move-to",
-            state,
             Value::Tuple(vec![target]),
         )
         .await
         .expect("move-to should succeed");
+    let status = decode_value(&bytes).expect("decode move-to status");
+    info!("move-to returned status: {:?}", status);
+    match &status {
+        Value::Variant { case_name, .. } => assert_eq!(case_name, "moving"),
+        _ => panic!("Expected a status variant, got: {:?}", status),
+    }
 
-    info!("State after move-to: {:?}", state);
-    assert!(
-        !result_bytes.is_empty(),
-        "Should have return value (status)"
-    );
-
-    // get-status — takes actor-state, returns actor-state + status
-    let (state, _) = instance
+    // get-status() -> status (no params, typed return).
+    let bytes = instance
         .call_function_with_value(
             "theater:contract-test/actions.get-status",
-            state,
             Value::Tuple(vec![]),
         )
         .await
         .expect("get-status should succeed");
+    assert!(matches!(
+        decode_value(&bytes).expect("decode status"),
+        Value::Variant { .. }
+    ));
 
-    // set-error — takes actor-state + string, returns actor-state
-    let (_state, _) = instance
+    // set-error(string) -> unit.
+    instance
         .call_function_with_value(
             "theater:contract-test/actions.set-error",
-            state,
             Value::Tuple(vec![Value::String("something went wrong".into())]),
         )
         .await
         .expect("set-error should succeed");
 
-    info!("All valid typed calls succeeded!");
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn test_invalid_state_type_rejected() {
-    let _ = tracing_subscriber::fmt().with_env_filter("info").try_init();
-
-    let mut instance = create_instance().await;
-
-    // First, get a valid state via init
-    let state = Value::Tuple(vec![]);
-    let (valid_state, _) = instance
-        .call_function("theater:simple/actor.init", state, vec![])
+    // The mutation is visible through get-state: status is now the error case
+    // and the step-count reflects the earlier move-to.
+    let state = instance
+        .call_value("theater:simple/actor.get-state", &Value::Tuple(vec![]))
         .await
-        .expect("init should succeed");
+        .expect("get-state should succeed");
+    match &state {
+        Value::Record { fields, .. } => {
+            let status = fields
+                .iter()
+                .find(|(n, _)| n == "status")
+                .map(|(_, v)| v)
+                .expect("status field");
+            match status {
+                Value::Variant { case_name, .. } => assert_eq!(case_name, "error"),
+                _ => panic!("Expected status variant, got {:?}", status),
+            }
+            let step = fields
+                .iter()
+                .find(|(n, _)| n == "step-count")
+                .map(|(_, v)| v)
+                .expect("step-count field");
+            assert_eq!(*step, Value::U32(1), "move-to bumped step-count to 1");
+        }
+        _ => panic!("Expected actor-state record, got: {:?}", state),
+    }
 
-    // Now try to call move-to with WRONG state type (a string instead of actor-state record)
-    let wrong_state = Value::String("not a valid state".into());
-    let target = Value::Record {
-        type_name: "position".into(),
-        fields: vec![("x".into(), Value::F64(1.0)), ("y".into(), Value::F64(2.0))],
-    };
-
-    let result = instance
-        .call_function_with_value(
-            "theater:contract-test/actions.move-to",
-            wrong_state,
-            Value::Tuple(vec![target]),
-        )
-        .await;
-
-    assert!(result.is_err(), "Should reject wrong state type");
-    let err = result.unwrap_err().to_string();
-    info!("Correctly rejected invalid state: {}", err);
-    assert!(
-        err.contains("State type mismatch"),
-        "Error should mention state type mismatch: {}",
-        err
-    );
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn test_missing_record_field_rejected() {
-    let _ = tracing_subscriber::fmt().with_env_filter("info").try_init();
-
-    let mut instance = create_instance().await;
-
-    // Create a record that's missing the "status" field
-    let incomplete_state = Value::Record {
-        type_name: "actor-state".into(),
-        fields: vec![
-            ("name".into(), Value::String("test".into())),
-            (
-                "pos".into(),
-                Value::Record {
-                    type_name: "position".into(),
-                    fields: vec![("x".into(), Value::F64(0.0)), ("y".into(), Value::F64(0.0))],
-                },
-            ),
-            // missing "status" and "step-count"
-        ],
-    };
-
-    let result = instance
-        .call_function_with_value(
-            "theater:contract-test/actions.get-status",
-            incomplete_state,
-            Value::Tuple(vec![]),
-        )
-        .await;
-
-    assert!(result.is_err(), "Should reject incomplete record");
-    let err = result.unwrap_err().to_string();
-    info!("Correctly rejected incomplete record: {}", err);
-    assert!(
-        err.contains("missing field") || err.contains("MissingField"),
-        "Error should mention missing field: {}",
-        err
-    );
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn test_wrong_field_type_rejected() {
-    let _ = tracing_subscriber::fmt().with_env_filter("info").try_init();
-
-    let mut instance = create_instance().await;
-
-    // Create a state where "step-count" is a string instead of u32
-    let bad_state = Value::Record {
-        type_name: "actor-state".into(),
-        fields: vec![
-            ("name".into(), Value::String("test".into())),
-            (
-                "pos".into(),
-                Value::Record {
-                    type_name: "position".into(),
-                    fields: vec![("x".into(), Value::F64(0.0)), ("y".into(), Value::F64(0.0))],
-                },
-            ),
-            (
-                "status".into(),
-                Value::Variant {
-                    type_name: "status".into(),
-                    case_name: "idle".into(),
-                    tag: 0,
-                    payload: vec![],
-                },
-            ),
-            ("step-count".into(), Value::String("not a number".into())), // wrong type!
-        ],
-    };
-
-    let result = instance
-        .call_function_with_value(
-            "theater:contract-test/actions.get-status",
-            bad_state,
-            Value::Tuple(vec![]),
-        )
-        .await;
-
-    assert!(result.is_err(), "Should reject wrong field type");
-    let err = result.unwrap_err().to_string();
-    info!("Correctly rejected wrong field type: {}", err);
-    assert!(
-        err.contains("step-count") || err.contains("expected u32"),
-        "Error should reference the bad field: {}",
-        err
-    );
+    info!("All valid typed calls succeeded, in-module state reflected them!");
 }

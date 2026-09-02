@@ -69,7 +69,7 @@ pack_types! {
         }
     }
     exports {
-        theater:simple/actor.init: func(state: option<list<u8>>) -> result<tuple<option<list<u8>>>, string>,
+        theater:simple/actor.init: func(config: value) -> result<_, string>,
     }
 }
 
@@ -147,15 +147,8 @@ fn list_actors_count() -> Result<usize, String> {
 // ============================================================================
 
 #[export(name = "theater:simple/actor.init")]
-fn init(input: Value) -> Value {
+fn init(_config: Value) -> Value {
     log(String::from("=== Multi-handler test actor starting ==="));
-
-    // The runtime calls init with an empty params tuple; there is no prior
-    // state on first init, so default to an empty (none) state.
-    let state = match input {
-        Value::Tuple(mut items) if !items.is_empty() => items.remove(0),
-        _ => empty_state(),
-    };
 
     // Test 1: Runtime handler (log) - already working if we see this!
     log(String::from("TEST 1: Runtime handler - PASSED (you're reading this!)"));
@@ -181,8 +174,8 @@ fn init(input: Value) -> Value {
 
     log(String::from("=== Multi-handler test actor completed ==="));
 
-    // Return success with unchanged state
-    ok_state(state)
+    // result<_, string>::ok(()) — no state to return.
+    ok_unit()
 }
 
 fn test_store_handler() -> Result<(), String> {
@@ -213,19 +206,12 @@ fn test_store_handler() -> Result<(), String> {
 // Helpers
 // ============================================================================
 
-/// An empty actor state (`none`), used when init receives no prior state.
-fn empty_state() -> Value {
-    Value::Option {
-        inner_type: ValueType::List(alloc::boxed::Box::new(ValueType::U8)),
-        value: None,
-    }
-}
-
-fn ok_state(state: Value) -> Value {
-    let inner = Value::Tuple(vec![state]);
+/// `result<_, string>::ok(())` — no state to return.
+fn ok_unit() -> Value {
+    let unit = Value::Tuple(vec![]);
     Value::Result {
-        ok_type: inner.infer_type(),
+        ok_type: unit.infer_type(),
         err_type: ValueType::String,
-        value: Ok(alloc::boxed::Box::new(inner)),
+        value: Ok(alloc::boxed::Box::new(unit)),
     }
 }

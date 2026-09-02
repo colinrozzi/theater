@@ -103,6 +103,14 @@ symbol — absence *is* the "opaque" signal. `get-state` returns a bare `value`
 (the state serialized); "can't serialize" is expressed by not exporting it, so no
 `option`/`result` wrapper is needed for that case.
 
+**One wiring detail** (learned building this): `has_export` reads the actor's
+embedded `__pack_types` **metadata**, not the raw wasm export table. So a
+`#[derive(State)]` actor must *also* declare `theater:simple/actor.get-state:
+func() -> value` in its `pack_types!` exports block — the derive emits the callable
+export, but the metadata entry is what the runtime discovers. (A derive can't
+inject into the separate `pack_types!` invocation; a future ergonomic could fuse
+the two.) Omitting the declaration makes the actor silently opaque.
+
 ### `#[derive(State)]` — the blessed opt-in (a Theater guest macro)
 
 `#[derive(State)]` is a **Theater** concern, not a packr one — "an actor holds
@@ -131,6 +139,16 @@ theater-guest = "0.1"
 
 *(Flag to pack-dev: ideally guest `GraphValue` would target packr-guest's
 re-export so this extra dep isn't needed.)*
+
+**Second pack-dev flag — `result<_, E>` (unit ok):** an export declared
+`result<_, string>` parses correctly to `ok: None`, but packr's metadata
+round-trip surfaces that empty ok-type to the host's return-type validator as
+`bool`, so validating a `ok(())` return spuriously fails ("expected bool, got
+tuple<0>"). Since the runtime caches function types and validates returns in the
+real spawn path, this would break *every* migrated actor's `init`. Worked around
+host-side: the return validator skips the check when the return is a unit `ok`
+(`Value::Result{ Ok(()) }`) — a unit ok has no payload to type-check anyway. The
+clean upstream fix is for packr to round-trip `ok: None` faithfully.
 
 [`StateCell<T>`]: ../crates/theater-guest/src/lib.rs
 

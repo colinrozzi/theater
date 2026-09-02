@@ -727,8 +727,9 @@ impl TheaterRuntime {
         self.chains.insert(actor_id, chain.clone());
 
         // The caller resolved `init_state` ahead of time (manifest precedence,
-        // defaults, etc. live in the caller). spawn_actor takes it at face
-        // value and stores it as the actor's initial state.
+        // defaults, etc. live in the caller). The runtime no longer stores it:
+        // state lives inside the module, so `init_state` is delivered to the
+        // actor as the *argument* of its `init` export below (see the init-fire).
         let phase_start = Instant::now();
         let from_manifest = manifest.is_some();
         let handler_registry = if let Some(ref manifest) = manifest {
@@ -750,7 +751,6 @@ impl TheaterRuntime {
             elapsed_ms = phase_start.elapsed().as_millis() as u64,
             "spawn phase complete",
         );
-        let initial_state = init_state;
 
         // Start the actor in a detached task. The pack runtime (and the
         // wasmtime Engine inside it) is shared across every spawn —
@@ -779,7 +779,6 @@ impl TheaterRuntime {
                 actor_info_tx,
                 control_rx,
                 actor_control_tx,
-                initial_state,
                 Some(setup_tx),
             )
             .await;
@@ -868,7 +867,10 @@ impl TheaterRuntime {
         if call_init {
             let init_phase_start = Instant::now();
             tokio::spawn(async move {
-                let init_params = Value::Tuple(vec![]);
+                // Deliver the resolved init config (manifest initial_state) as the
+                // argument to the actor's `init` export — the actor builds its
+                // in-module state from it. Nothing is threaded back.
+                let init_params = init_state;
                 let init_fut = actor_handle
                     .call_function("theater:simple/actor.init".to_string(), init_params);
                 tokio::pin!(init_fut);

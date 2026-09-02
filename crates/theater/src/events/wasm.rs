@@ -9,7 +9,6 @@ pub enum WasmEventData {
     },
     WasmResult {
         function_name: String,
-        state: Value,
         response: Value,
     },
     WasmError {
