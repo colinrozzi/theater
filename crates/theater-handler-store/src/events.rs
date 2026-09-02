@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 // Re-export ContentRef from theater since store events depend on it
-pub use theater::store::ContentRef;
+pub use theater_store::ContentRef;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum StoreEventData {

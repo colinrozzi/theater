@@ -3,6 +3,7 @@ members = [
     "crates/theater",
     "crates/theater-cli",
     "crates/theater-chain",
+    "crates/theater-store",
     "crates/theater-guest",
     "crates/theater-guest-macros",
     # Theater-specific handlers (to be migrated to Composite)
@@ -54,6 +55,7 @@ uuid = { version = "1.6", features = ["v4", "serde"] }
 # `cargo publish -p X` verify-builds against a stale dep from the index
 # and fails on APIs added in the unreleased local source.)
 theater-chain = { version = "0.3.11", path = "crates/theater-chain" }
+theater-store = { version = "0.1.0", path = "crates/theater-store" }
 theater = { version = "0.3.28", path = "crates/theater" }
 # Theater-specific handlers
 theater-handler-message-server = { version = "0.3.13", path = "crates/theater-handler-message-server" }

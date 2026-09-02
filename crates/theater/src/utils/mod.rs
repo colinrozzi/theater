@@ -218,15 +218,9 @@ pub fn merge_initial_states(
     }
 }
 
-pub fn get_theater_home() -> String {
-    std::env::var("THEATER_HOME").unwrap_or_else(|_| {
-        format!(
-            "{}/{}",
-            std::env::var("HOME").unwrap_or_default(),
-            ".theater"
-        )
-    })
-}
+/// Re-exported from `theater-store` (which owns it now, for its base path). Kept
+/// here so `theater::utils::get_theater_home` resolves unchanged.
+pub use theater_store::get_theater_home;
 
 #[cfg(test)]
 mod tests {

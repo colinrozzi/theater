@@ -47,7 +47,10 @@ pub mod messages;
 pub mod metrics;
 pub mod replay;
 pub mod shutdown;
-pub mod store;
+/// Content-addressed storage, re-exported from the `theater-store` crate. Kept as
+/// `theater::store` so existing `crate::store::…` / `theater::store::…` paths
+/// resolve unchanged.
+pub use theater_store as store;
 pub mod subscription;
 pub mod theater_runtime;
 pub mod utils;

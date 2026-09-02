@@ -14,6 +14,7 @@ description = "Content storage handler for Theater WebAssembly runtime"
 
 [dependencies]
 theater = { workspace = true }
+theater-store = { workspace = true }
 anyhow.workspace = true
 tracing.workspace = true
 thiserror = "2.0"

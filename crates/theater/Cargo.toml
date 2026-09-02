@@ -22,6 +22,7 @@ tracing.workspace = true
 uuid.workspace = true
 
 theater-chain.workspace = true
+theater-store.workspace = true
 
 # WebAssembly runtime
 wasmtime = { version = "31.0", features = ["component-model", "async"] }
