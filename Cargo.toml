@@ -20,7 +20,6 @@ members = [
     "crates/theater-handler-loop",
     "crates/theater-handler-podman",
     "crates/theater-handler-http-client",
-    "crates/theater-replay-experimenting",
     "crates/theater-tests",
 ]
 exclude = [
