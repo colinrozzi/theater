@@ -4,7 +4,6 @@ use std::sync::{Arc, RwLock};
 use thiserror::Error;
 use tracing::info;
 
-use crate::store::{ContentRef, ContentStore, Label};
 use anyhow::Result;
 
 // Add the template module
@@ -102,62 +101,27 @@ pub async fn resolve_reference_cached(
 }
 
 /// Resolve a reference to a byte array.
-/// A reference can be a file path, a store path, or a URL.
-/// The reference is resolved to a byte array.
+/// A reference can be a file path or a URL.
 ///
-/// A store path is a reference to a file in the store and is prefixed with `store://`
-/// A store path can be either a hash or a path to a label:
-/// - store://<store-id>/hash/<hash>
-/// - store://<store-id>/<label>
-///
-/// A URL is any reference starting with `http://` or `https://`
+/// A URL is any reference starting with `http://` or `https://`.
 ///
 /// Everything else is treated as a file path.
+///
+/// The runtime no longer resolves content-store (`store://`) references. Content
+/// addressing (`ContentRef`) stays in core because the chain is content-addressed,
+/// but the blob **store** is a capability that lives outside the runtime (the
+/// `theater:simple/store` handler). A caller that wants to spawn from a store
+/// reference resolves it to bytes (or a file/URL) itself and hands those to the
+/// runtime — `SpawnActor` already takes `wasm_bytes` directly.
 pub async fn resolve_reference(reference: &str) -> Result<Vec<u8>, ReferenceError> {
     info!("Resolving reference: {}", reference);
 
     if reference.starts_with("store://") {
-        // store path
-        let parts: Vec<&str> = reference.split('/').collect();
-        if parts.len() < 3 {
-            return Err(ReferenceError::ResolveError(format!(
-                "Invalid store path: {}",
-                reference
-            )));
-        }
-        let store_id = parts[2];
-        let store = ContentStore::from_id(store_id);
-
-        if parts.len() >= 5 && parts[3] == "hash" {
-            // store path with hash
-            let hash = parts[4];
-            let content_ref = ContentRef::from_str(hash);
-            info!("Resolving store path with hash: {}", hash);
-            store
-                .get(&content_ref)
-                .await
-                .map_err(|e| ReferenceError::ResolveError(e.to_string()))
-        } else if parts.len() >= 4 {
-            // store path with label
-            let label_string = parts[3];
-            let label = Label::new(label_string.to_string());
-            info!("Resolving store path with label: {}", label);
-            match store.get_content_by_label(&label).await {
-                Ok(result) => match result {
-                    Some(content) => Ok(content),
-                    None => Err(ReferenceError::ResolveError(format!(
-                        "Label not found: {}",
-                        label
-                    ))),
-                },
-                Err(e) => Err(ReferenceError::ResolveError(e.to_string())),
-            }
-        } else {
-            Err(ReferenceError::ResolveError(format!(
-                "Invalid store path format: {}",
-                reference
-            )))
-        }
+        Err(ReferenceError::ResolveError(format!(
+            "store:// references are no longer resolved by the runtime: {}. \
+             Resolve it to bytes (or a file/URL) via the store capability before spawning.",
+            reference
+        )))
     } else if reference.starts_with("http://") || reference.starts_with("https://") {
         // HTTP/HTTPS URL
         info!("Fetching from URL: {}", reference);
