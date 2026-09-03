@@ -371,7 +371,7 @@ impl PartialOrd for MessageServerPermissions {
 /// does NOT require this. An empty `runtime = {}` grants nothing (safe default).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct RuntimePermissions {
-    /// Read-only control: list-actors, get-actor-chain, get-actor-state/manifest/metrics,
+    /// Read-only control: list-actors, get-actor-chain, get-actor-state/manifest,
     /// subscribe-to-actor.
     #[serde(default)]
     pub inspect: bool,

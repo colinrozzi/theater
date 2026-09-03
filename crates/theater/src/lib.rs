@@ -45,7 +45,6 @@ pub mod pack_bridge;
 pub mod id;
 pub mod logging;
 pub mod messages;
-pub mod metrics;
 pub mod replay;
 pub mod shutdown;
 /// Content-addressed storage, re-exported from the `theater-store` crate. Kept as
@@ -69,9 +68,6 @@ pub use config::actor_manifest::{
 };
 pub use errors::{SpawnError, TheaterRuntimeError};
 pub use id::TheaterId;
-pub use metrics::{
-    ActorMetrics, MetricsCollector, OperationMetrics, OperationStats, ResourceMetrics,
-};
 pub use replay::{HostFunctionCall, ReplayHandler, ReplayState};
 pub use shutdown::{ShutdownController, ShutdownReceiver, ShutdownSignal, ShutdownType};
 pub use store::{ContentRef, ContentStore, Label};

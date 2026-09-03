@@ -81,7 +81,7 @@ const SUPERVISOR_PACT: &str = include_str!("../supervisor.pact");
 /// that view; a target outside it is rejected with `out-of-view`. Ops:
 /// - spawn / spawn-and-wait — create a child of the caller (setup + init)
 /// - list-actors -> list<actor-info> — every actor in view
-/// - get-actor-status / -state / -manifest / -metrics (id)
+/// - get-actor-status / -state / -manifest (id)
 /// - stop-actor (graceful) / kill-actor (force) (id)
 /// - subscribe-to-actor / unsubscribe-from-actor (id) — chain events to the
 ///   caller's `handle-actor-event` export
@@ -1127,33 +1127,6 @@ impl Handler for SupervisorHandler {
                         match rrx.await {
                             Ok(Ok(m)) => serde_json::to_string(&m).map(Value::String).map_err(|e| {
                                 SupervisorError::Internal(format!("serialize manifest: {}", e)).into()
-                            }),
-                            Ok(Err(e)) => Err(Value::from(SupervisorError::Internal(e.to_string()))),
-                            Err(_) => Err(Value::from(SupervisorError::RuntimeUnavailable)),
-                        }
-                    }
-                }
-            })?
-            // get-actor-metrics: func(id: string) -> result<string, supervisor-error>
-            .func_async_result("get-actor-metrics", {
-                let permissions = permissions.clone();
-                let children = children.clone();
-                move |ctx: AsyncCtx<ActorStore>, id: String| {
-                    let permissions = permissions.clone();
-                    let children = children.clone();
-                    async move {
-                        let target = parse_actor_id(&id)?;
-                        let tx = ctx.data().theater_tx.clone();
-                        authorize(&tx, &permissions, target, false, &children).await?;
-                        let (rtx, rrx) = oneshot::channel();
-                        tx.send(TheaterCommand::GetActorMetrics {
-                            actor_id: target,
-                            response_tx: rtx,
-                        })
-                        .map_err(|_| SupervisorError::RuntimeUnavailable)?;
-                        match rrx.await {
-                            Ok(Ok(m)) => serde_json::to_string(&m).map(Value::String).map_err(|e| {
-                                SupervisorError::Internal(format!("serialize metrics: {}", e)).into()
                             }),
                             Ok(Err(e)) => Err(Value::from(SupervisorError::Internal(e.to_string()))),
                             Err(_) => Err(Value::from(SupervisorError::RuntimeUnavailable)),
