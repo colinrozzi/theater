@@ -57,9 +57,7 @@ fn create_test_manifest(name: &str, wasm_path: &str) -> ManifestConfig {
         initial_state: None,
         static_package: false,
         permission_policy: HandlerPermissionPolicy::default(),
-        handlers: vec![HandlerConfig::SelfHandler {
-            config: SelfHostConfig {},
-        }],
+        handlers: vec![HandlerConfig::unit("self")],
     }
 }
 
@@ -403,12 +401,8 @@ async fn test_actor_shutdown_with_supervisor_handler() {
         static_package: false,
         permission_policy: HandlerPermissionPolicy::default(),
         handlers: vec![
-            HandlerConfig::SelfHandler {
-                config: SelfHostConfig {},
-            },
-            HandlerConfig::Supervisor {
-                config: SupervisorHostConfig {},
-            },
+            HandlerConfig::unit("self"),
+            HandlerConfig::unit("supervisor"),
         ],
     };
 

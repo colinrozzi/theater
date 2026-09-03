@@ -199,12 +199,7 @@ async fn replay_reconstructs_in_module_state_full_runtime() {
     let record_id = setup_actor(
         &theater_tx,
         "state-test-record",
-        manifest(
-            "state-test-record",
-            vec![HandlerConfig::SelfHandler {
-                config: SelfHostConfig {},
-            }],
-        ),
+        manifest("state-test-record", vec![HandlerConfig::unit("self")]),
         rec_ev_tx,
     )
     .await;
@@ -270,14 +265,13 @@ async fn replay_reconstructs_in_module_state_full_runtime() {
         manifest(
             "state-test-replay",
             vec![
-                HandlerConfig::Replay {
-                    config: ReplayHandlerConfig {
+                HandlerConfig::new(
+                    "replay",
+                    ReplayHandlerConfig {
                         chain: chain_path.clone(),
                     },
-                },
-                HandlerConfig::SelfHandler {
-                    config: SelfHostConfig {},
-                },
+                ),
+                HandlerConfig::unit("self"),
             ],
         ),
         rep_ev_tx,

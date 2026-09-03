@@ -53,8 +53,11 @@ impl PodmanHandler {
 impl Handler for PodmanHandler {
     fn create_instance(&self, config: Option<&HandlerConfig>) -> Box<dyn Handler> {
         let cfg = match config {
-            Some(HandlerConfig::Podman { config }) => config.clone(),
-            _ => self.config.clone(),
+            Some(c) => c.parse::<PodmanHandlerConfig>().unwrap_or_else(|e| {
+                tracing::warn!("invalid podman handler config: {}; using default", e);
+                self.config.clone()
+            }),
+            None => self.config.clone(),
         };
         Box::new(PodmanHandler::new(cfg))
     }

@@ -150,15 +150,9 @@ async fn multi_handler_actor_instantiates_against_reshaped_supervisor() {
         "multi-handler-test",
         &path,
         vec![
-            HandlerConfig::SelfHandler {
-                config: SelfHostConfig {},
-            },
-            HandlerConfig::Store {
-                config: StoreHandlerConfig::default(),
-            },
-            HandlerConfig::Supervisor {
-                config: SupervisorHostConfig {},
-            },
+            HandlerConfig::unit("self"),
+            HandlerConfig::new("store", StoreHandlerConfig::default()),
+            HandlerConfig::unit("supervisor"),
         ],
     );
 
@@ -193,15 +187,9 @@ async fn supervisor_replay_actor_instantiates_against_reshaped_supervisor() {
         "supervisor-replay-test",
         &path,
         vec![
-            HandlerConfig::SelfHandler {
-                config: SelfHostConfig {},
-            },
-            HandlerConfig::Supervisor {
-                config: SupervisorHostConfig {},
-            },
-            HandlerConfig::MessageServer {
-                config: MessageServerConfig {},
-            },
+            HandlerConfig::unit("self"),
+            HandlerConfig::unit("supervisor"),
+            HandlerConfig::unit("message-server"),
         ],
     );
 
@@ -229,9 +217,7 @@ async fn spawn_with_parent(
         initial_state: None,
         static_package: false,
         permission_policy: HandlerPermissionPolicy::default(),
-        handlers: vec![HandlerConfig::SelfHandler {
-            config: SelfHostConfig {},
-        }],
+        handlers: vec![HandlerConfig::unit("self")],
     };
     let (tx, rx) = oneshot::channel();
     theater_tx
@@ -349,9 +335,7 @@ async fn spawn_with_init(
         initial_state: None,
         static_package: false,
         permission_policy: HandlerPermissionPolicy::default(),
-        handlers: vec![HandlerConfig::SelfHandler {
-            config: SelfHostConfig {},
-        }],
+        handlers: vec![HandlerConfig::unit("self")],
     };
     let (tx, rx) = oneshot::channel();
     theater_tx

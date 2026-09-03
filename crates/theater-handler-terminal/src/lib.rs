@@ -185,8 +185,11 @@ impl TerminalHandler {
 impl Handler for TerminalHandler {
     fn create_instance(&self, config: Option<&HandlerConfig>) -> Box<dyn Handler> {
         let terminal_config = match config {
-            Some(HandlerConfig::Terminal { config }) => config.clone(),
-            _ => self.config.clone(),
+            Some(c) => c.parse::<TerminalHandlerConfig>().unwrap_or_else(|e| {
+                tracing::warn!("invalid terminal handler config: {}; using default", e);
+                self.config.clone()
+            }),
+            None => self.config.clone(),
         };
         Box::new(TerminalHandler::new(terminal_config))
     }

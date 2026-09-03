@@ -82,8 +82,11 @@ impl TimerHandler {
 impl Handler for TimerHandler {
     fn create_instance(&self, config: Option<&HandlerConfig>) -> Box<dyn Handler> {
         let timer_config = match config {
-            Some(HandlerConfig::Timer { config }) => config.clone(),
-            _ => self.config.clone(),
+            Some(c) => c.parse::<TimerHandlerConfig>().unwrap_or_else(|e| {
+                tracing::warn!("invalid timer handler config: {}; using default", e);
+                self.config.clone()
+            }),
+            None => self.config.clone(),
         };
         Box::new(TimerHandler::new(timer_config))
     }

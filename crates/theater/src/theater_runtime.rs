@@ -8,7 +8,6 @@ use crate::actor::handle::ActorHandle;
 use crate::actor::runtime::{ActorRuntime, ActorRuntimeError};
 use crate::actor::types::{ActorControl, ActorError, ActorInfo, ActorOperation};
 use crate::chain::ChainEvent;
-use crate::config::actor_manifest::HandlerConfig;
 use crate::handler::HandlerRegistry;
 use crate::id::TheaterId;
 use crate::messages::{ActorMessage, ActorStatus, ActorTreeRow, TheaterCommand};
@@ -1126,7 +1125,14 @@ impl TheaterRuntime {
 
         // Special handling for replay handler - needs to load chain file
         for handler_config in &manifest.handlers {
-            if let HandlerConfig::Replay { config } = handler_config {
+            if handler_config.type_name() == "replay" {
+                let config: crate::config::actor_manifest::ReplayHandlerConfig =
+                    handler_config.parse().map_err(|e| {
+                        TheaterRuntimeError::ActorInitializationError(format!(
+                            "Invalid replay handler config: {}",
+                            e
+                        ))
+                    })?;
                 info!(
                     "Found replay handler config, loading chain from: {:?}",
                     config.chain
