@@ -7,31 +7,14 @@ use tracing::{debug, error};
 
 use crate::{error::CliError, CommandContext};
 use theater::chain::ChainEvent;
-use theater::config::actor_manifest::{
-    RuntimeHostConfig, SelfHostConfig, StoreHandlerConfig, SupervisorHostConfig, TcpHandlerConfig,
-    TerminalHandlerConfig, TimerHandlerConfig,
-};
 use theater::events::lifecycle::{ActorLifecycleEvent, TerminationCause};
 use theater::events::{decode_chain_event_payload, ChainEventPayload};
-use theater::handler::HandlerRegistry;
 use theater::messages::{default_init_state, TheaterCommand};
 use theater::pack_bridge::Value;
 use theater::theater_runtime::TheaterRuntime;
 use theater::utils::{resolve_reference, resolve_reference_cached, ResourceCache};
 use theater::ManifestConfig;
 use theater::TheaterId;
-use theater_handler_http_client::HttpClientHandler;
-use theater_handler_loop::LoopHandler;
-use theater_handler_message_server::{MessageRouter, MessageServerHandler};
-use theater_handler_podman::PodmanHandler;
-use theater_handler_rpc::RpcHandler;
-use theater_handler_runtime::RuntimeHandler;
-use theater_handler_self::SelfHandler;
-use theater_handler_store::StoreHandler;
-use theater_handler_supervisor::SupervisorHandler;
-use theater_handler_tcp::TcpHandler;
-use theater_handler_terminal::TerminalHandler;
-use theater_handler_timer::TimerHandler;
 
 /// Output format for chain events
 #[derive(Debug, Clone, Copy, ValueEnum, Default)]
@@ -110,84 +93,6 @@ fn format_event_json(event: &ChainEvent, actor_id: &TheaterId) -> String {
     serde_json::to_string(&json).unwrap_or_else(|_| "{}".to_string())
 }
 
-/// Create a handler registry with all Theater handlers
-fn create_handler_registry(
-    theater_tx: mpsc::UnboundedSender<TheaterCommand>,
-    show_actor_logs: bool,
-    resource_cache: Arc<ResourceCache>,
-) -> Result<HandlerRegistry, CliError> {
-    let mut registry = HandlerRegistry::new();
-
-    // Self handler - the per-actor handle: log, self, shutdown
-    let self_config = SelfHostConfig {};
-    registry.register(
-        SelfHandler::new(self_config, theater_tx.clone(), None).with_show_logs(show_actor_logs),
-    );
-
-    // Lifecycle handler - actor-facing link / monitor over the subscription
-    // substrate (fate-sharing + watching between actors).
-    registry.register(theater_handler_lifecycle::LifecycleHandler::new(
-        theater_tx.clone(),
-    ));
-
-    // Store handler - provides content storage
-    let store_config = StoreHandlerConfig::default();
-    registry.register(StoreHandler::new(store_config, None));
-
-    // Supervisor handler - allows spawning/managing child actors.
-    // Wired with the CLI process's resource cache so a child whose
-    // manifest sets `static_package = true` hits the cache on repeat
-    // spawns rather than re-fetching its wasm.
-    let supervisor_config = SupervisorHostConfig {};
-    registry.register(
-        SupervisorHandler::new(supervisor_config, None).with_resource_cache(resource_cache),
-    );
-
-    // Runtime (system) handler - shutdown-runtime + subscribe-to-spawns.
-    // Capability-gated, default-deny: an actor needs an explicit
-    // [permission_policy.runtime] grant to use it.
-    registry.register(RuntimeHandler::new(RuntimeHostConfig {}, None));
-
-    // Message server handler - inter-actor messaging
-    let message_router = MessageRouter::new();
-    registry.register(MessageServerHandler::new(None, message_router.clone()));
-
-    // RPC handler - direct actor-to-actor function calls
-    registry.register(RpcHandler::new(theater_tx.clone()));
-
-    // TCP handler - TCP server/client functionality
-    let tcp_config = TcpHandlerConfig {
-        listen: None,
-        max_connections: None,
-        ..Default::default()
-    };
-    registry.register(TcpHandler::new(tcp_config));
-
-    // Terminal handler - stdin/stdout/stderr for interactive CLI apps
-    let terminal_config = TerminalHandlerConfig::default();
-    registry.register(TerminalHandler::new(terminal_config));
-
-    // Timer handler - periodic tick callbacks for game loops, polling, etc.
-    let timer_config = TimerHandlerConfig::default();
-    registry.register(TimerHandler::new(timer_config));
-
-    // Loop handler - cooperative looping with yield points
-    registry.register(LoopHandler::new());
-
-    // Podman handler - container management via the podman CLI
-    let podman_config = theater::config::actor_manifest::PodmanHandlerConfig::default();
-    registry.register(PodmanHandler::new(podman_config));
-
-    // HTTP client handler - outbound HTTP(S) requests, gated per-manifest by
-    // allowed_hosts. The registered instance holds an empty allowlist; the
-    // real allowed_hosts are pulled from each actor's manifest via
-    // create_instance(HandlerConfig::HttpClient { .. }).
-    let http_client_config = theater::config::actor_manifest::HttpClientHandlerConfig::default();
-    registry.register(HttpClientHandler::new(http_client_config));
-
-    Ok(registry)
-}
-
 /// `theater spawn manifest.toml` — load the actor, set up its task loops,
 /// AND call its `theater:simple/actor.init` export before returning control
 /// to the caller. The runtime auto-inits (PR A in ticket #27); the CLI
@@ -229,13 +134,17 @@ async fn run(args: &SpawnArgs, ctx: &CommandContext, call_init: bool) -> Result<
     let (theater_tx, theater_rx) = mpsc::unbounded_channel::<TheaterCommand>();
     // One URL→bytes cache shared across every entry point in this CLI
     // invocation: the top-level wasm fetch below and the supervisor host
-    // fn (via `create_handler_registry`). Lasts until the CLI process exits.
+    // fn. Lasts until the CLI process exits.
     let resource_cache = Arc::new(ResourceCache::new());
-    let handler_registry = create_handler_registry(
+    // The standard handler set lives in the composition root, `theater-stage`,
+    // so the CLI, the tests, and any embedder assemble the same node.
+    let handler_registry = theater_stage::standard_handlers(
         theater_tx.clone(),
-        !args.no_actor_logs,
-        resource_cache.clone(),
-    )?;
+        &theater_stage::StandardHandlers {
+            show_actor_logs: !args.no_actor_logs,
+            resource_cache: resource_cache.clone(),
+        },
+    );
 
     let mut runtime = TheaterRuntime::new(
         theater_tx.clone(),

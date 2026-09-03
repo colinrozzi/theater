@@ -2951,19 +2951,7 @@ dependencies = [
  "serde_yaml",
  "tempfile",
  "theater",
- "theater-handler-http-client",
- "theater-handler-lifecycle",
- "theater-handler-loop",
- "theater-handler-message-server",
- "theater-handler-podman",
- "theater-handler-rpc",
- "theater-handler-runtime",
- "theater-handler-self",
- "theater-handler-store",
- "theater-handler-supervisor",
- "theater-handler-tcp",
- "theater-handler-terminal",
- "theater-handler-timer",
+ "theater-stage",
  "thiserror 1.0.69",
  "tokio",
  "tokio-util",
@@ -3163,6 +3151,27 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "theater-stage"
+version = "0.1.0"
+dependencies = [
+ "theater",
+ "theater-handler-http-client",
+ "theater-handler-lifecycle",
+ "theater-handler-loop",
+ "theater-handler-message-server",
+ "theater-handler-podman",
+ "theater-handler-rpc",
+ "theater-handler-runtime",
+ "theater-handler-self",
+ "theater-handler-store",
+ "theater-handler-supervisor",
+ "theater-handler-tcp",
+ "theater-handler-terminal",
+ "theater-handler-timer",
+ "tokio",
 ]
 
 [[package]]
