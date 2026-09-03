@@ -13,10 +13,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use theater::config::actor_manifest::{
-    HandlerConfig, ManifestConfig, MessageServerConfig, SelfHostConfig, StoreHandlerConfig,
-    SupervisorHostConfig,
-};
+use theater::config::actor_manifest::{HandlerConfig, ManifestConfig};
 use theater::config::inheritance::{HandlerInheritance, HandlerPermissionPolicy};
 use theater::handler::HandlerRegistry;
 use theater::messages::{default_init_state, TheaterCommand};
@@ -24,9 +21,9 @@ use theater::pack_bridge::{Value, ValueType};
 use theater::utils::ResourceCache;
 use theater_handler_lifecycle::LifecycleHandler;
 use theater_handler_message_server::{MessageRouter, MessageServerHandler};
-use theater_handler_self::SelfHandler;
-use theater_handler_store::StoreHandler;
-use theater_handler_supervisor::SupervisorHandler;
+use theater_handler_self::{SelfHandler, SelfHostConfig};
+use theater_handler_store::{StoreHandler, StoreHandlerConfig};
+use theater_handler_supervisor::{SupervisorHandler, SupervisorHostConfig};
 use tokio::sync::{mpsc, oneshot};
 
 const SPAWN_TIMEOUT: Duration = Duration::from_secs(10);

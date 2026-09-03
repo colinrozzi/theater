@@ -3,13 +3,13 @@
 //! This module provides configuration loading and TLS context creation from
 //! manifest configuration.
 
+use crate::{ClientTlsConfig, ServerTlsConfig, TcpHandlerConfig};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName};
 use rustls::{ClientConfig, RootCertStore, ServerConfig};
 use std::fs::File;
 use std::io::BufReader;
 use std::path::Path;
 use std::sync::Arc;
-use theater::config::actor_manifest::TcpHandlerConfig;
 use tokio_rustls::{TlsAcceptor, TlsConnector};
 use tracing::{debug, info, warn};
 
@@ -122,9 +122,7 @@ impl TlsContext {
 }
 
 /// Build a TLS connector for client connections.
-fn build_client_connector(
-    config: &theater::config::actor_manifest::ClientTlsConfig,
-) -> Result<TlsConnector, TlsError> {
+fn build_client_connector(config: &ClientTlsConfig) -> Result<TlsConnector, TlsError> {
     let mut root_store = RootCertStore::empty();
 
     // Add custom CA certificate if provided
@@ -162,9 +160,7 @@ fn build_client_connector(
 }
 
 /// Build a TLS acceptor for server connections.
-fn build_server_acceptor(
-    config: &theater::config::actor_manifest::ServerTlsConfig,
-) -> Result<TlsAcceptor, TlsError> {
+fn build_server_acceptor(config: &ServerTlsConfig) -> Result<TlsAcceptor, TlsError> {
     info!("Loading server certificate from: {:?}", config.cert);
     let certs = load_certificates(&config.cert)?;
     info!("Loaded {} server certificates", certs.len());
@@ -296,7 +292,6 @@ impl rustls::client::danger::ServerCertVerifier for NoVerifier {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use theater::config::actor_manifest::TcpHandlerConfig;
 
     #[test]
     fn test_tls_context_no_config() {
@@ -308,7 +303,7 @@ mod tests {
     #[test]
     fn test_tls_context_disabled() {
         let config = TcpHandlerConfig {
-            client_tls: Some(theater::config::actor_manifest::ClientTlsConfig {
+            client_tls: Some(ClientTlsConfig {
                 enabled: false,
                 ca_cert: None,
                 skip_verify: false,

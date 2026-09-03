@@ -11,10 +11,16 @@
 //!
 //! Capability-gated by RuntimePermissions { inspect, mutate }.
 
+use serde::{Deserialize, Serialize};
 use theater::actor::handle::ActorHandle;
 use theater::actor::store::ActorStore;
-use theater::config::actor_manifest::RuntimeHostConfig;
 use theater::config::permissions::RuntimePermissions;
+
+/// Configuration for the runtime CONTROL handler (theater:simple/runtime).
+/// Runtime-wide control plane (inspect/drive any actor); capability-gated by
+/// RuntimePermissions { inspect, mutate }. No fields today.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RuntimeHostConfig {}
 use theater::handler::{Handler, HandlerContext, SharedActorInstance};
 use theater::messages::TheaterCommand;
 use theater::shutdown::ShutdownReceiver;

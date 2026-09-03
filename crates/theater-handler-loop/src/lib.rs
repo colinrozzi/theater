@@ -30,8 +30,14 @@ use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
+use serde::{Deserialize, Serialize};
 use tokio::sync::Notify;
 use tracing::{debug, error, info};
+
+/// Configuration for the Loop handler
+/// This handler provides cooperative looping with yield points
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct LoopHandlerConfig {}
 
 use theater::actor::handle::ActorHandle;
 use theater::actor::store::ActorStore;

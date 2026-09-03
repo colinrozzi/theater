@@ -18,10 +18,16 @@
 //! }
 //! ```
 
+use serde::{Deserialize, Serialize};
 use std::future::Future;
 use std::pin::Pin;
 use std::time::Duration;
 use tracing::{debug, info};
+
+/// Configuration for the RPC handler
+/// This handler enables direct actor-to-actor function calls
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct RpcHandlerConfig {}
 
 use theater::actor::handle::ActorHandle;
 use theater::actor::store::ActorStore;

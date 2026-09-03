@@ -4,7 +4,7 @@ use theater::events::{ChainEventData, ChainEventPayload};
 use theater::id::TheaterId;
 use theater::messages::{ActorMessage, TheaterCommand};
 use theater::ActorOperation;
-use theater::{HandlerConfig, ManifestConfig, MessageServerConfig};
+use theater::{HandlerConfig, ManifestConfig};
 use theater::{ShutdownController, ShutdownReceiver};
 use tokio::sync::mpsc;
 

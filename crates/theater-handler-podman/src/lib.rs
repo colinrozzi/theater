@@ -11,14 +11,21 @@ use std::future::Future;
 use std::pin::Pin;
 use std::process::Stdio;
 
+use serde::{Deserialize, Serialize};
 use tokio::process::Command;
 use tracing::{debug, info};
 
 use theater::actor::handle::ActorHandle;
 use theater::actor::store::ActorStore;
-use theater::config::actor_manifest::{HandlerConfig, PodmanHandlerConfig};
+use theater::config::actor_manifest::HandlerConfig;
 use theater::handler::{Handler, HandlerContext, SharedActorInstance};
 use theater::shutdown::ShutdownReceiver;
+
+/// Configuration for the Podman handler.
+/// This handler shells out to the `podman` CLI to manage containers.
+/// No daemon required; the host needs only podman installed.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct PodmanHandlerConfig {}
 
 use theater::pack_bridge::{
     parse_pact, AsyncCtx, HostLinkerBuilder, InterfaceImpl, LinkerError, TypeHash, Value, ValueType,

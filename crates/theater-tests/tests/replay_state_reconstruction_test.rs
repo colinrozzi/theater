@@ -19,16 +19,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use theater::chain::ChainEvent;
-use theater::config::actor_manifest::{
-    HandlerConfig, ManifestConfig, ReplayHandlerConfig, SelfHostConfig,
-};
+use theater::config::actor_manifest::{HandlerConfig, ManifestConfig, ReplayHandlerConfig};
 use theater::config::inheritance::HandlerPermissionPolicy;
 use theater::handler::HandlerRegistry;
 use theater::id::TheaterId;
 use theater::messages::{default_init_state, TheaterCommand};
 use theater::pack_bridge::Value;
 use theater::utils::ResourceCache;
-use theater_handler_self::SelfHandler;
+use theater_handler_self::{SelfHandler, SelfHostConfig};
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::timeout;
 
