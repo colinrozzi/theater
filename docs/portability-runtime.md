@@ -93,49 +93,61 @@ mechanical swap, and channels stop being a driver concern. The **3 `watch`** (th
 a tiny portable watch, `async-broadcast`, or restructure the phase signal onto an
 mpsc/observable. Small, contained.
 
-## The crux: where `MaybeSend` is irreducible — and the fork that removes it
+## `MaybeSend` doesn't belong in core — the `Handler` trait does the confusing
 
-`MaybeSend` (a conditional `Send` bound) is a *smell*, and the audit says where it
-does and doesn't belong.
+`MaybeSend` (a conditional `Send` bound) looks unavoidable only if you assume **one
+`Handler` trait, living in core, that must be `Send` for native work-stealing and
+`!Send` for a browser handler simultaneously.** That assumption is false.
 
-- The executor, the spawns, channels, and clock **do not** force it — they're
-  driver-owned or portable.
-- It survives at **exactly one point**: the **`dyn Handler` boxed future**. The open
-  handler registry (which we just built) needs `Box<dyn Handler>`; a boxed
-  trait-object future must declare its `Send`-ness *at the trait*, and that differs —
-  native work-stealing needs `Send`, a browser handler holding JS handles can't be
-  `Send`. That one bound is the irreducible tension of {open registry × work-stealing
-  × browser}.
+**Handlers are per-environment.** The browser runs fetch/IndexedDB/WebRTC handlers;
+native runs TCP/filesystem/podman; embedded runs GPIO/I2C. These aren't one handler
+ported three ways — they're different code. So there is no shared cross-environment
+`Handler` trait to protect, and no reason it lives in core.
 
-**But there's an escape, and it's the same insight the note parked as "browser async
-host I/O."** If handlers stop being *self-driven async loops* and become
-**synchronous step functions that emit effects** — message-pass I/O: a handler
-returns "do this I/O," the driver performs it, the result arrives as a later
-*operation* — then:
+So: **push the `Handler` contract into the drivers.**
 
-- Spawn site #5 (the handler loop) **disappears** — handlers don't run loops.
-- `Handler` has no `run`/`setup` future → **no boxed future → no `MaybeSend`, anywhere.**
-- Browser async I/O is **free**: effects are performed by the driver and delivered as
-  operations; no JSPI, no Asyncify. The thing wasmtime needs its heaviest machinery
-  for, the browser gets for nothing.
+- `theater-driver-native` defines *its* handler contract — `Send`, independent async
+  loops, work-stealing. The native handler crates implement that.
+- `theater-driver-browser` defines *its* — Worker-spawned, `!Send`, its own loop
+  model. Browser handlers implement that.
+- `theater-core` never sees `dyn Handler`, never declares `Send`, and **keeps
+  handlers as independent async loops** — the loop-ness and the `Send`-ness are the
+  *driver's* to decide, and each driver resolves it naturally. **No `MaybeSend`
+  anywhere, and the loop model we like is preserved.**
 
-This is the mesh's sans-io model applied to handlers — and it's the "in-module-state
-moment": a portability constraint revealing a cleaner model that's better *everywhere*,
-not just in the browser.
+### Two async things, only one forced
 
-### The fork (this is the real decision)
+The earlier draft conflated two things the audit now separates:
 
-- **Path A — keep handlers as async loops.** Least disruptive to the 12 handler
-  crates. Cost: one cfg'd `Send` bound survives on the `Handler` future, and the
-  browser needs JSPI/Asyncify for handler async I/O.
-- **Path B — handlers = sync step + effects (message-pass I/O).** Rewrites the handler
-  model (the 12 crates move to the effect shape). Payoff: fully sans-executor core,
-  **no `MaybeSend`**, browser async I/O for free, and a handler contract that's more
-  actor-native. Bigger, but it's the version where the smell doesn't exist rather than
-  gets confined.
+- **(i) Handler *run loops*** (tcp-accept, message-pull — inject events *into* an
+  actor). These go **driver-side**, stay loops, per-environment. Solved by the above.
+- **(ii) Async host-function *calls*** — the guest, mid-execution, calls a host fn
+  (`store.get`, message-server `request`) that does real I/O before returning. This
+  one is **core-visible no matter what**, because the host fn re-enters the
+  core-owned wasm instance to size its return (`__pack_alloc`). This — not the loops —
+  is the only genuinely-forced decision.
 
-My lean: **Path B**, staged — but it's genuinely a bigger commitment, and it's the
-one call in here that should be made deliberately, not defaulted.
+And (ii) is **surgical, not a handler rewrite.** Most host functions are synchronous
+(`log`, the vast majority) and don't care. Only a handful do real async I/O. So the
+one remaining fork is, *for just those*:
+
+- **`await` them** — the operation loop awaits the async host fn. Simple on native;
+  needs JSPI/Asyncify on the browser (a JS import can't block on a Promise).
+- **fire-and-return** — the host fn kicks off the I/O and returns immediately; the
+  result arrives as a later *operation*. No mid-execution await → no `Send` pressure,
+  no JSPI, and it's actor-native.
+
+That fork is the subject of the next section (async host calls). Everything else —
+Clock removal, the spawn seam, `futures::channel`, the crate split — is unaffected by
+it and keeps native byte-identical.
+
+### Core handlers vs driver handlers
+
+A few current "handlers" aren't environment I/O at all — `message-server` (inter-actor
+comms), `supervisor`, `lifecycle`, `self` are **actor-model** concerns. Those likely
+belong in **core**; only the genuine I/O handlers (tcp/filesystem/http/podman) are the
+per-environment/driver set. The split is "core handlers vs driver handlers," which
+also draws the line between where the actor model ends and the environment begins.
 
 ## Brick sequence (each independently green, native unchanged until the split)
 
@@ -149,15 +161,20 @@ one call in here that should be made deliberately, not defaulted.
    native impl = `tokio::spawn`. Behavior byte-identical on native. *This seam is the
    core/driver boundary.*
 5. **Channel swap** to `futures::channel` (+ the watch gap).
-6. **Crate split:** extract `theater-core` + `theater-driver-native`. Now the boundary
-   is a crate boundary; a new driver is a new crate.
-7. **The fork decision (A/B)** — gates the handler model.
+6. **Crate split:** extract `theater-core` + `theater-driver-native`, moving the
+   `Handler` contract + the I/O handlers driver-side while `message-server`/
+   `supervisor`/`lifecycle`/`self` stay core. A new driver is a new crate.
+7. **The async-host-call decision** — `await` vs fire-and-return (next section);
+   gates the browser driver, not the native path.
 8. **`theater-driver-browser`** — Worker-per-actor + `wasm-bindgen-futures`; the engine
    axis (`packr` → JS `WebAssembly`) is pack-dev's parallel track.
 
 ## Open questions
 
-- **The A/B fork** (handler model) — the deliberate call.
+- **Async host calls** — `await` vs fire-and-return-as-operation, for the handful of
+  host fns that do real I/O. The one forced fork. *(Being dug into next.)*
+- **Core-handler vs driver-handler line** — confirm `message-server`/`supervisor`/
+  `lifecycle`/`self` are core; tcp/filesystem/http/podman are driver.
 - **Chain `timestamp`** load-bearingness (believed informational; confirm).
 - **The `watch` gap** (phase manager) — portable watch vs restructure.
 - **Engine axis** (`packr` ← wasmtime → wasmi/JS) — pack-dev's crate, parallel and
