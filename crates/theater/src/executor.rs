@@ -12,7 +12,6 @@
 
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::Arc;
 use std::task::{Context, Poll};
 
 /// A boxed, `Send` future the core hands to a driver to run.
@@ -61,12 +60,16 @@ impl Future for TaskHandle {
 }
 
 /// The spawn capability a driver gives the core: run a long-lived actor loop.
-pub trait Spawn: Send + Sync + 'static {
+///
+/// The runtime is **generic over its `Spawn`** (`TheaterRuntime<E: Spawn>`), not
+/// `dyn`: which substrate a node runs on is a *compile-time* property of the build
+/// (a native binary vs a browser wasm binary — never swapped at runtime), so a type
+/// parameter is the honest model and makes the runtime's defining axis visible in
+/// its type. `Clone` because the runtime hands the executor to each spawned task; a
+/// driver's executor is a cheap handle (ZST here; `Rc`/`Arc` elsewhere).
+pub trait Spawn: Clone + Send + Sync + 'static {
     fn spawn(&self, task: BoxedTask) -> TaskHandle;
 }
-
-/// A shared spawn handle threaded through the runtime.
-pub type Executor = Arc<dyn Spawn>;
 
 /// The native work-stealing driver: `tokio::spawn`. This is `theater-driver-native`
 /// in miniature — it will move to its own crate at the split.
@@ -79,9 +82,4 @@ impl Spawn for TokioSpawn {
             inner: tokio::spawn(task),
         }
     }
-}
-
-/// The default native executor.
-pub fn native_executor() -> Executor {
-    Arc::new(TokioSpawn)
 }

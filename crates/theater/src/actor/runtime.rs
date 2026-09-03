@@ -184,7 +184,7 @@ impl ActorPhaseManager {
 
 impl ActorRuntime {
     #[allow(clippy::too_many_arguments)]
-    pub async fn build_actor_resources(
+    pub async fn build_actor_resources<E: crate::executor::Spawn>(
         id: TheaterId,
         name: String,
         wasm_bytes: Vec<u8>,
@@ -197,7 +197,7 @@ impl ActorRuntime {
         control_tx: Sender<ActorControl>,
         actor_phase_manager: ActorPhaseManager,
         actor_instance_wrapper: Arc<RwLock<Option<PackInstance>>>,
-        executor: crate::executor::Executor,
+        executor: E,
     ) -> Result<(ShutdownController, Vec<crate::executor::TaskHandle>), ActorRuntimeError> {
         // ---------------- Checkpoint Setup Initial ----------------
 
@@ -605,7 +605,7 @@ impl ActorRuntime {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub async fn start(
+    pub async fn start<E: crate::executor::Spawn>(
         id: TheaterId,
         name: String,
         wasm_bytes: Vec<u8>,
@@ -619,7 +619,7 @@ impl ActorRuntime {
         info_tx: Sender<ActorInfo>,
         control_rx: Receiver<ActorControl>,
         control_tx: Sender<ActorControl>,
-        executor: crate::executor::Executor,
+        executor: E,
         setup_result_tx: Option<tokio::sync::oneshot::Sender<Result<(), ActorRuntimeError>>>,
     ) {
         info!("Actor runtime starting communication loops");

@@ -95,11 +95,12 @@ async fn main() -> Result<()> {
     info!("Creating Theater runtime...");
 
     // Create the Theater runtime
-    let mut runtime: TheaterRuntime = TheaterRuntime::new(
+    let mut runtime = TheaterRuntime::new(
         theater_tx.clone(),
         theater_rx,
         handler_registry,
         Arc::new(ResourceCache::new()),
+        theater::executor::TokioSpawn,
     )
     .await?;
 
