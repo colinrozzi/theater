@@ -28,7 +28,6 @@ use tokio::sync::mpsc::Sender;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::RwLock;
 use tokio::sync::{mpsc, oneshot};
-use tokio::task::JoinHandle;
 use tracing::{debug, error, info, warn};
 
 /// How long `actor.init` may run before the runtime starts emitting periodic
@@ -76,6 +75,7 @@ const INIT_WATCHDOG_WARN_INTERVAL: Duration = Duration::from_secs(30);
 ///         theater_rx,
 ///         HandlerRegistry::new(),
 ///         Arc::new(ResourceCache::new()),
+///         theater::executor::TokioSpawn,
 ///     ).await?;
 ///
 ///     // Start a background task to run the runtime
@@ -107,7 +107,7 @@ const INIT_WATCHDOG_WARN_INTERVAL: Duration = Duration::from_secs(30);
 /// The runtime uses a command-based architecture where all operations are sent as messages
 /// through channels. This allows for asynchronous processing and helps maintain isolation
 /// between components.
-pub struct TheaterRuntime {
+pub struct TheaterRuntime<E: crate::executor::Spawn> {
     /// Map of active actors indexed by their ID. The runtime tracks only its
     /// flat set of live actors — supervision (parenthood, view-scope, the
     /// stop-children cascade) is owned by the supervisor handler, which knows
@@ -144,6 +144,10 @@ pub struct TheaterRuntime {
     /// one cache regardless of which entry point a spawn comes from.
     /// Opt-in per child manifest via `static_package = true`.
     resource_cache: Arc<ResourceCache>,
+    /// The spawn capability — how actor loops get put on the substrate. The
+    /// runtime is generic over it: native (`TokioSpawn`) today, a browser/embedded
+    /// driver tomorrow, chosen at compile time.
+    executor: E,
     /// Handler registry
     pub handler_registry: HandlerRegistry,
     /// Global subscribers — receive tagged events from every actor's chain.
@@ -174,7 +178,7 @@ pub struct ActorProcess {
     /// Actor Name
     pub name: String,
     /// Task handle for the running actor
-    pub process: JoinHandle<()>,
+    pub process: crate::executor::TaskHandle,
     /// Channel for sending messages to the actor
     pub mailbox_tx: mpsc::Sender<ActorMessage>,
     /// Channel for sending operations to the actor
@@ -191,7 +195,7 @@ pub struct ActorProcess {
     pub shutdown_controller: ShutdownController,
 }
 
-impl TheaterRuntime {
+impl<E: crate::executor::Spawn> TheaterRuntime<E> {
     /// Creates a new TheaterRuntime with the given communication channels.
     ///
     /// ## Parameters
@@ -221,6 +225,7 @@ impl TheaterRuntime {
     ///     theater_rx,
     ///     HandlerRegistry::new(),
     ///     Arc::new(ResourceCache::new()),
+    ///     theater::executor::TokioSpawn,
     /// ).await?;
     /// # Ok(())
     /// # }
@@ -230,6 +235,7 @@ impl TheaterRuntime {
         theater_rx: UnboundedReceiver<TheaterCommand>,
         handler_registry: HandlerRegistry,
         resource_cache: Arc<ResourceCache>,
+        executor: E,
     ) -> Result<Self> {
         info!("Theater runtime initializing with Composite runtime");
         let pack_runtime = Arc::new(CachingPackRuntime::new());
@@ -243,6 +249,7 @@ impl TheaterRuntime {
             channels: HashMap::new(),
             pack_runtime,
             resource_cache,
+            executor,
             handler_registry,
             global_subscribers: Vec::new(),
         })
@@ -763,7 +770,8 @@ impl TheaterRuntime {
         let (setup_tx, setup_rx) = tokio::sync::oneshot::channel::<Result<(), ActorRuntimeError>>();
 
         let phase_start = Instant::now();
-        let actor_runtime_process = tokio::spawn(async move {
+        let executor_for_actor = self.executor.clone();
+        let actor_runtime_process = self.executor.spawn(Box::pin(async move {
             let _actor_runtime = ActorRuntime::start(
                 actor_id_for_task,
                 actor_name_for_task,
@@ -778,10 +786,11 @@ impl TheaterRuntime {
                 actor_info_tx,
                 control_rx,
                 actor_control_tx,
+                executor_for_actor,
                 Some(setup_tx),
             )
             .await;
-        });
+        }));
 
         // Wait for setup to complete
         match setup_rx.await {
@@ -865,7 +874,7 @@ impl TheaterRuntime {
         // command loop while the parent's init is still mid-flight).
         if call_init {
             let init_phase_start = Instant::now();
-            tokio::spawn(async move {
+            self.executor.spawn(Box::pin(async move {
                 // Deliver the resolved init config (manifest initial_state) as the
                 // argument to the actor's `init` export — the actor builds its
                 // in-module state from it. Nothing is threaded back.
@@ -916,7 +925,7 @@ impl TheaterRuntime {
                         let _ = response_tx.send(Err(SpawnError::Init(e)));
                     }
                 }
-            });
+            }));
         } else {
             let _ = response_tx.send(Ok(actor_id));
         }
@@ -1186,7 +1195,7 @@ impl TheaterRuntime {
     /// # use theater::theater_runtime::TheaterRuntime;
     /// # use anyhow::Result;
     /// #
-    /// # async fn example(mut runtime: TheaterRuntime) -> Result<()> {
+    /// # async fn example(mut runtime: TheaterRuntime<theater::executor::TokioSpawn>) -> Result<()> {
     /// // Shut down the runtime
     /// runtime.stop().await?;
     /// # Ok(())

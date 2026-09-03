@@ -27,7 +27,6 @@ use crate::StateChain;
 use std::sync::Arc;
 use tokio::sync::mpsc::{self, Receiver, Sender, UnboundedSender};
 use tokio::sync::RwLock;
-use tokio::task::JoinHandle;
 use tokio::time::Instant;
 use tracing::{debug, error, info, warn};
 
@@ -185,7 +184,7 @@ impl ActorPhaseManager {
 
 impl ActorRuntime {
     #[allow(clippy::too_many_arguments)]
-    pub async fn build_actor_resources(
+    pub async fn build_actor_resources<E: crate::executor::Spawn>(
         id: TheaterId,
         name: String,
         wasm_bytes: Vec<u8>,
@@ -198,7 +197,8 @@ impl ActorRuntime {
         control_tx: Sender<ActorControl>,
         actor_phase_manager: ActorPhaseManager,
         actor_instance_wrapper: Arc<RwLock<Option<PackInstance>>>,
-    ) -> Result<(ShutdownController, Vec<JoinHandle<()>>), ActorRuntimeError> {
+        executor: E,
+    ) -> Result<(ShutdownController, Vec<crate::executor::TaskHandle>), ActorRuntimeError> {
         // ---------------- Checkpoint Setup Initial ----------------
 
         // spawn-bench: phases below all run inside the runtime's setup task
@@ -554,7 +554,7 @@ impl ActorRuntime {
 
         // Set up handlers - use the shutdown_controller created earlier
         let phase_start = Instant::now();
-        let mut handler_tasks: Vec<JoinHandle<()>> = vec![];
+        let mut handler_tasks: Vec<crate::executor::TaskHandle> = vec![];
         let handler_actor_handle = actor_handle.clone();
         let handlers_count = handlers.len();
         debug!("Setting up {} handlers", handlers_count);
@@ -574,7 +574,7 @@ impl ActorRuntime {
                 let mut chain_guard = chain.write().await;
                 chain_guard.add_subscriber(handler_event_tx);
             }
-            let handler_task = tokio::spawn(async move {
+            let handler_task = executor.spawn(Box::pin(async move {
                 debug!("Handler task running: {}", handler_name);
                 if let Err(e) = handler
                     .setup(actor_handle, actor_instance, shutdown_receiver, event_rx)
@@ -584,7 +584,7 @@ impl ActorRuntime {
                 } else {
                     debug!("Handler '{}' setup() completed", handler_name);
                 }
-            });
+            }));
             handler_tasks.push(handler_task);
         }
         info!(
@@ -605,7 +605,7 @@ impl ActorRuntime {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub async fn start(
+    pub async fn start<E: crate::executor::Spawn>(
         id: TheaterId,
         name: String,
         wasm_bytes: Vec<u8>,
@@ -619,6 +619,7 @@ impl ActorRuntime {
         info_tx: Sender<ActorInfo>,
         control_rx: Receiver<ActorControl>,
         control_tx: Sender<ActorControl>,
+        executor: E,
         setup_result_tx: Option<tokio::sync::oneshot::Sender<Result<(), ActorRuntimeError>>>,
     ) {
         info!("Actor runtime starting communication loops");
@@ -627,7 +628,8 @@ impl ActorRuntime {
         // These will be set once setup completes
         let actor_instance_wrapper: Arc<RwLock<Option<PackInstance>>> = Arc::new(RwLock::new(None));
         let metrics: Arc<RwLock<MetricsCollector>> = Arc::new(RwLock::new(MetricsCollector::new()));
-        let handler_tasks: Arc<RwLock<Vec<JoinHandle<()>>>> = Arc::new(RwLock::new(vec![]));
+        let handler_tasks: Arc<RwLock<Vec<crate::executor::TaskHandle>>> =
+            Arc::new(RwLock::new(vec![]));
         let handlers_shutdown_controller: Arc<RwLock<Option<ShutdownController>>> =
             Arc::new(RwLock::new(None));
         let operation_rx = operation_rx;
@@ -641,8 +643,9 @@ impl ActorRuntime {
             let theater_tx = theater_tx.clone();
             let handler_tasks = handler_tasks.clone();
             let handlers_shutdown_controller = handlers_shutdown_controller.clone();
+            let executor_for_build = executor.clone();
 
-            tokio::spawn(async move {
+            executor.spawn(Box::pin(async move {
                 match Self::build_actor_resources(
                     id,
                     name,
@@ -656,6 +659,7 @@ impl ActorRuntime {
                     control_tx,
                     actor_phase_manager.clone(),
                     actor_instance_wrapper,
+                    executor_for_build,
                 )
                 .await
                 {
@@ -690,7 +694,7 @@ impl ActorRuntime {
                         }
                     }
                 }
-            })
+            }))
         };
 
         let mut info_handle = {
@@ -698,12 +702,12 @@ impl ActorRuntime {
             let metrics = metrics.clone();
             let actor_phase_manager = actor_phase_manager.clone();
 
-            tokio::spawn(Self::info_loop(
+            executor.spawn(Box::pin(Self::info_loop(
                 info_rx,
                 actor_instance_wrapper,
                 metrics,
                 actor_phase_manager,
-            ))
+            )))
         };
 
         let mut operation_handle = {
@@ -712,13 +716,13 @@ impl ActorRuntime {
             let theater_tx = theater_tx.clone();
             let actor_phase_manager = actor_phase_manager.clone();
 
-            tokio::spawn(Self::operation_loop(
+            executor.spawn(Box::pin(Self::operation_loop(
                 operation_rx,
                 actor_instance_wrapper,
                 metrics,
                 theater_tx,
                 actor_phase_manager,
-            ))
+            )))
         };
 
         while let Some(control) = control_rx.recv().await {

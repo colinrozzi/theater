@@ -106,6 +106,7 @@ async fn test_actor_shutdown_timing() {
             theater_rx,
             handler_registry,
             Arc::new(ResourceCache::new()),
+            theater::executor::TokioSpawn,
         )
         .await
         .expect("Failed to create runtime");
@@ -233,6 +234,7 @@ async fn test_multiple_actor_shutdown_timing() {
             theater_rx,
             handler_registry,
             Arc::new(ResourceCache::new()),
+            theater::executor::TokioSpawn,
         )
         .await
         .expect("Failed to create runtime");
@@ -378,6 +380,7 @@ async fn test_actor_shutdown_with_supervisor_handler() {
             theater_rx,
             handler_registry,
             Arc::new(ResourceCache::new()),
+            theater::executor::TokioSpawn,
         )
         .await
         .expect("Failed to create runtime");
@@ -543,6 +546,7 @@ async fn test_actor_shutdown_with_all_handlers() {
             theater_rx,
             handler_registry,
             Arc::new(ResourceCache::new()),
+            theater::executor::TokioSpawn,
         )
         .await
         .expect("Failed to create runtime");

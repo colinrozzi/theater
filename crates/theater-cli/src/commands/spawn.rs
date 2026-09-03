@@ -151,6 +151,7 @@ async fn run(args: &SpawnArgs, ctx: &CommandContext, call_init: bool) -> Result<
         theater_rx,
         handler_registry,
         resource_cache.clone(),
+        theater::executor::TokioSpawn,
     )
     .await
     .map_err(|e| CliError::server_error(format!("Failed to create runtime: {}", e)))?;
