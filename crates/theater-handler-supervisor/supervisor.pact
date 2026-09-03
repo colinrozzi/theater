@@ -81,7 +81,6 @@ interface supervisor {
         get-actor-status: func(id: actor-id) -> result<string, supervisor-error>
         get-actor-state: func(id: actor-id) -> result<option<list<u8>>, supervisor-error>
         get-actor-manifest: func(id: actor-id) -> result<string, supervisor-error>
-        get-actor-metrics: func(id: actor-id) -> result<string, supervisor-error>
 
         // Lifecycle control of one actor in view.
         stop-actor: func(id: actor-id) -> result<_, supervisor-error>

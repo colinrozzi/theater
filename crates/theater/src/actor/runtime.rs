@@ -15,7 +15,6 @@ use crate::handler::HandlerRegistry;
 use crate::id::TheaterId;
 use crate::interceptor::{RecordingInterceptor, ReplayRecordingInterceptor};
 use crate::messages::TheaterCommand;
-use crate::metrics::MetricsCollector;
 use crate::pack_bridge::{
     CachingPackRuntime, CallInterceptor, HostLinkerBuilder, PackInstance, Value,
 };
@@ -27,7 +26,6 @@ use crate::StateChain;
 use std::sync::Arc;
 use tokio::sync::mpsc::{self, Receiver, Sender, UnboundedSender};
 use tokio::sync::RwLock;
-use tokio::time::Instant;
 use tracing::{debug, error, info, warn};
 
 use super::types::ActorControl;
@@ -201,12 +199,6 @@ impl ActorRuntime {
     ) -> Result<(ShutdownController, Vec<crate::executor::TaskHandle>), ActorRuntimeError> {
         // ---------------- Checkpoint Setup Initial ----------------
 
-        // spawn-bench: phases below all run inside the runtime's setup task
-        // (spawn_actor awaits setup_tx). They contribute to the per-spawn
-        // queue-blocking cost — anything slow here is what wedges the runtime
-        // command loop under load.
-        let build_start = Instant::now();
-
         debug!("Setting up actor store");
 
         if !actor_phase_manager.is_phase(ActorPhase::Starting) {
@@ -312,7 +304,6 @@ impl ActorRuntime {
         handler_ctx.actor_id = Some(id);
         let handlers_for_setup = &mut handlers;
 
-        let phase_start = Instant::now();
         let mut actor_instance = PackInstance::new_with_interceptor_cached(
             name.clone(),
             &wasm_bytes,
@@ -328,19 +319,11 @@ impl ActorRuntime {
                         "Setting up Composite host functions for handler '{}'",
                         handler.name()
                     );
-                    let handler_setup_start = Instant::now();
                     match handler.setup_host_functions_composite(builder, &mut handler_ctx) {
                         Ok(()) => {
                             debug!(
                                 "Handler '{}' Composite host functions set up successfully",
                                 handler.name()
-                            );
-                            info!(
-                                phase = "runtime.handler_setup",
-                                actor_id = %id,
-                                handler = handler.name(),
-                                elapsed_ms = handler_setup_start.elapsed().as_millis() as u64,
-                                "spawn phase complete",
                             );
                         }
                         Err(e) => {
@@ -370,13 +353,6 @@ impl ActorRuntime {
             err
         })?;
 
-        info!(
-            phase = "runtime.pack_instance_new",
-            actor_id = %id,
-            wasm_bytes = wasm_bytes.len(),
-            elapsed_ms = phase_start.elapsed().as_millis() as u64,
-            "spawn phase complete (compile + linker + instantiate)",
-        );
         debug!("PackInstance created successfully");
         debug!(
             "Handler context satisfied imports: {:?}",
@@ -392,7 +368,6 @@ impl ActorRuntime {
         // `theater:simple/self` which provides `log`, `get-chain`, and `shutdown`.
         // In this case, we compute a subset hash from the handler's functions and
         // compare against the actor's declared interface hash.
-        let phase_start = Instant::now();
         match actor_instance.get_metadata_with_hashes().await {
             Ok(metadata) => {
                 let actor_import_hashes = &metadata.import_hashes;
@@ -495,28 +470,15 @@ impl ActorRuntime {
                 }
 
                 info!("All interface hashes verified for actor {}", id);
-                info!(
-                    phase = "runtime.metadata_and_verify",
-                    actor_id = %id,
-                    elapsed_ms = phase_start.elapsed().as_millis() as u64,
-                    "spawn phase complete",
-                );
 
                 // Cache function type info for host-side validation.
                 // This is mandatory — we guarantee type safety to actors.
-                let phase_start = Instant::now();
                 actor_instance.cache_function_types().await.map_err(|e| {
                     ActorRuntimeError::FunctionTypeCacheFailed {
                         id,
                         detail: format!("{:?}", e),
                     }
                 })?;
-                info!(
-                    phase = "runtime.cache_function_types",
-                    actor_id = %id,
-                    elapsed_ms = phase_start.elapsed().as_millis() as u64,
-                    "spawn phase complete",
-                );
             }
             Err(e) => {
                 // Actor doesn't have __pack_types metadata - FATAL
@@ -553,7 +515,6 @@ impl ActorRuntime {
         }
 
         // Set up handlers - use the shutdown_controller created earlier
-        let phase_start = Instant::now();
         let mut handler_tasks: Vec<crate::executor::TaskHandle> = vec![];
         let handler_actor_handle = actor_handle.clone();
         let handlers_count = handlers.len();
@@ -587,19 +548,6 @@ impl ActorRuntime {
             }));
             handler_tasks.push(handler_task);
         }
-        info!(
-            phase = "runtime.spawn_handler_tasks",
-            actor_id = %id,
-            handlers = handlers_count,
-            elapsed_ms = phase_start.elapsed().as_millis() as u64,
-            "spawn phase complete",
-        );
-        info!(
-            phase = "runtime.build_actor_resources_total",
-            actor_id = %id,
-            elapsed_ms = build_start.elapsed().as_millis() as u64,
-            "build_actor_resources total",
-        );
 
         Ok((shutdown_controller, handler_tasks))
     }
@@ -627,7 +575,6 @@ impl ActorRuntime {
 
         // These will be set once setup completes
         let actor_instance_wrapper: Arc<RwLock<Option<PackInstance>>> = Arc::new(RwLock::new(None));
-        let metrics: Arc<RwLock<MetricsCollector>> = Arc::new(RwLock::new(MetricsCollector::new()));
         let handler_tasks: Arc<RwLock<Vec<crate::executor::TaskHandle>>> =
             Arc::new(RwLock::new(vec![]));
         let handlers_shutdown_controller: Arc<RwLock<Option<ShutdownController>>> =
@@ -699,27 +646,23 @@ impl ActorRuntime {
 
         let mut info_handle = {
             let actor_instance_wrapper = actor_instance_wrapper.clone();
-            let metrics = metrics.clone();
             let actor_phase_manager = actor_phase_manager.clone();
 
             executor.spawn(Box::pin(Self::info_loop(
                 info_rx,
                 actor_instance_wrapper,
-                metrics,
                 actor_phase_manager,
             )))
         };
 
         let mut operation_handle = {
             let actor_instance_wrapper = actor_instance_wrapper.clone();
-            let metrics = metrics.clone();
             let theater_tx = theater_tx.clone();
             let actor_phase_manager = actor_phase_manager.clone();
 
             executor.spawn(Box::pin(Self::operation_loop(
                 operation_rx,
                 actor_instance_wrapper,
-                metrics,
                 theater_tx,
                 actor_phase_manager,
             )))
@@ -850,7 +793,6 @@ impl ActorRuntime {
         // request
 
         info!("Actor runtime communication loop exiting, performing cleanup");
-        let metrics = metrics.read().await;
 
         // If any handlers are still running, abort them
         let handler_tasks = handler_tasks.read().await;
@@ -860,10 +802,6 @@ impl ActorRuntime {
                 handle.abort();
             }
         }
-
-        // Log final metrics
-        let final_metrics = metrics.get_metrics().await;
-        info!("Final metrics at shutdown: {:?}", final_metrics);
 
         // Self-report: the task has finished its own bounded teardown (loops
         // stopped, handlers signalled, resources released). This is the single
@@ -877,7 +815,6 @@ impl ActorRuntime {
     async fn operation_loop(
         mut operation_rx: Receiver<ActorOperation>,
         actor_instance_wrapper: Arc<RwLock<Option<PackInstance>>>,
-        metrics: Arc<RwLock<MetricsCollector>>,
         theater_tx: UnboundedSender<TheaterCommand>,
         actor_phase_manager: ActorPhaseManager,
     ) {
@@ -902,7 +839,7 @@ impl ActorRuntime {
 
                 Some(op) = operation_rx.recv() => {
                     Self::process_operation(
-                        op, &actor_instance_wrapper, &metrics, &theater_tx, actor_phase_manager.clone()
+                        op, &actor_instance_wrapper, &theater_tx, actor_phase_manager.clone()
                     ).await
                 }
 
@@ -914,7 +851,6 @@ impl ActorRuntime {
     async fn process_operation(
         op: ActorOperation,
         actor_instance_wrapper: &Arc<RwLock<Option<PackInstance>>>,
-        metrics: &Arc<RwLock<MetricsCollector>>,
         theater_tx: &UnboundedSender<TheaterCommand>,
         actor_phase_manager: ActorPhaseManager,
     ) {
@@ -947,10 +883,7 @@ impl ActorRuntime {
                         return;
                     }
                 };
-                let metrics = metrics.write().await;
-                match Self::execute_call_pack(actor_instance, &name, params, theater_tx, &metrics)
-                    .await
-                {
+                match Self::execute_call_pack(actor_instance, &name, params, theater_tx).await {
                     Ok(result) => {
                         if let Err(e) = response_tx.send(Ok(result)) {
                             error!(
@@ -981,7 +914,6 @@ impl ActorRuntime {
     async fn info_loop(
         mut info_rx: Receiver<ActorInfo>,
         actor_instance_wrapper: Arc<RwLock<Option<PackInstance>>>,
-        metrics: Arc<RwLock<MetricsCollector>>,
         actor_phase_manager: ActorPhaseManager,
     ) {
         // Handle info requests
@@ -1046,13 +978,6 @@ impl ActorRuntime {
                             }
                         }
                     }
-                    ActorInfo::GetMetrics { response_tx } => {
-                        let metrics = metrics.read().await;
-                        let metrics_data = metrics.get_metrics().await;
-                        if let Err(e) = response_tx.send(Ok(metrics_data)) {
-                            error!("Failed to send metrics response: {:?}", e);
-                        }
-                    }
                     ActorInfo::GetExportHashes { response_tx } => {
                         match &mut *actor_instance_wrapper.write().await {
                             Some(instance) => {
@@ -1098,10 +1023,7 @@ impl ActorRuntime {
         name: &String,
         params: Vec<u8>,
         _theater_tx: &mpsc::UnboundedSender<TheaterCommand>,
-        metrics: &MetricsCollector,
     ) -> Result<Vec<u8>, ActorError> {
-        let start = Instant::now();
-
         debug!("Executing pack call to function '{}'", name);
 
         let params_value = crate::pack_bridge::decode_value(&params).map_err(|e| {
@@ -1121,11 +1043,9 @@ impl ActorRuntime {
             })
             .await;
 
-        let exec_start = Instant::now();
         let call_result = actor_instance
             .call_function_with_value(name, params_value)
             .await;
-        let exec_ms = exec_start.elapsed().as_millis() as u64;
 
         let results = match call_result {
             Ok(result) => {
@@ -1161,30 +1081,9 @@ impl ActorRuntime {
                     .await;
 
                 error!("Failed to execute function '{}': {:#}", name, e);
-                let duration = start.elapsed();
-                debug!(
-                    phase = "actor.exec_call",
-                    name = %name,
-                    elapsed_ms = duration.as_millis() as u64,
-                    exec_ms,
-                    ok = false,
-                    "actor exec_call complete",
-                );
-                metrics.record_operation(duration, false).await;
                 return Err(ActorError::Internal(event));
             }
         };
-
-        let duration = start.elapsed();
-        debug!(
-            phase = "actor.exec_call",
-            name = %name,
-            elapsed_ms = duration.as_millis() as u64,
-            exec_ms,
-            ok = true,
-            "actor exec_call complete",
-        );
-        metrics.record_operation(duration, true).await;
 
         Ok(results)
     }

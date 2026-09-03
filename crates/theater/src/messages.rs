@@ -71,7 +71,6 @@ use crate::actor::ActorRuntimeError;
 /// to their callers.
 use crate::chain::ChainEvent;
 use crate::id::TheaterId;
-use crate::metrics::ActorMetrics;
 use crate::pack_bridge::{InterfaceHash, Value, ValueType};
 
 /// The conventional "no initial state" sentinel passed to a freshly-spawned
@@ -330,19 +329,6 @@ pub enum TheaterCommand {
         response_tx: oneshot::Sender<Result<Value>>,
     },
 
-    /// # Get actor metrics
-    ///
-    /// Retrieves performance and resource usage metrics for an actor.
-    ///
-    /// ## Parameters
-    ///
-    /// * `actor_id` - ID of the actor to get metrics for
-    /// * `response_tx` - Channel to receive the result (actor metrics)
-    GetActorMetrics {
-        actor_id: TheaterId,
-        response_tx: oneshot::Sender<Result<ActorMetrics>>,
-    },
-
     /// # Subscribe to actor events
     ///
     /// Creates a subscription to receive all future events from an actor.
@@ -491,9 +477,6 @@ impl TheaterCommand {
             TheaterCommand::GetActorState { actor_id, .. } => {
                 format!("GetActorState: {:?}", actor_id)
             }
-            TheaterCommand::GetActorMetrics { actor_id, .. } => {
-                format!("GetActorMetrics: {:?}", actor_id)
-            }
             TheaterCommand::SubscribeToActor { actor_id, .. } => {
                 format!("SubscribeToActor: {:?}", actor_id)
             }
@@ -581,12 +564,12 @@ impl ChannelId {
     /// A new unique ChannelId
     pub fn new(initiator: &ChannelParticipant, target: &ChannelParticipant) -> Self {
         let mut hasher = DefaultHasher::new();
-        let timestamp = chrono::Utc::now().timestamp_millis();
+        // 64 bits of entropy make the id unique; no wall clock needed (and a
+        // clock in core is exactly what the portability work is shedding).
         let rand_value: u64 = rand::random();
 
         initiator.hash(&mut hasher);
         target.hash(&mut hasher);
-        timestamp.hash(&mut hasher);
         rand_value.hash(&mut hasher);
 
         let hash = hasher.finish();

@@ -10,7 +10,6 @@ use tokio::time::timeout;
 use tracing::error;
 
 use crate::actor::types::{ActorError, ActorOperation, DEFAULT_OPERATION_TIMEOUT};
-use crate::metrics::ActorMetrics;
 use crate::pack_bridge::{self, InterfaceHash, Value};
 
 use super::types::{ActorControl, ActorInfo};
@@ -193,48 +192,6 @@ impl ActorHandle {
             Err(_) => {
                 error!(
                     "GetState operation timed out after {:?}",
-                    DEFAULT_OPERATION_TIMEOUT
-                );
-                Err(ActorError::OperationTimeout(
-                    DEFAULT_OPERATION_TIMEOUT.as_secs(),
-                ))
-            }
-        }
-    }
-
-    /// Retrieves performance metrics for the actor.
-    ///
-    /// ## Purpose
-    ///
-    /// This method provides access to performance metrics for the actor, which is useful
-    /// for monitoring, debugging, and performance analysis.
-    ///
-    /// ## Returns
-    ///
-    /// * `Ok(ActorMetrics)` - The current metrics for the actor.
-    /// * `Err(ActorError)` - An error occurred while retrieving the metrics.
-    pub async fn get_metrics(&self) -> Result<ActorMetrics, ActorError> {
-        let (tx, rx) = oneshot::channel();
-
-        self.info_tx
-            .send(ActorInfo::GetMetrics { response_tx: tx })
-            .await
-            .map_err(|e| {
-                error!("Failed to send GetMetrics operation: {}", e);
-                ActorError::ChannelClosed
-            })?;
-
-        match timeout(DEFAULT_OPERATION_TIMEOUT, rx).await {
-            Ok(result) => result.map_err(|e| {
-                error!(
-                    "Channel closed while waiting for GetMetrics response: {:?}",
-                    e
-                );
-                ActorError::ChannelClosed
-            })?,
-            Err(_) => {
-                error!(
-                    "GetMetrics operation timed out after {:?}",
                     DEFAULT_OPERATION_TIMEOUT
                 );
                 Err(ActorError::OperationTimeout(

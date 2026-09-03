@@ -335,16 +335,7 @@ impl PackInstance {
     where
         F: FnOnce(&mut HostLinkerBuilder<'_, ActorStore>) -> Result<(), LinkerError>,
     {
-        let compile_start = std::time::Instant::now();
-        let (module, cache_hit) = runtime.load_module_cached(wasm_bytes)?;
-        tracing::info!(
-            phase = "runtime.module_compile",
-            actor_id = %actor_store.id,
-            cache_hit,
-            wasm_bytes = wasm_bytes.len(),
-            elapsed_ms = compile_start.elapsed().as_millis() as u64,
-            "spawn phase complete",
-        );
+        let (module, _cache_hit) = runtime.load_module_cached(wasm_bytes)?;
 
         let instance = module
             .instantiate_with_host_and_interceptor_async(

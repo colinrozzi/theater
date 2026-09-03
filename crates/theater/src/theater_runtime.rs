@@ -12,7 +12,6 @@ use crate::handler::HandlerRegistry;
 use crate::id::TheaterId;
 use crate::messages::{ActorMessage, ActorStatus, ActorTreeRow, TheaterCommand};
 use crate::messages::{ChannelId, ChannelParticipant};
-use crate::metrics::ActorMetrics;
 use crate::pack_bridge::{CachingPackRuntime, Value};
 use crate::replay::ReplayHandler;
 use crate::shutdown::{ShutdownController, ShutdownType};
@@ -519,20 +518,6 @@ impl<E: crate::executor::Spawn> TheaterRuntime<E> {
                         error!("Failed to send actor status: {:?}", e);
                     }
                 }
-                TheaterCommand::GetActorMetrics {
-                    actor_id,
-                    response_tx,
-                } => {
-                    debug!("Getting metrics for actor: {:?}", actor_id);
-                    match self.get_actor_metrics(actor_id).await {
-                        Ok(metrics) => {
-                            let _ = response_tx.send(Ok(metrics));
-                        }
-                        Err(e) => {
-                            let _ = response_tx.send(Err(e));
-                        }
-                    }
-                }
                 TheaterCommand::SubscribeToActor { actor_id, event_tx } => {
                     debug!("Subscribing to events for actor: {:?}", actor_id);
                     if let Some(chain) = self.chains.get(&actor_id) {
@@ -690,12 +675,6 @@ impl<E: crate::executor::Spawn> TheaterRuntime<E> {
         debug!("Starting actor spawn process for: {}", actor_name);
         debug!("WASM bytes: {} bytes", wasm_bytes.len());
 
-        // spawn-bench: timing spans match the supervisor-side names so the
-        // two streams stitch together by actor_id (post-spawn) or by name
-        // (pre-spawn). spawn_actor itself runs in the runtime command loop,
-        // so every elapsed_ms here represents queue-blocking time.
-        let spawn_actor_start = Instant::now();
-
         // Create a shutdown controller for this specific actor
         let mut shutdown_controller = ShutdownController::new();
         let (mailbox_tx, _mailbox_rx) = mpsc::channel(100);
@@ -736,8 +715,6 @@ impl<E: crate::executor::Spawn> TheaterRuntime<E> {
         // defaults, etc. live in the caller). The runtime no longer stores it:
         // state lives inside the module, so `init_state` is delivered to the
         // actor as the *argument* of its `init` export below (see the init-fire).
-        let phase_start = Instant::now();
-        let from_manifest = manifest.is_some();
         let handler_registry = if let Some(ref manifest) = manifest {
             match self.create_handler_registry_for_manifest(manifest).await {
                 Ok(r) => r,
@@ -750,13 +727,6 @@ impl<E: crate::executor::Spawn> TheaterRuntime<E> {
         } else {
             self.handler_registry.clone()
         };
-        info!(
-            phase = "runtime.handler_registry",
-            actor_id = %actor_id,
-            from_manifest,
-            elapsed_ms = phase_start.elapsed().as_millis() as u64,
-            "spawn phase complete",
-        );
 
         // Start the actor in a detached task. The pack runtime (and the
         // wasmtime Engine inside it) is shared across every spawn —
@@ -769,7 +739,6 @@ impl<E: crate::executor::Spawn> TheaterRuntime<E> {
         // Create channel to receive setup result
         let (setup_tx, setup_rx) = tokio::sync::oneshot::channel::<Result<(), ActorRuntimeError>>();
 
-        let phase_start = Instant::now();
         let executor_for_actor = self.executor.clone();
         let actor_runtime_process = self.executor.spawn(Box::pin(async move {
             let _actor_runtime = ActorRuntime::start(
@@ -796,12 +765,6 @@ impl<E: crate::executor::Spawn> TheaterRuntime<E> {
         match setup_rx.await {
             Ok(Ok(())) => {
                 debug!("Actor {} setup completed successfully", actor_id);
-                info!(
-                    phase = "runtime.setup",
-                    actor_id = %actor_id,
-                    elapsed_ms = phase_start.elapsed().as_millis() as u64,
-                    "spawn phase complete",
-                );
             }
             Ok(Err(e)) => {
                 error!("Actor {} setup failed: {}", actor_id, e);
@@ -855,16 +818,6 @@ impl<E: crate::executor::Spawn> TheaterRuntime<E> {
                 )
             });
         }
-        // elapsed_ms here is the total queue-blocking cost: every ms
-        // counted is one ms the runtime command loop spent serialized
-        // on this spawn instead of draining other commands.
-        info!(
-            phase = "runtime.register",
-            actor_id = %actor_id,
-            elapsed_ms = spawn_actor_start.elapsed().as_millis() as u64,
-            "spawn registered (runtime command loop now free)",
-        );
-
         // Setup is complete; the actor is reachable by RPC. From here on we
         // must not hold the runtime command loop. For `call_init = false`,
         // fire response_tx immediately and return. For `call_init = true`,
@@ -912,12 +865,6 @@ impl<E: crate::executor::Spawn> TheaterRuntime<E> {
                 match result {
                     Ok(_) => {
                         debug!("Actor {} init completed", actor_id);
-                        info!(
-                            phase = "runtime.init",
-                            actor_id = %actor_id,
-                            elapsed_ms = init_phase_start.elapsed().as_millis() as u64,
-                            "spawn phase complete",
-                        );
                         let _ = response_tx.send(Ok(actor_id));
                     }
                     Err(e) => {
@@ -1069,23 +1016,6 @@ impl<E: crate::executor::Spawn> TheaterRuntime<E> {
             Err(anyhow::Error::new(TheaterRuntimeError::ActorNotFound(
                 actor_id,
             )))
-        }
-    }
-
-    async fn get_actor_metrics(&self, actor_id: TheaterId) -> Result<ActorMetrics> {
-        if let Some(proc) = self.actors.get(&actor_id) {
-            // Send a message to get the actor's metrics
-            let (tx, rx) = oneshot::channel();
-            proc.info_tx
-                .send(ActorInfo::GetMetrics { response_tx: tx })
-                .await?;
-
-            match rx.await {
-                Ok(metrics) => Ok(metrics?),
-                Err(e) => Err(anyhow::anyhow!("Failed to receive metrics: {}", e)),
-            }
-        } else {
-            Err(anyhow::anyhow!("Actor not found"))
         }
     }
 

@@ -41,8 +41,13 @@ The audit (below) says the seam is smaller than the note first sketched:
 1. **Spawn** — start a long-lived actor/handler loop. Driver-provided; the core is
    *generic over the driver*, so it never states a `Send` bound — the bound comes
    from the concrete driver per build (native requires `Send`, browser doesn't).
-2. ~~**Clock**~~ — **dissolves.** Observability timing goes to the log/metrics edge;
-   the sleep/epoch watchdogs are *preemption*, which is already per-target.
+2. ~~**Clock**~~ — **ripped out of the core call path** (DONE, PR pending — see brick 2).
+   The audit's first framing ("timing moves to a log sink") was half-wrong: *durations*
+   are measured start→end *inside* core, so a sink can't recover them. But that timing —
+   plus the whole metrics subsystem and the `ChannelId` wall-clock entropy — is **sugar**.
+   Colin's call: rip it, don't abstract it (a Clock capability / a `web-time` swap would
+   just relocate the coupling). Only the *async timers* (teardown timeouts, init-watchdog,
+   epoch ticker) matter; they're preemption/safety and go to the driver at the split.
 3. **Channels** — become a non-issue by switching core from tokio channels to
    `futures::channel` (portable: native, wasm, embedded). One gap: `watch`.
 
@@ -201,9 +206,15 @@ also draws the line between where the actor model ends and the environment begin
 ## Brick sequence (each independently green, native unchanged until the split)
 
 1. **Audit** — done (this doc).
-2. **Rip Clock:** move observability timing to the metrics/log sink; leave epoch/
-   watchdog where they are (already engine/driver). Confirm the chain timestamp.
-   Non-disturbing on native.
+2. **Rip Clock (DONE):** delete the observability clock from the core call path —
+   phase-timing bench logs (the init-hang-saga scaffolding), chain-dispatch timing,
+   pack_bridge compile timing, the whole **metrics subsystem** (incl. the supervisor
+   `get-actor-metrics` op — a deliberate fleet ABI change), and the `ChannelId`
+   `chrono::Utc::now()` entropy (rand alone suffices). Kept: the async timers (3 teardown
+   timeouts, init-watchdog, epoch ticker) — preemption/safety, driver-bound at the split.
+   Correction to the audit: there is **no** load-bearing chain-event timestamp; the only
+   `chrono` was ChannelId hash entropy. Native behavior identical (lib 35 / doctests 21 /
+   theater-tests teardown net all green). +7/−300 + metrics.rs (−250).
 3. **Restructure the init-fire** (spawn site #7 → operation + completion channel).
    Kills the one detached spawn. Non-disturbing.
 4. **Spawn seam:** introduce a driver-provided `Spawn`; route the 6 loops through it;

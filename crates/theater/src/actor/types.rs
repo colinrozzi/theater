@@ -4,7 +4,6 @@
 //! These include operation types, error definitions, and other shared types needed for
 //! the actor system to function.
 
-use crate::metrics::ActorMetrics;
 use crate::pack_bridge::{InterfaceHash, Value};
 use crate::ChainEvent;
 use serde::{Deserialize, Serialize};
@@ -122,11 +121,6 @@ pub enum ActorInfo {
     GetState {
         /// Channel to send state back to the caller
         response_tx: oneshot::Sender<Result<Value, ActorError>>,
-    },
-    /// Retrieve performance metrics for the actor
-    GetMetrics {
-        /// Channel to send metrics back to the caller
-        response_tx: oneshot::Sender<Result<ActorMetrics, ActorError>>,
     },
     /// Retrieve the actor's current processing state
     GetStatus {
