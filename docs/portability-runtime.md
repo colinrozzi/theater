@@ -141,7 +141,56 @@ That fork is the subject of the next section (async host calls). Everything else
 Clock removal, the spawn seam, `futures::channel`, the crate split — is unaffected by
 it and keeps native byte-identical.
 
-### Core handlers vs driver handlers
+## Async host calls: the capability model + the async-ABI target
+
+A *waiting* host call (`store.get`, message-server `request` — I/O before it can
+return) is the one genuinely-forced portability question. There are ~75 of them
+(`func_async_result`); most host fns (`log`, …) are synchronous and don't care.
+
+The unlock: **a wasm *call* and an async *task* are different things.** The host
+can't pause a wasm call mid-execution (the browser limitation), but a wasm call can
+*return normally* while an async task inside it is **parked** — its half-done state
+saved in the wasm's linear memory (the same persistence that makes in-module state
+work), and resumed by a *later* call.
+
+There are **three layers**, and the async machinery lives in the middle one, not in
+the actor's code:
+
+```
+WASM ("the guest") = actor logic (author's `store.get(h).await`)
+                   + guest runtime lib (packr-guest/theater-guest: allocator, ABI, executor)
+HOST (native Rust / browser JS) = runs the wasm, provides host fns, does the I/O
+```
+
+So "wait for a slow call" is a **driver capability**, invisible to the actor. The
+actor always writes `let c = store.get(h).await;` — one style, everywhere. Drivers
+differ in *how* they realize the wait:
+
+| Driver | Wait mechanism | Runs |
+|---|---|---|
+| native | wasmtime suspends the wasm call | all actors |
+| browser (JSPI) | engine suspends the wasm call (needs Chrome-class JSPI) | all actors |
+| browser (**async-ABI**) | **guest runtime parks the task; host fn fires-and-returns a ticket; result comes back as a `resume(ticket, …)` call** | all actors — **needs no engine feature** |
+| browser (minimal) | none | only actors that never wait |
+
+**Portability principle:** drivers advertise capabilities; actors have needs; an
+actor runs on any driver that meets its needs — its source never changes. `.await`
+already means "may suspend here"; whether that's realized by the engine (JSPI) or
+the guest runtime's executor (async-ABI) is below the author's code.
+
+**Target = the async-ABI tier.** It's the one that runs an actor on *any* platform
+with no engine dependency, keeps actor code inline, and drops straight into
+theater's operation loop (a result is just another operation). Its cost: the
+guest-runtime half (executor + park/resume + ticket→state mapping + the ABI) is
+**pack-dev's** area (`packr-guest`), so it's a coordinated change, not theater's
+alone.
+
+**Sequencing:** JSPI is a fast interim — proves the whole browser stack (engine +
+Worker + core/driver split) while touching almost nothing, and doesn't foreclose the
+async-ABI. The `await`-style host fns migrate to fire-and-return incrementally. The
+minimal sync-only browser is a near-free floor tier.
+
+## Core handlers vs driver handlers
 
 A few current "handlers" aren't environment I/O at all — `message-server` (inter-actor
 comms), `supervisor`, `lifecycle`, `self` are **actor-model** concerns. Those likely
@@ -171,8 +220,10 @@ also draws the line between where the actor model ends and the environment begin
 
 ## Open questions
 
-- **Async host calls** — `await` vs fire-and-return-as-operation, for the handful of
-  host fns that do real I/O. The one forced fork. *(Being dug into next.)*
+- ~~**Async host calls**~~ — **settled** (see the section above): capability tiers,
+  actors stay one style, **async-ABI is the target** (portable everywhere, no engine
+  feature), **JSPI a fast interim**, sync-only a floor. The async-ABI's guest half is
+  a coordinated change with pack-dev (`packr-guest`); not blocking the native reshape.
 - **Core-handler vs driver-handler line** — confirm `message-server`/`supervisor`/
   `lifecycle`/`self` are core; tcp/filesystem/http/podman are driver.
 - **Chain `timestamp`** load-bearingness (believed informational; confirm).
