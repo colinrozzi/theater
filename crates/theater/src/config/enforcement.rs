@@ -58,96 +58,71 @@ pub fn validate_manifest_permissions(
     manifest: &ManifestConfig,
     effective_permissions: &HandlerPermission,
 ) -> PermissionResult<()> {
+    // Handler configs are raw tables now; key on the `type` and parse the typed
+    // config only for the capability handlers that validate against a grant.
+    // A malformed typed config surfaces as a config error here (spawn-time).
+    fn typed<T: serde::de::DeserializeOwned>(hc: &HandlerConfig) -> PermissionResult<T> {
+        hc.parse()
+            .map_err(|e| PermissionError::ConfigExceedsPermissions {
+                reason: format!("invalid '{}' handler config: {}", hc.type_name(), e),
+            })
+    }
+    let deny = |handler_type: &str| PermissionError::HandlerNotPermitted {
+        handler_type: handler_type.to_string(),
+    };
+
     for handler_config in &manifest.handlers {
-        match handler_config {
-            HandlerConfig::FileSystem { config } => {
-                validate_filesystem_config(config, &effective_permissions.file_system)?;
+        match handler_config.type_name() {
+            "filesystem" => {
+                validate_filesystem_config(
+                    &typed(handler_config)?,
+                    &effective_permissions.file_system,
+                )?;
             }
-            HandlerConfig::HttpClient { config } => {
-                validate_http_client_config(config, &effective_permissions.http_client)?;
+            "http-client" => {
+                validate_http_client_config(
+                    &typed(handler_config)?,
+                    &effective_permissions.http_client,
+                )?;
             }
-            HandlerConfig::HttpFramework { config } => {
-                validate_http_framework_config(config, &effective_permissions.http_framework)?;
+            "http-framework" => {
+                validate_http_framework_config(
+                    &typed(handler_config)?,
+                    &effective_permissions.http_framework,
+                )?;
             }
-            HandlerConfig::Process { config } => {
-                validate_process_config(config, &effective_permissions.process)?;
+            "process" => {
+                validate_process_config(&typed(handler_config)?, &effective_permissions.process)?;
             }
-            HandlerConfig::Environment { config } => {
-                validate_environment_config(config, &effective_permissions.environment)?;
+            "environment" => {
+                validate_environment_config(
+                    &typed(handler_config)?,
+                    &effective_permissions.environment,
+                )?;
             }
-            HandlerConfig::Random { config } => {
-                validate_random_config(config, &effective_permissions.random)?;
+            "random" => {
+                validate_random_config(&typed(handler_config)?, &effective_permissions.random)?;
             }
-            HandlerConfig::Timing { config } => {
-                validate_timing_config(config, &effective_permissions.timing)?;
+            "timing" => {
+                validate_timing_config(&typed(handler_config)?, &effective_permissions.timing)?;
             }
-            HandlerConfig::MessageServer { .. } => {
-                if effective_permissions.message_server.is_none() {
-                    return Err(PermissionError::HandlerNotPermitted {
-                        handler_type: "message-server".to_string(),
-                    });
-                }
+            "message-server" if effective_permissions.message_server.is_none() => {
+                return Err(deny("message-server"));
             }
-            HandlerConfig::SelfHandler { .. } => {
-                if effective_permissions.runtime.is_none() {
-                    return Err(PermissionError::HandlerNotPermitted {
-                        handler_type: "runtime".to_string(),
-                    });
-                }
+            // The `self` and runtime-wide CONTROL interfaces both require the
+            // RuntimePermissions capability (inspect/mutate enforced per-op).
+            "self" | "runtime" if effective_permissions.runtime.is_none() => {
+                return Err(deny("runtime"));
             }
-            HandlerConfig::Runtime { .. } => {
-                // The runtime-wide CONTROL interface requires the RuntimePermissions
-                // capability (inspect/mutate enforced per-op in the handler).
-                if effective_permissions.runtime.is_none() {
-                    return Err(PermissionError::HandlerNotPermitted {
-                        handler_type: "runtime".to_string(),
-                    });
-                }
+            "supervisor" if effective_permissions.supervisor.is_none() => {
+                return Err(deny("supervisor"));
             }
-            HandlerConfig::Supervisor { .. } => {
-                if effective_permissions.supervisor.is_none() {
-                    return Err(PermissionError::HandlerNotPermitted {
-                        handler_type: "supervisor".to_string(),
-                    });
-                }
+            "store" if effective_permissions.store.is_none() => {
+                return Err(deny("store"));
             }
-            HandlerConfig::Store { .. } => {
-                if effective_permissions.store.is_none() {
-                    return Err(PermissionError::HandlerNotPermitted {
-                        handler_type: "store".to_string(),
-                    });
-                }
-            }
-            HandlerConfig::Replay { .. } => {
-                // Replay handler is always allowed - it's for debugging/testing
-                // The replay handler replays recorded event chains
-            }
-            HandlerConfig::Tcp { .. } => {
-                // TCP handler is allowed by default
-                // Fine-grained permission enforcement can be added later
-            }
-            HandlerConfig::Rpc { .. } => {
-                // RPC handler is allowed by default
-                // It enables actor-to-actor function calls
-            }
-            HandlerConfig::Terminal { .. } => {
-                // Terminal handler is allowed by default
-                // It provides stdin/stdout/stderr for interactive CLI apps
-            }
-            HandlerConfig::Timer { .. } => {
-                // Timer handler is allowed by default
-                // It provides periodic tick callbacks
-            }
-            HandlerConfig::Loop { .. } => {
-                // Loop handler is allowed by default
-                // It provides cooperative looping with yield points
-            }
-            HandlerConfig::Podman { .. } => {
-                // Podman handler is allowed by default. Container ops shell
-                // out to the host's podman binary; finer-grained permission
-                // enforcement can be added later (image allow-list, mount
-                // path constraints, etc).
-            }
+            // replay, tcp, rpc, terminal, timer, loop, podman — allowed by default;
+            // the granted ones above that pass their `is_none()` guard fall here too.
+            _ => {}
         }
     }
     Ok(())

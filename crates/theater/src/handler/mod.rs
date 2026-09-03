@@ -178,7 +178,7 @@ impl HandlerRegistry {
     ) -> Self {
         let mut new_registry = HandlerRegistry::new();
         for handler in &self.handlers {
-            let matching_config = configs.iter().find(|c| c.handler_name() == handler.name());
+            let matching_config = configs.iter().find(|c| c.type_name() == handler.name());
             let mut instance = handler.create_instance(matching_config);
             instance.set_permissions(permissions);
             new_registry.handlers.push(instance);

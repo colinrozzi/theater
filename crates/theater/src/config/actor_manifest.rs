@@ -98,133 +98,61 @@ pub struct InterfacesConfig {
     pub requires: Vec<String>,
 }
 
+/// One `[[handler]]` block from a manifest, kept as its **raw table** (including
+/// the `type` discriminant).
+///
+/// Handler configs are no longer a closed enum in core. Each handler owns its
+/// typed config struct and deserializes it from this raw table via
+/// [`HandlerConfig::parse`]; the runtime pairs a config with its handler by
+/// [`type_name`](Self::type_name). Adding a handler — including a third-party one
+/// — needs no change here.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(tag = "type")]
-pub enum HandlerConfig {
-    #[serde(rename = "message-server")]
-    MessageServer {
-        #[serde(flatten)]
-        config: MessageServerConfig,
-    },
-    #[serde(rename = "filesystem")]
-    FileSystem {
-        #[serde(flatten)]
-        config: FileSystemHandlerConfig,
-    },
-    #[serde(rename = "http-client")]
-    HttpClient {
-        #[serde(flatten)]
-        config: HttpClientHandlerConfig,
-    },
-    #[serde(rename = "http-framework")]
-    HttpFramework {
-        #[serde(flatten)]
-        config: HttpFrameworkHandlerConfig,
-    },
-    #[serde(rename = "self")]
-    SelfHandler {
-        #[serde(flatten)]
-        config: SelfHostConfig,
-    },
-    /// The runtime-wide CONTROL interface (theater:simple/runtime): inspect
-    /// and drive any actor by id. Capability-gated by RuntimePermissions.
-    #[serde(rename = "runtime")]
-    Runtime {
-        #[serde(flatten)]
-        config: RuntimeHostConfig,
-    },
-    #[serde(rename = "supervisor")]
-    Supervisor {
-        #[serde(flatten)]
-        config: SupervisorHostConfig,
-    },
-    #[serde(rename = "store")]
-    Store {
-        #[serde(flatten)]
-        config: StoreHandlerConfig,
-    },
-    #[serde(rename = "timing")]
-    Timing {
-        #[serde(flatten)]
-        config: TimingHostConfig,
-    },
-    #[serde(rename = "process")]
-    Process {
-        #[serde(flatten)]
-        config: ProcessHostConfig,
-    },
-    #[serde(rename = "environment")]
-    Environment {
-        #[serde(flatten)]
-        config: EnvironmentHandlerConfig,
-    },
-    #[serde(rename = "random")]
-    Random {
-        #[serde(flatten)]
-        config: RandomHandlerConfig,
-    },
-    #[serde(rename = "replay")]
-    Replay {
-        #[serde(flatten)]
-        config: ReplayHandlerConfig,
-    },
-    #[serde(rename = "tcp")]
-    Tcp {
-        #[serde(flatten)]
-        config: TcpHandlerConfig,
-    },
-    #[serde(rename = "rpc")]
-    Rpc {
-        #[serde(flatten)]
-        config: RpcHandlerConfig,
-    },
-    #[serde(rename = "terminal")]
-    Terminal {
-        #[serde(flatten)]
-        config: TerminalHandlerConfig,
-    },
-    #[serde(rename = "timer")]
-    Timer {
-        #[serde(flatten)]
-        config: TimerHandlerConfig,
-    },
-    #[serde(rename = "loop")]
-    Loop {
-        #[serde(flatten)]
-        config: LoopHandlerConfig,
-    },
-    #[serde(rename = "podman")]
-    Podman {
-        #[serde(flatten)]
-        config: PodmanHandlerConfig,
-    },
+#[serde(transparent)]
+pub struct HandlerConfig {
+    raw: toml::Table,
 }
 
 impl HandlerConfig {
-    /// Returns the handler name that this config applies to.
-    /// This matches the handler's `name()` method return value.
-    pub fn handler_name(&self) -> &'static str {
-        match self {
-            HandlerConfig::MessageServer { .. } => "message-server",
-            HandlerConfig::FileSystem { .. } => "filesystem",
-            HandlerConfig::HttpClient { .. } => "http-client",
-            HandlerConfig::HttpFramework { .. } => "http-framework",
-            HandlerConfig::SelfHandler { .. } => "self",
-            HandlerConfig::Runtime { .. } => "runtime",
-            HandlerConfig::Supervisor { .. } => "supervisor",
-            HandlerConfig::Store { .. } => "store",
-            HandlerConfig::Timing { .. } => "timing",
-            HandlerConfig::Process { .. } => "process",
-            HandlerConfig::Environment { .. } => "environment",
-            HandlerConfig::Random { .. } => "random",
-            HandlerConfig::Replay { .. } => "replay",
-            HandlerConfig::Tcp { .. } => "tcp",
-            HandlerConfig::Rpc { .. } => "rpc",
-            HandlerConfig::Terminal { .. } => "terminal",
-            HandlerConfig::Timer { .. } => "timer",
-            HandlerConfig::Loop { .. } => "loop",
-            HandlerConfig::Podman { .. } => "podman",
-        }
+    /// Build a handler config from a `type` tag and a typed config value.
+    /// Serializes `config` to a table and stamps the `type` in. Used for
+    /// programmatic manifests (tests, embedders).
+    pub fn new(type_name: &str, config: impl Serialize) -> Self {
+        let mut raw = match toml::Value::try_from(config) {
+            Ok(toml::Value::Table(t)) => t,
+            _ => toml::Table::new(),
+        };
+        raw.insert(
+            "type".to_string(),
+            toml::Value::String(type_name.to_string()),
+        );
+        Self { raw }
+    }
+
+    /// Build a handler config carrying only its `type` (no fields) — for the unit
+    /// configs (`self`, `supervisor`, `message-server`, …).
+    pub fn unit(type_name: &str) -> Self {
+        let mut raw = toml::Table::new();
+        raw.insert(
+            "type".to_string(),
+            toml::Value::String(type_name.to_string()),
+        );
+        Self { raw }
+    }
+
+    /// The `type` discriminant — matches the handler's `name()`.
+    pub fn type_name(&self) -> &str {
+        self.raw
+            .get("type")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+    }
+
+    /// Deserialize this handler's typed config from the raw table. The `type` key
+    /// is dropped first so configs that `deny_unknown_fields` still parse.
+    pub fn parse<T: serde::de::DeserializeOwned>(&self) -> Result<T, toml::de::Error> {
+        let mut table = self.raw.clone();
+        table.remove("type");
+        toml::Value::Table(table).try_into()
     }
 }
 

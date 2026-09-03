@@ -608,8 +608,11 @@ async fn do_transfer_async(
 impl Handler for TcpHandler {
     fn create_instance(&self, config: Option<&HandlerConfig>) -> Box<dyn Handler> {
         let tcp_config = match config {
-            Some(HandlerConfig::Tcp { config }) => config.clone(),
-            _ => self.config.clone(),
+            Some(c) => c.parse::<TcpHandlerConfig>().unwrap_or_else(|e| {
+                tracing::warn!("invalid tcp handler config: {}; using default", e);
+                self.config.clone()
+            }),
+            None => self.config.clone(),
         };
 
         // Build TLS context from config if different from current

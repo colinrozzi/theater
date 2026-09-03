@@ -78,8 +78,11 @@ impl HttpClientHandler {
 impl Handler for HttpClientHandler {
     fn create_instance(&self, config: Option<&HandlerConfig>) -> Box<dyn Handler> {
         let cfg = match config {
-            Some(HandlerConfig::HttpClient { config }) => config.clone(),
-            _ => self.config.clone(),
+            Some(c) => c.parse::<HttpClientHandlerConfig>().unwrap_or_else(|e| {
+                tracing::warn!("invalid http-client handler config: {}; using default", e);
+                self.config.clone()
+            }),
+            None => self.config.clone(),
         };
         Box::new(HttpClientHandler::new(cfg))
     }

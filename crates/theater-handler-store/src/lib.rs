@@ -248,18 +248,17 @@ impl Handler for StoreHandler {
         &self,
         config: Option<&theater::config::actor_manifest::HandlerConfig>,
     ) -> Box<dyn Handler> {
-        use theater::config::actor_manifest::HandlerConfig;
+        use theater::config::actor_manifest::StoreHandlerConfig;
 
-        if let Some(HandlerConfig::Store {
-            config: store_config,
-        }) = config
-        {
-            Box::new(StoreHandler::new(
-                store_config.clone(),
-                self.permissions.clone(),
-            ))
-        } else {
-            Box::new(self.clone())
+        match config {
+            Some(c) => {
+                let store_config = c.parse::<StoreHandlerConfig>().unwrap_or_else(|e| {
+                    tracing::warn!("invalid store handler config: {}; using default", e);
+                    StoreHandlerConfig::default()
+                });
+                Box::new(StoreHandler::new(store_config, self.permissions.clone()))
+            }
+            None => Box::new(self.clone()),
         }
     }
 
