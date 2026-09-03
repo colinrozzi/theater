@@ -28,7 +28,6 @@ use tokio::sync::mpsc::Sender;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::RwLock;
 use tokio::sync::{mpsc, oneshot};
-use tokio::task::JoinHandle;
 use tracing::{debug, error, info, warn};
 
 /// How long `actor.init` may run before the runtime starts emitting periodic
@@ -144,6 +143,9 @@ pub struct TheaterRuntime {
     /// one cache regardless of which entry point a spawn comes from.
     /// Opt-in per child manifest via `static_package = true`.
     resource_cache: Arc<ResourceCache>,
+    /// The spawn capability — how actor loops get put on the substrate. Native
+    /// (work-stealing) today; the seam a browser/embedded driver plugs into.
+    executor: crate::executor::Executor,
     /// Handler registry
     pub handler_registry: HandlerRegistry,
     /// Global subscribers — receive tagged events from every actor's chain.
@@ -174,7 +176,7 @@ pub struct ActorProcess {
     /// Actor Name
     pub name: String,
     /// Task handle for the running actor
-    pub process: JoinHandle<()>,
+    pub process: crate::executor::TaskHandle,
     /// Channel for sending messages to the actor
     pub mailbox_tx: mpsc::Sender<ActorMessage>,
     /// Channel for sending operations to the actor
@@ -243,6 +245,7 @@ impl TheaterRuntime {
             channels: HashMap::new(),
             pack_runtime,
             resource_cache,
+            executor: crate::executor::native_executor(),
             handler_registry,
             global_subscribers: Vec::new(),
         })
@@ -763,7 +766,8 @@ impl TheaterRuntime {
         let (setup_tx, setup_rx) = tokio::sync::oneshot::channel::<Result<(), ActorRuntimeError>>();
 
         let phase_start = Instant::now();
-        let actor_runtime_process = tokio::spawn(async move {
+        let executor_for_actor = self.executor.clone();
+        let actor_runtime_process = self.executor.spawn(Box::pin(async move {
             let _actor_runtime = ActorRuntime::start(
                 actor_id_for_task,
                 actor_name_for_task,
@@ -778,10 +782,11 @@ impl TheaterRuntime {
                 actor_info_tx,
                 control_rx,
                 actor_control_tx,
+                executor_for_actor,
                 Some(setup_tx),
             )
             .await;
-        });
+        }));
 
         // Wait for setup to complete
         match setup_rx.await {
@@ -865,7 +870,7 @@ impl TheaterRuntime {
         // command loop while the parent's init is still mid-flight).
         if call_init {
             let init_phase_start = Instant::now();
-            tokio::spawn(async move {
+            self.executor.spawn(Box::pin(async move {
                 // Deliver the resolved init config (manifest initial_state) as the
                 // argument to the actor's `init` export — the actor builds its
                 // in-module state from it. Nothing is threaded back.
@@ -916,7 +921,7 @@ impl TheaterRuntime {
                         let _ = response_tx.send(Err(SpawnError::Init(e)));
                     }
                 }
-            });
+            }));
         } else {
             let _ = response_tx.send(Ok(actor_id));
         }
