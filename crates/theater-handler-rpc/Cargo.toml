@@ -15,6 +15,9 @@ rust-version.workspace = true
 # Core theater dependencies
 theater.workspace = true
 
+# Config (de)serialization
+serde = { workspace = true }
+
 # Async runtime
 tokio = { version = "1.0", features = ["full"] }
 

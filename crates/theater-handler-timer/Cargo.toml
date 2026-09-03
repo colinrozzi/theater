@@ -14,6 +14,7 @@ description = "Timer handler for Theater WebAssembly runtime - periodic tick cal
 
 [dependencies]
 theater = { workspace = true }
+serde = { workspace = true }
 anyhow.workspace = true
 tracing.workspace = true
 tokio.workspace = true

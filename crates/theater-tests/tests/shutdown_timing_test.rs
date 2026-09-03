@@ -11,10 +11,7 @@
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use theater::config::actor_manifest::{
-    HandlerConfig, ManifestConfig, SelfHostConfig, StoreHandlerConfig, SupervisorHostConfig,
-    TcpHandlerConfig, TimerHandlerConfig,
-};
+use theater::config::actor_manifest::{HandlerConfig, ManifestConfig};
 use theater::config::inheritance::HandlerPermissionPolicy;
 use theater::handler::HandlerRegistry;
 use theater::messages::default_init_state;
@@ -23,11 +20,11 @@ use theater::utils::ResourceCache;
 use theater_handler_loop::LoopHandler;
 use theater_handler_message_server::{MessageRouter, MessageServerHandler};
 use theater_handler_rpc::RpcHandler;
-use theater_handler_self::SelfHandler;
-use theater_handler_store::StoreHandler;
-use theater_handler_supervisor::SupervisorHandler;
-use theater_handler_tcp::TcpHandler;
-use theater_handler_timer::TimerHandler;
+use theater_handler_self::{SelfHandler, SelfHostConfig};
+use theater_handler_store::{StoreHandler, StoreHandlerConfig};
+use theater_handler_supervisor::{SupervisorHandler, SupervisorHostConfig};
+use theater_handler_tcp::{TcpHandler, TcpHandlerConfig};
+use theater_handler_timer::{TimerHandler, TimerHandlerConfig};
 use tokio::sync::{mpsc, oneshot};
 use tracing::info;
 

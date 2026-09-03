@@ -7,14 +7,17 @@ use std::future::Future;
 use std::pin::Pin;
 use tracing::info;
 
+use serde::{Deserialize, Serialize};
 use theater::actor::handle::ActorHandle;
 use theater::actor::store::ActorStore;
-use theater::config::actor_manifest::SelfHostConfig;
 use theater::config::permissions::RuntimePermissions;
 use theater::handler::{Handler, HandlerContext, SharedActorInstance};
 use theater::messages::TheaterCommand;
 use theater::shutdown::ShutdownReceiver;
 use tokio::sync::mpsc::UnboundedSender;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SelfHostConfig {}
 
 // Pack integration
 use theater::pack_bridge::{
@@ -246,7 +249,6 @@ impl Handler for SelfHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use theater::config::actor_manifest::SelfHostConfig;
     use theater::pack_bridge::{
         decode_metadata_with_hashes, encode_metadata_with_hashes, Arena, Function, Param, Type,
     };

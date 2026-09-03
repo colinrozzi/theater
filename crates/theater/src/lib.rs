@@ -64,8 +64,7 @@ pub use actor::ActorStore;
 pub use actor::StartActorResult;
 pub use chain::{ChainEvent, StateChain};
 pub use config::actor_manifest::{
-    HandlerConfig, HttpServerHandlerConfig, InterfacesConfig, ManifestConfig, MessageServerConfig,
-    RandomHandlerConfig,
+    HandlerConfig, HttpServerHandlerConfig, InterfacesConfig, ManifestConfig, RandomHandlerConfig,
 };
 pub use errors::{SpawnError, TheaterRuntimeError};
 pub use id::TheaterId;

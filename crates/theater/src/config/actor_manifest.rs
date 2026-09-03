@@ -164,104 +164,6 @@ pub struct ReplayHandlerConfig {
     pub chain: PathBuf,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
-pub struct TcpHandlerConfig {
-    #[serde(default)]
-    pub listen: Option<String>,
-    #[serde(default)]
-    pub max_connections: Option<u32>,
-    /// TLS configuration for outbound client connections
-    #[serde(default)]
-    pub client_tls: Option<ClientTlsConfig>,
-    /// TLS configuration for inbound server connections (listeners)
-    #[serde(default)]
-    pub server_tls: Option<ServerTlsConfig>,
-}
-
-/// TLS configuration for outbound client connections
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct ClientTlsConfig {
-    /// Whether TLS is enabled for client connections
-    #[serde(default)]
-    pub enabled: bool,
-    /// Optional path to a custom CA certificate file (PEM format)
-    #[serde(default)]
-    pub ca_cert: Option<PathBuf>,
-    /// Skip certificate verification (for development only!)
-    #[serde(default)]
-    pub skip_verify: bool,
-    /// Automatically perform a TLS handshake when `connect()` is called.
-    /// True (default) keeps the existing behaviour — every outbound connection
-    /// is encrypted. Set to false for STARTTLS-style protocols where the
-    /// actor wants a plain TCP connection initially and will call
-    /// `upgrade-to-tls-client` after negotiating the upgrade.
-    #[serde(default = "default_true")]
-    pub auto_handshake: bool,
-}
-
-fn default_true() -> bool {
-    true
-}
-
-/// TLS configuration for inbound server connections (listeners)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct ServerTlsConfig {
-    /// Whether TLS is enabled for server listeners
-    #[serde(default)]
-    pub enabled: bool,
-    /// Path to the server certificate file (PEM format)
-    pub cert: PathBuf,
-    /// Path to the server private key file (PEM format)
-    pub key: PathBuf,
-}
-
-/// Configuration for the RPC handler
-/// This handler enables direct actor-to-actor function calls
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
-pub struct RpcHandlerConfig {}
-
-/// Configuration for the Terminal handler
-/// This handler provides terminal I/O for interactive CLI applications
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
-pub struct TerminalHandlerConfig {
-    /// Whether to start in raw mode (disables line buffering and echo)
-    #[serde(default)]
-    pub raw_mode: Option<bool>,
-}
-
-/// Configuration for the Timer handler
-/// This handler provides periodic tick callbacks for game loops, polling, etc.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
-pub struct TimerHandlerConfig {
-    /// Default interval in milliseconds for the timer tick
-    /// If set, starts a "default" timer automatically
-    #[serde(default)]
-    pub interval_ms: Option<u64>,
-}
-
-/// Configuration for the Loop handler
-/// This handler provides cooperative looping with yield points
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
-pub struct LoopHandlerConfig {}
-
-/// Configuration for the Podman handler.
-/// This handler shells out to the `podman` CLI to manage containers.
-/// No daemon required; the host needs only podman installed.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
-pub struct PodmanHandlerConfig {}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct SupervisorHostConfig {}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct SelfHostConfig {}
-
-/// Configuration for the runtime CONTROL handler (theater:simple/runtime).
-/// Runtime-wide control plane (inspect/drive any actor); capability-gated by
-/// RuntimePermissions { inspect, mutate }. No fields today.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct RuntimeHostConfig {}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct TimingHostConfig {
     #[serde(default = "default_max_sleep_duration")]
@@ -291,9 +193,6 @@ pub struct WebSocketServerHandlerConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct MessageServerConfig {}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct FileSystemHandlerConfig {
     pub path: Option<PathBuf>,
     pub new_dir: Option<bool>,
@@ -307,17 +206,6 @@ pub struct FileSystemHandlerConfig {
 pub struct HttpClientHandlerConfig {
     #[serde(default)]
     pub allowed_hosts: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
-pub struct StoreHandlerConfig {
-    /// Custom base path for the content store. If not set, uses the default location.
-    #[serde(default)]
-    pub base_path: Option<std::path::PathBuf>,
-    /// Fixed store ID. If set, actors will use this ID instead of creating a new store.
-    /// This allows multiple actors to share the same store.
-    #[serde(default)]
-    pub store_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

@@ -43,6 +43,9 @@ use theater::TheaterId;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MessageServerConfig {}
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};

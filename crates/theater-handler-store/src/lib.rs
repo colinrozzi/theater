@@ -15,8 +15,7 @@
 //! ## Usage
 //!
 //! ```rust
-//! use theater_handler_store::StoreHandler;
-//! use theater::config::actor_manifest::StoreHandlerConfig;
+//! use theater_handler_store::{StoreHandler, StoreHandlerConfig};
 //!
 //! let config = StoreHandlerConfig::default();
 //! let handler = StoreHandler::new(config, None);
@@ -57,14 +56,25 @@ impl Drop for PhaseLog {
     }
 }
 
+use serde::{Deserialize, Serialize};
 use theater::actor::handle::ActorHandle;
 use theater::actor::store::ActorStore;
 use theater::actor::types::ActorError;
-use theater::config::actor_manifest::StoreHandlerConfig;
 use theater::config::permissions::StorePermissions;
 use theater::handler::{Handler, HandlerContext, SharedActorInstance};
 use theater::shutdown::ShutdownReceiver;
 use theater_store::{ContentRef, ContentStore, Label};
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct StoreHandlerConfig {
+    /// Custom base path for the content store. If not set, uses the default location.
+    #[serde(default)]
+    pub base_path: Option<std::path::PathBuf>,
+    /// Fixed store ID. If set, actors will use this ID instead of creating a new store.
+    /// This allows multiple actors to share the same store.
+    #[serde(default)]
+    pub store_id: Option<String>,
+}
 
 // Pack integration
 use theater::pack_bridge::{
@@ -248,7 +258,7 @@ impl Handler for StoreHandler {
         &self,
         config: Option<&theater::config::actor_manifest::HandlerConfig>,
     ) -> Box<dyn Handler> {
-        use theater::config::actor_manifest::StoreHandlerConfig;
+        use crate::StoreHandlerConfig;
 
         match config {
             Some(c) => {

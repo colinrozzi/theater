@@ -12,10 +12,11 @@ use tokio::sync::{mpsc, RwLock};
 
 use theater::actor::handle::ActorHandle;
 use theater::actor::types::{ActorControl, ActorInfo, ActorOperation};
-use theater::config::actor_manifest::{SelfHostConfig, SupervisorHostConfig};
 use theater::handler::{Handler, SharedActorInstance};
 use theater::messages::TheaterCommand;
 use theater::shutdown::{ShutdownController, ShutdownType};
+use theater_handler_self::SelfHostConfig;
+use theater_handler_supervisor::SupervisorHostConfig;
 
 /// Timeout for handler shutdown tests
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
@@ -122,8 +123,7 @@ async fn test_runtime_handler_shutdown() {
 
 #[tokio::test]
 async fn test_store_handler_shutdown() {
-    use theater::config::actor_manifest::StoreHandlerConfig;
-    use theater_handler_store::StoreHandler;
+    use theater_handler_store::{StoreHandler, StoreHandlerConfig};
 
     let config = StoreHandlerConfig::default();
     let handler = StoreHandler::new(config, None);
@@ -155,8 +155,7 @@ async fn test_rpc_handler_shutdown() {
 
 #[tokio::test]
 async fn test_timer_handler_shutdown() {
-    use theater::config::actor_manifest::TimerHandlerConfig;
-    use theater_handler_timer::TimerHandler;
+    use theater_handler_timer::{TimerHandler, TimerHandlerConfig};
 
     let config = TimerHandlerConfig::default();
     let handler = TimerHandler::new(config);
@@ -172,8 +171,7 @@ async fn test_timer_handler_shutdown() {
 
 #[tokio::test]
 async fn test_tcp_handler_shutdown() {
-    use theater::config::actor_manifest::TcpHandlerConfig;
-    use theater_handler_tcp::TcpHandler;
+    use theater_handler_tcp::{TcpHandler, TcpHandlerConfig};
 
     let config = TcpHandlerConfig::default();
     let handler = TcpHandler::new(config);
@@ -206,8 +204,7 @@ async fn test_loop_handler_shutdown_without_start() {
 
 #[tokio::test]
 async fn test_terminal_handler_shutdown_without_enable_input() {
-    use theater::config::actor_manifest::TerminalHandlerConfig;
-    use theater_handler_terminal::TerminalHandler;
+    use theater_handler_terminal::{TerminalHandler, TerminalHandlerConfig};
 
     let config = TerminalHandlerConfig::default();
     let handler = TerminalHandler::new(config);

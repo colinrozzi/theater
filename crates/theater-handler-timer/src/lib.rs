@@ -11,14 +11,25 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, Mutex};
 use tracing::{debug, info};
 
 use theater::actor::handle::ActorHandle;
 use theater::actor::store::ActorStore;
-use theater::config::actor_manifest::{HandlerConfig, TimerHandlerConfig};
+use theater::config::actor_manifest::HandlerConfig;
 use theater::handler::{Handler, HandlerContext, SharedActorInstance};
 use theater::shutdown::ShutdownReceiver;
+
+/// Configuration for the Timer handler
+/// This handler provides periodic tick callbacks for game loops, polling, etc.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct TimerHandlerConfig {
+    /// Default interval in milliseconds for the timer tick
+    /// If set, starts a "default" timer automatically
+    #[serde(default)]
+    pub interval_ms: Option<u64>,
+}
 
 use theater::pack_bridge::{
     parse_pact, AsyncCtx, HostLinkerBuilder, InterfaceImpl, LinkerError, TypeHash, Value,

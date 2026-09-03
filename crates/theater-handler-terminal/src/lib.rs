@@ -9,15 +9,25 @@ use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
+use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncReadExt, BufReader};
 use tokio::sync::{Mutex, Notify};
 use tracing::{debug, error, info, warn};
 
 use theater::actor::handle::ActorHandle;
 use theater::actor::store::ActorStore;
-use theater::config::actor_manifest::{HandlerConfig, TerminalHandlerConfig};
+use theater::config::actor_manifest::HandlerConfig;
 use theater::handler::{Handler, HandlerContext, SharedActorInstance};
 use theater::shutdown::ShutdownReceiver;
+
+/// Configuration for the Terminal handler
+/// This handler provides terminal I/O for interactive CLI applications
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct TerminalHandlerConfig {
+    /// Whether to start in raw mode (disables line buffering and echo)
+    #[serde(default)]
+    pub raw_mode: Option<bool>,
+}
 
 use theater::pack_bridge::{
     parse_pact, AsyncCtx, HostLinkerBuilder, InterfaceImpl, LinkerError, TypeHash, Value, ValueType,

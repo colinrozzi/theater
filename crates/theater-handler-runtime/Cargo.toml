@@ -13,6 +13,7 @@ rust-version.workspace = true
 
 [dependencies]
 theater = { workspace = true }
+serde = { workspace = true }
 anyhow.workspace = true
 tracing.workspace = true
 tokio = { workspace = true, features = ["sync", "time"] }

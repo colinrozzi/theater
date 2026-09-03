@@ -23,11 +23,7 @@
 
 use std::sync::Arc;
 
-use theater::config::actor_manifest::{
-    HttpClientHandlerConfig, PodmanHandlerConfig, RuntimeHostConfig, SelfHostConfig,
-    StoreHandlerConfig, SupervisorHostConfig, TcpHandlerConfig, TerminalHandlerConfig,
-    TimerHandlerConfig,
-};
+use theater::config::actor_manifest::HttpClientHandlerConfig;
 use theater::handler::HandlerRegistry;
 use theater::messages::TheaterCommand;
 use theater::utils::ResourceCache;
@@ -37,15 +33,15 @@ use theater_handler_http_client::HttpClientHandler;
 use theater_handler_lifecycle::LifecycleHandler;
 use theater_handler_loop::LoopHandler;
 use theater_handler_message_server::{MessageRouter, MessageServerHandler};
-use theater_handler_podman::PodmanHandler;
+use theater_handler_podman::{PodmanHandler, PodmanHandlerConfig};
 use theater_handler_rpc::RpcHandler;
-use theater_handler_runtime::RuntimeHandler;
-use theater_handler_self::SelfHandler;
-use theater_handler_store::StoreHandler;
-use theater_handler_supervisor::SupervisorHandler;
-use theater_handler_tcp::TcpHandler;
-use theater_handler_terminal::TerminalHandler;
-use theater_handler_timer::TimerHandler;
+use theater_handler_runtime::{RuntimeHandler, RuntimeHostConfig};
+use theater_handler_self::{SelfHandler, SelfHostConfig};
+use theater_handler_store::{StoreHandler, StoreHandlerConfig};
+use theater_handler_supervisor::{SupervisorHandler, SupervisorHostConfig};
+use theater_handler_tcp::{TcpHandler, TcpHandlerConfig};
+use theater_handler_terminal::{TerminalHandler, TerminalHandlerConfig};
+use theater_handler_timer::{TimerHandler, TimerHandlerConfig};
 
 /// Options for assembling the standard handler set.
 pub struct StandardHandlers {

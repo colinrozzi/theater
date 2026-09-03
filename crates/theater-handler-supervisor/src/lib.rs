@@ -4,12 +4,15 @@
 
 pub mod events;
 
+use serde::{Deserialize, Serialize};
 use theater::actor::handle::ActorHandle;
 use theater::actor::runtime::ActorRuntimeError;
 use theater::actor::store::ActorStore;
 use theater::chain::ChainEvent;
-use theater::config::actor_manifest::SupervisorHostConfig;
 use theater::config::permissions::{SupervisorPermissions, ViewScope};
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SupervisorHostConfig {}
 use theater::events::lifecycle::{ActorLifecycleEvent, TerminationCause};
 use theater::events::{decode_chain_event_payload, ChainEventPayload};
 use theater::handler::{Handler, HandlerContext, SharedActorInstance};
@@ -1479,7 +1482,6 @@ fn parse_optional_u64(value: &Value) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use theater::config::actor_manifest::SupervisorHostConfig;
 
     #[test]
     fn test_supervisor_handler_creation() {
