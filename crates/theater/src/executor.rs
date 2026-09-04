@@ -42,7 +42,9 @@ impl std::fmt::Display for TaskError {
 /// `&mut handle` is itself a future), [`abort`](Self::abort)s it, joins after
 /// abort, and checks [`is_finished`](Self::is_finished). A driver's concrete handle
 /// (native: a `tokio::task::JoinHandle` wrapper) implements this contract.
-pub trait SpawnedTask: Future<Output = Result<(), TaskError>> + Unpin + Send + Sync + 'static {
+pub trait SpawnedTask:
+    Future<Output = Result<(), TaskError>> + Unpin + Send + Sync + 'static
+{
     /// Cancel the task. Idempotent; safe after completion.
     fn abort(&self);
 
@@ -66,53 +68,4 @@ pub trait Spawn: Clone + Send + Sync + 'static {
     type Handle: SpawnedTask;
 
     fn spawn(&self, task: BoxedTask) -> Self::Handle;
-}
-
-// ---------------------------------------------------------------------------
-// Native driver (temporary home). This `TokioSpawn` + `TokioTaskHandle` pair is
-// the native work-stealing driver; it moves to the `theater-native` crate in the
-// next step. Kept here for now so the generic-handle refactor lands green first.
-// ---------------------------------------------------------------------------
-
-use std::task::{Context, Poll};
-
-/// Native task handle: a thin wrapper over `tokio::task::JoinHandle`.
-pub struct TokioTaskHandle {
-    inner: tokio::task::JoinHandle<()>,
-}
-
-impl SpawnedTask for TokioTaskHandle {
-    fn abort(&self) {
-        self.inner.abort();
-    }
-
-    fn is_finished(&self) -> bool {
-        self.inner.is_finished()
-    }
-}
-
-impl Future for TokioTaskHandle {
-    type Output = Result<(), TaskError>;
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        // `JoinHandle` is `Unpin`, so this is sound and keeps `&mut TokioTaskHandle`
-        // usable directly in `select!`.
-        Pin::new(&mut self.inner)
-            .poll(cx)
-            .map_err(|e| TaskError::new(e.to_string()))
-    }
-}
-
-/// The native work-stealing driver: `tokio::spawn`.
-#[derive(Clone, Copy, Default)]
-pub struct TokioSpawn;
-
-impl Spawn for TokioSpawn {
-    type Handle = TokioTaskHandle;
-
-    fn spawn(&self, task: BoxedTask) -> Self::Handle {
-        TokioTaskHandle {
-            inner: tokio::spawn(task),
-        }
-    }
 }

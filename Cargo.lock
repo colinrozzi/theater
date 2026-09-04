@@ -2911,6 +2911,7 @@ dependencies = [
  "tempfile",
  "test-log",
  "theater-chain",
+ "theater-native",
  "theater-store",
  "thiserror 1.0.69",
  "tokio",
@@ -2951,6 +2952,7 @@ dependencies = [
  "serde_yaml",
  "tempfile",
  "theater",
+ "theater-native",
  "theater-stage",
  "thiserror 1.0.69",
  "tokio",
@@ -3161,6 +3163,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "theater-native"
+version = "0.1.0"
+dependencies = [
+ "theater",
+ "tokio",
+]
+
+[[package]]
 name = "theater-stage"
 version = "0.1.0"
 dependencies = [
@@ -3215,6 +3225,7 @@ dependencies = [
  "theater-handler-tcp",
  "theater-handler-terminal",
  "theater-handler-timer",
+ "theater-native",
  "tokio",
  "tracing",
  "tracing-subscriber",

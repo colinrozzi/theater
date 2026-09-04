@@ -10,11 +10,11 @@ use crate::actor::types::ActorError;
 use crate::actor::types::ActorOperation;
 use crate::events::wasm::WasmEventData;
 use crate::events::ChainEventData;
+use crate::executor::SpawnedTask;
 use crate::handler::HandlerContext;
 use crate::handler::HandlerRegistry;
 use crate::id::TheaterId;
 use crate::interceptor::{RecordingInterceptor, ReplayRecordingInterceptor};
-use crate::executor::SpawnedTask;
 use crate::messages::TheaterCommand;
 use crate::pack_bridge::{
     CachingPackRuntime, CallInterceptor, HostLinkerBuilder, PackInstance, Value,
@@ -576,8 +576,7 @@ impl ActorRuntime {
 
         // These will be set once setup completes
         let actor_instance_wrapper: Arc<RwLock<Option<PackInstance>>> = Arc::new(RwLock::new(None));
-        let handler_tasks: Arc<RwLock<Vec<E::Handle>>> =
-            Arc::new(RwLock::new(vec![]));
+        let handler_tasks: Arc<RwLock<Vec<E::Handle>>> = Arc::new(RwLock::new(vec![]));
         let handlers_shutdown_controller: Arc<RwLock<Option<ShutdownController>>> =
             Arc::new(RwLock::new(None));
         let operation_rx = operation_rx;

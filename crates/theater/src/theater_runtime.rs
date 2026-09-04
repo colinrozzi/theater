@@ -74,7 +74,7 @@ const INIT_WATCHDOG_WARN_INTERVAL: Duration = Duration::from_secs(30);
 ///         theater_rx,
 ///         HandlerRegistry::new(),
 ///         Arc::new(ResourceCache::new()),
-///         theater::executor::TokioSpawn,
+///         theater_native::TokioSpawn,
 ///     ).await?;
 ///
 ///     // Start a background task to run the runtime
@@ -224,7 +224,7 @@ impl<E: crate::executor::Spawn> TheaterRuntime<E> {
     ///     theater_rx,
     ///     HandlerRegistry::new(),
     ///     Arc::new(ResourceCache::new()),
-    ///     theater::executor::TokioSpawn,
+    ///     theater_native::TokioSpawn,
     /// ).await?;
     /// # Ok(())
     /// # }
@@ -829,7 +829,7 @@ impl<E: crate::executor::Spawn> TheaterRuntime<E> {
             let init_phase_start = Instant::now();
             // Fire-and-forget: the init task detaches (dropping the handle does not
             // cancel it on the native driver), so response_tx fires from inside it.
-            let _ = self.executor.spawn(Box::pin(async move {
+            let _init_task = self.executor.spawn(Box::pin(async move {
                 // Deliver the resolved init config (manifest initial_state) as the
                 // argument to the actor's `init` export — the actor builds its
                 // in-module state from it. Nothing is threaded back.
@@ -1127,7 +1127,7 @@ impl<E: crate::executor::Spawn> TheaterRuntime<E> {
     /// # use theater::theater_runtime::TheaterRuntime;
     /// # use anyhow::Result;
     /// #
-    /// # async fn example(mut runtime: TheaterRuntime<theater::executor::TokioSpawn>) -> Result<()> {
+    /// # async fn example(mut runtime: TheaterRuntime<theater_native::TokioSpawn>) -> Result<()> {
     /// // Shut down the runtime
     /// runtime.stop().await?;
     /// # Ok(())
