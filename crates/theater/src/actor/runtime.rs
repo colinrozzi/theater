@@ -14,6 +14,7 @@ use crate::handler::HandlerContext;
 use crate::handler::HandlerRegistry;
 use crate::id::TheaterId;
 use crate::interceptor::{RecordingInterceptor, ReplayRecordingInterceptor};
+use crate::executor::SpawnedTask;
 use crate::messages::TheaterCommand;
 use crate::pack_bridge::{
     CachingPackRuntime, CallInterceptor, HostLinkerBuilder, PackInstance, Value,
@@ -196,7 +197,7 @@ impl ActorRuntime {
         actor_phase_manager: ActorPhaseManager,
         actor_instance_wrapper: Arc<RwLock<Option<PackInstance>>>,
         executor: E,
-    ) -> Result<(ShutdownController, Vec<crate::executor::TaskHandle>), ActorRuntimeError> {
+    ) -> Result<(ShutdownController, Vec<E::Handle>), ActorRuntimeError> {
         // ---------------- Checkpoint Setup Initial ----------------
 
         debug!("Setting up actor store");
@@ -515,7 +516,7 @@ impl ActorRuntime {
         }
 
         // Set up handlers - use the shutdown_controller created earlier
-        let mut handler_tasks: Vec<crate::executor::TaskHandle> = vec![];
+        let mut handler_tasks: Vec<E::Handle> = vec![];
         let handler_actor_handle = actor_handle.clone();
         let handlers_count = handlers.len();
         debug!("Setting up {} handlers", handlers_count);
@@ -575,7 +576,7 @@ impl ActorRuntime {
 
         // These will be set once setup completes
         let actor_instance_wrapper: Arc<RwLock<Option<PackInstance>>> = Arc::new(RwLock::new(None));
-        let handler_tasks: Arc<RwLock<Vec<crate::executor::TaskHandle>>> =
+        let handler_tasks: Arc<RwLock<Vec<E::Handle>>> =
             Arc::new(RwLock::new(vec![]));
         let handlers_shutdown_controller: Arc<RwLock<Option<ShutdownController>>> =
             Arc::new(RwLock::new(None));
