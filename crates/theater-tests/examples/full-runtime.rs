@@ -100,7 +100,7 @@ async fn main() -> Result<()> {
         theater_rx,
         handler_registry,
         Arc::new(ResourceCache::new()),
-        theater::executor::TokioSpawn,
+        theater_native::TokioSpawn,
     )
     .await?;
 

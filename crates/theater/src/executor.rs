@@ -1,18 +1,19 @@
-//! The spawn seam — how `theater-core` puts long-lived actor loops on the substrate.
+//! The spawn seam — how `theater` puts long-lived actor loops on the substrate.
 //!
-//! The core does not spawn tasks itself; it asks a [`Spawn`] for one. Native
-//! provides [`TokioSpawn`] (work-stealing); a browser driver would provide a
-//! Worker/`spawn_local`-based one, an embedded driver an embassy task. The core
-//! stays agnostic — this is the one capability it needs from its driver to run.
+//! The core does not spawn tasks itself; it asks a [`Spawn`] for one and holds the
+//! result as an opaque [`SpawnedTask`]. The native work-stealing driver
+//! (`theater-native`'s `TokioSpawn`) provides both; a browser driver would provide
+//! a Worker/`spawn_local`-based one, an embedded driver an embassy task. The core
+//! stays agnostic — [`Spawn`] is the one capability it needs from its driver to run.
 //!
-//! A [`TaskHandle`] reproduces the slice of `tokio::task::JoinHandle` the actor
+//! [`SpawnedTask`] reproduces the slice of `tokio::task::JoinHandle` the actor
 //! lifecycle actually uses: it's a `Future` (await it for completion, poll it in a
-//! `select!`) and it can be [`abort`](TaskHandle::abort)ed. Native wraps a real
-//! `JoinHandle`; other drivers implement the same contract.
+//! `select!`), it can be [`abort`](SpawnedTask::abort)ed, and its liveness can be
+//! polled with [`is_finished`](SpawnedTask::is_finished). A driver names its own
+//! concrete handle via [`Spawn::Handle`].
 
 use std::future::Future;
 use std::pin::Pin;
-use std::task::{Context, Poll};
 
 /// A boxed, `Send` future the core hands to a driver to run.
 pub type BoxedTask = Pin<Box<dyn Future<Output = ()> + Send + 'static>>;
@@ -21,42 +22,34 @@ pub type BoxedTask = Pin<Box<dyn Future<Output = ()> + Send + 'static>>;
 #[derive(Debug)]
 pub struct TaskError(String);
 
+impl TaskError {
+    /// Build a `TaskError` from a driver's join failure (panic / cancellation).
+    /// Drivers construct this when reporting an abnormal task end to the core.
+    pub fn new(detail: impl Into<String>) -> Self {
+        Self(detail.into())
+    }
+}
+
 impl std::fmt::Display for TaskError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
     }
 }
 
-/// A handle to a spawned task: `Future` (completion) + [`abort`](Self::abort).
+/// A handle to a spawned actor loop, as the core consumes it.
 ///
-/// Native backs this with `tokio::task::JoinHandle`; the actor lifecycle awaits it
-/// in `select!`, aborts it, and joins after abort — this exposes exactly that.
-pub struct TaskHandle {
-    inner: tokio::task::JoinHandle<()>,
-}
-
-impl TaskHandle {
+/// The actor lifecycle awaits it in a `select!` (hence `Future` + `Unpin`, so
+/// `&mut handle` is itself a future), [`abort`](Self::abort)s it, joins after
+/// abort, and checks [`is_finished`](Self::is_finished). A driver's concrete handle
+/// (native: a `tokio::task::JoinHandle` wrapper) implements this contract.
+pub trait SpawnedTask:
+    Future<Output = Result<(), TaskError>> + Unpin + Send + Sync + 'static
+{
     /// Cancel the task. Idempotent; safe after completion.
-    pub fn abort(&self) {
-        self.inner.abort();
-    }
+    fn abort(&self);
 
     /// Whether the task has finished (completed, panicked, or was aborted).
-    pub fn is_finished(&self) -> bool {
-        self.inner.is_finished()
-    }
-}
-
-impl Future for TaskHandle {
-    type Output = Result<(), TaskError>;
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        // `JoinHandle` is `Unpin`, so this is sound and keeps `&mut TaskHandle`
-        // usable directly in `select!`.
-        Pin::new(&mut self.inner)
-            .poll(cx)
-            .map_err(|e| TaskError(e.to_string()))
-    }
+    fn is_finished(&self) -> bool;
 }
 
 /// The spawn capability a driver gives the core: run a long-lived actor loop.
@@ -65,21 +58,14 @@ impl Future for TaskHandle {
 /// `dyn`: which substrate a node runs on is a *compile-time* property of the build
 /// (a native binary vs a browser wasm binary — never swapped at runtime), so a type
 /// parameter is the honest model and makes the runtime's defining axis visible in
-/// its type. `Clone` because the runtime hands the executor to each spawned task; a
-/// driver's executor is a cheap handle (ZST here; `Rc`/`Arc` elsewhere).
+/// its type. The spawned handle is a driver-chosen associated type ([`Self::Handle`])
+/// so the core never names a concrete (native) handle — that's what lets the driver
+/// live in its own crate. `Clone` because the runtime hands the executor to each
+/// spawned task; a driver's executor is a cheap handle (ZST for native; `Rc`/`Arc`
+/// elsewhere).
 pub trait Spawn: Clone + Send + Sync + 'static {
-    fn spawn(&self, task: BoxedTask) -> TaskHandle;
-}
+    /// The concrete task handle this driver produces.
+    type Handle: SpawnedTask;
 
-/// The native work-stealing driver: `tokio::spawn`. This is `theater-driver-native`
-/// in miniature — it will move to its own crate at the split.
-#[derive(Clone, Copy, Default)]
-pub struct TokioSpawn;
-
-impl Spawn for TokioSpawn {
-    fn spawn(&self, task: BoxedTask) -> TaskHandle {
-        TaskHandle {
-            inner: tokio::spawn(task),
-        }
-    }
+    fn spawn(&self, task: BoxedTask) -> Self::Handle;
 }

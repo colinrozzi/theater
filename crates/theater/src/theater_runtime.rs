@@ -74,7 +74,7 @@ const INIT_WATCHDOG_WARN_INTERVAL: Duration = Duration::from_secs(30);
 ///         theater_rx,
 ///         HandlerRegistry::new(),
 ///         Arc::new(ResourceCache::new()),
-///         theater::executor::TokioSpawn,
+///         theater_native::TokioSpawn,
 ///     ).await?;
 ///
 ///     // Start a background task to run the runtime
@@ -111,7 +111,7 @@ pub struct TheaterRuntime<E: crate::executor::Spawn> {
     /// flat set of live actors — supervision (parenthood, view-scope, the
     /// stop-children cascade) is owned by the supervisor handler, which knows
     /// its own direct children.
-    actors: HashMap<TheaterId, ActorProcess>,
+    actors: HashMap<TheaterId, ActorProcess<E>>,
     /// Map of chains index by actor ID
     chains: HashMap<TheaterId, Arc<RwLock<StateChain>>>,
     /// Runtime-wide spawn-notification subscribers. Every actor spawned
@@ -171,13 +171,13 @@ pub struct TheaterRuntime<E: crate::executor::Spawn> {
 /// The ActorProcess is maintained by the TheaterRuntime and typically not accessed directly
 /// by users of the library. It contains internal channels used to communicate with the actor's
 /// execution environment.
-pub struct ActorProcess {
+pub struct ActorProcess<E: crate::executor::Spawn> {
     /// Unique identifier for the actor
     pub actor_id: TheaterId,
     /// Actor Name
     pub name: String,
-    /// Task handle for the running actor
-    pub process: crate::executor::TaskHandle,
+    /// Task handle for the running actor (the driver's concrete handle type)
+    pub process: E::Handle,
     /// Channel for sending messages to the actor
     pub mailbox_tx: mpsc::Sender<ActorMessage>,
     /// Channel for sending operations to the actor
@@ -224,7 +224,7 @@ impl<E: crate::executor::Spawn> TheaterRuntime<E> {
     ///     theater_rx,
     ///     HandlerRegistry::new(),
     ///     Arc::new(ResourceCache::new()),
-    ///     theater::executor::TokioSpawn,
+    ///     theater_native::TokioSpawn,
     /// ).await?;
     /// # Ok(())
     /// # }
@@ -618,13 +618,13 @@ impl<E: crate::executor::Spawn> TheaterRuntime<E> {
     /// Insert an actor into the runtime's flat actor set. The runtime holds no
     /// lineage — parenthood, view-scope, and the stop-children cascade are the
     /// supervisor handler's job.
-    fn register_actor(&mut self, process: ActorProcess) {
+    fn register_actor(&mut self, process: ActorProcess<E>) {
         self.actors.insert(process.actor_id, process);
     }
 
     /// Remove an actor from the runtime's flat actor set. Returns the removed
     /// process, if the actor was present.
-    fn deregister_actor(&mut self, actor_id: &TheaterId) -> Option<ActorProcess> {
+    fn deregister_actor(&mut self, actor_id: &TheaterId) -> Option<ActorProcess<E>> {
         self.actors.remove(actor_id)
     }
 
@@ -827,7 +827,9 @@ impl<E: crate::executor::Spawn> TheaterRuntime<E> {
         // command loop while the parent's init is still mid-flight).
         if call_init {
             let init_phase_start = Instant::now();
-            self.executor.spawn(Box::pin(async move {
+            // Fire-and-forget: the init task detaches (dropping the handle does not
+            // cancel it on the native driver), so response_tx fires from inside it.
+            let _init_task = self.executor.spawn(Box::pin(async move {
                 // Deliver the resolved init config (manifest initial_state) as the
                 // argument to the actor's `init` export — the actor builds its
                 // in-module state from it. Nothing is threaded back.
@@ -1125,7 +1127,7 @@ impl<E: crate::executor::Spawn> TheaterRuntime<E> {
     /// # use theater::theater_runtime::TheaterRuntime;
     /// # use anyhow::Result;
     /// #
-    /// # async fn example(mut runtime: TheaterRuntime<theater::executor::TokioSpawn>) -> Result<()> {
+    /// # async fn example(mut runtime: TheaterRuntime<theater_native::TokioSpawn>) -> Result<()> {
     /// // Shut down the runtime
     /// runtime.stop().await?;
     /// # Ok(())

@@ -48,8 +48,15 @@ The audit (below) says the seam is smaller than the note first sketched:
    Colin's call: rip it, don't abstract it (a Clock capability / a `web-time` swap would
    just relocate the coupling). Only the *async timers* (teardown timeouts, init-watchdog,
    epoch ticker) matter; they're preemption/safety and go to the driver at the split.
-3. **Channels** — become a non-issue by switching core from tokio channels to
-   `futures::channel` (portable: native, wasm, embedded). One gap: `watch`.
+3. ~~**Channels → futures::channel**~~ — **DROPPED; channels were never the blocker.**
+   `tokio::sync` (mpsc/oneshot/watch/RwLock) is runtime-agnostic and compiles on wasm32;
+   `select!`/`pin!`/`join!` are executor-agnostic macros. Only `tokio::time`,
+   `tokio::net`/`fs`, and the runtime/`spawn` aren't portable. Swapping channels would be
+   pure churn (and would hit the `futures` bounded-mpsc `&mut`-send wall). The real
+   remaining non-portable surface: the timers (→ driver), `resolve_reference`'s `fs::read`
+   (→ driver/store), the `pack_bridge` runtime handle (engine seam). In-workspace feature
+   unification masks a per-crate `tokio` narrowing, so the authoritative proof is the wasm
+   build at the crate split.
 
 ## The audit (load-bearing section)
 
@@ -215,18 +222,23 @@ also draws the line between where the actor model ends and the environment begin
    Correction to the audit: there is **no** load-bearing chain-event timestamp; the only
    `chrono` was ChannelId hash entropy. Native behavior identical (lib 35 / doctests 21 /
    theater-tests teardown net all green). +7/−300 + metrics.rs (−250).
-3. **Restructure the init-fire** (spawn site #7 → operation + completion channel).
-   Kills the one detached spawn. Non-disturbing.
-4. **Spawn seam:** introduce a driver-provided `Spawn`; route the 6 loops through it;
-   native impl = `tokio::spawn`. Behavior byte-identical on native. *This seam is the
-   core/driver boundary.*
-5. **Channel swap** to `futures::channel` (+ the watch gap).
-6. **Crate split:** extract `theater-core` + `theater-driver-native`, moving the
-   `Handler` contract + the I/O handlers driver-side while `message-server`/
-   `supervisor`/`lifecycle`/`self` stay core. A new driver is a new crate.
-7. **The async-host-call decision** — `await` vs fire-and-return (next section);
+3. **Spawn seam (DONE, #190):** driver-provided `Spawn`; the 6 loops route through it;
+   native impl = `tokio::spawn`. Byte-identical on native. *This seam is the core/driver
+   boundary.*
+4. ~~**Channel swap**~~ — **DROPPED** (channels are already portable; see the thesis
+   note above).
+5. **Crate split — native driver (DONE, #192):** the core keeps the name **`theater`**
+   (Colin's call — no rename churn; every `use theater::…` is unchanged); the *native
+   implementation* moves to a new **`theater-native`** (`TokioSpawn` + `TokioTaskHandle`).
+   To let the driver leave the crate, the spawned handle became a driver-chosen
+   associated type: `Spawn { type Handle: SpawnedTask }`, generic (not boxed), threaded
+   as `E::Handle` through `ActorProcess<E>`. Doctests build a real runtime via a cyclic
+   dev-dep on theater-native. Follow-ups relocate the remaining native bits (timers,
+   `fs::read`, engine handle); the **wasm build at that point is the real portability
+   proof.**
+6. **The async-host-call decision** — `await` vs fire-and-return (next section);
    gates the browser driver, not the native path.
-8. **`theater-driver-browser`** — Worker-per-actor + `wasm-bindgen-futures`; the engine
+7. **`theater-driver-browser`** — Worker-per-actor + `wasm-bindgen-futures`; the engine
    axis (`packr` → JS `WebAssembly`) is pack-dev's parallel track.
 
 ## Open questions

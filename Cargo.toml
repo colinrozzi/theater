@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "crates/theater",
+    "crates/theater-native",
     "crates/theater-cli",
     "crates/theater-chain",
     "crates/theater-store",
@@ -59,6 +60,7 @@ theater-chain = { version = "0.3.11", path = "crates/theater-chain" }
 theater-store = { version = "0.1.0", path = "crates/theater-store" }
 theater-stage = { version = "0.1.0", path = "crates/theater-stage" }
 theater = { version = "0.3.28", path = "crates/theater" }
+theater-native = { version = "0.1.0", path = "crates/theater-native" }
 # Theater-specific handlers
 theater-handler-message-server = { version = "0.3.13", path = "crates/theater-handler-message-server" }
 theater-handler-runtime = { version = "0.3.0", path = "crates/theater-handler-runtime" }

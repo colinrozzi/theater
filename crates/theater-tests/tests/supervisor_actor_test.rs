@@ -77,7 +77,7 @@ fn start_runtime() -> mpsc::UnboundedSender<TheaterCommand> {
             theater_rx,
             registry,
             Arc::new(ResourceCache::new()),
-            theater::executor::TokioSpawn,
+            theater_native::TokioSpawn,
         )
         .await
         .expect("Failed to create runtime");

@@ -1,0 +1,12 @@
+[package]
+name = "theater-native"
+description = "Native (tokio work-stealing) driver for the Theater runtime: the Spawn implementation TheaterRuntime<E> runs on."
+version = "0.1.0"
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+theater.workspace = true
+tokio = { workspace = true }

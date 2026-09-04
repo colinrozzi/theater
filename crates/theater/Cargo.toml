@@ -47,6 +47,9 @@ reqwest = { version = "0.11", features = ["json"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [dev-dependencies]
+# Cyclic dev-dependency (permitted by cargo): the doctests build a real
+# `TheaterRuntime` with the native driver. theater-native depends on theater.
+theater-native.workspace = true
 test-log = "0.2"
 pretty_assertions = "1.4"
 tempfile = "3.8.1"
