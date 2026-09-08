@@ -100,8 +100,15 @@ theater-handler-http-client = { version = "0.3.0", path = "crates/theater-handle
 # theater:simple/*. Growable memory deletes the capped-heap OOM class (the mail-spine
 # wedge). The runtime loader (Runtime/AsyncRuntime/Module) is unchanged — it already
 # loads plain-built actors — so this is a build/CLI change, not a loader change.
-packr = "0.23.0"
-packr-abi = "0.23.0"
+# Engine-axis bump (task #24): pack 0.24.0 from crates.io. ALL packr crates at
+# the same 0.24.0 so there is exactly ONE packr-abi (and one pact-AST) in the
+# graph — the two-Value hazard. `packr` (umbrella, old AsyncRuntime/AsyncCtx API)
+# is kept transitionally for the incremental migration and dropped once
+# pack_bridge + every handler move to packr-core (the clean end state).
+packr = "0.24.0"
+packr-abi = "0.24.0"
+packr-core = "0.24.0"
+packr-wasmtime = "0.24.0"
 
 # Metadata for Nix crane builds
 [workspace.metadata.crane]
