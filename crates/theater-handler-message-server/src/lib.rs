@@ -29,7 +29,6 @@
 pub mod events;
 
 use theater::actor::handle::ActorHandle;
-use theater::actor::store::ActorStore;
 use theater::actor::types::ActorError;
 use theater::config::permissions::MessageServerPermissions;
 use theater::handler::{Handler, HandlerContext, SharedActorInstance};
@@ -85,8 +84,7 @@ use uuid::Uuid;
 
 // Pack integration
 use theater::pack_bridge::{
-    parse_pact, AsyncCtx, Ctx, HostLinkerBuilder, InterfaceImpl, LinkerError, TypeHash, Value,
-    ValueType,
+    pact_result_host_fn, parse_pact, plain_host_fn, InterfaceImpl, TypeHash, Value, ValueType,
 };
 
 /// Errors that can occur during message server operations
@@ -750,11 +748,11 @@ impl Handler for MessageServerHandler {
     // Composite Integration
     // =========================================================================
 
-    fn setup_host_functions_composite(
+    fn register_host_functions(
         &mut self,
-        builder: &mut HostLinkerBuilder<'_, ActorStore>,
+        imports: &mut theater::pack_bridge::HostImports,
         ctx: &mut HandlerContext,
-    ) -> Result<(), LinkerError> {
+    ) -> anyhow::Result<()> {
         info!("Setting up message server host functions (Pack)");
 
         // Store the actor_id from context for use in start()
@@ -806,11 +804,16 @@ impl Handler for MessageServerHandler {
         let registered_notify_for_register = self.registered_notify.clone();
         let outstanding_requests_for_register = self.outstanding_requests.clone();
 
-        builder
-            .interface("theater:simple/message-server-host")?
-            // register() -> result<(), string>
-            // Registers with the message router and starts the consumption loop
-            .func_async_result("register", move |_ctx: AsyncCtx<ActorStore>, _input: Value| {
+        // This actor's own id, captured for the channel host functions that
+        // previously read it from `ctx.data().id`.
+        let id = ctx.actor_id.expect("actor_id set before registration");
+
+        // register() -> result<(), string>
+        // Registers with the message router and starts the consumption loop
+        imports.define(
+            "theater:simple/message-server-host",
+            "register",
+            pact_result_host_fn(move |_input: Value| {
                 let router = router_for_register.clone();
                 let actor_id = actor_id_for_register;
                 let actor_handle_arc = actor_handle_for_register.clone();
@@ -898,9 +901,14 @@ impl Handler for MessageServerHandler {
 
                     Ok(Value::Tuple(vec![]))
                 }
-            })?
-            // send(address: string, msg: list<u8>) -> result<_, string>
-            .func_async_result("send", move |_ctx: AsyncCtx<ActorStore>, input: Value| {
+            }),
+        );
+
+        // send(address: string, msg: list<u8>) -> result<_, string>
+        imports.define(
+            "theater:simple/message-server-host",
+            "send",
+            pact_result_host_fn(move |input: Value| {
                 let router = router.clone();
                 async move {
                     let _ph = PhaseLog::new("message_server.send");
@@ -928,9 +936,14 @@ impl Handler for MessageServerHandler {
                         Err(e) => Err(Value::String(e.to_string())),
                     }
                 }
-            })?
-            // request(address: string, msg: list<u8>) -> result<list<u8>, string>
-            .func_async_result("request", move |_ctx: AsyncCtx<ActorStore>, input: Value| {
+            }),
+        );
+
+        // request(address: string, msg: list<u8>) -> result<list<u8>, string>
+        imports.define(
+            "theater:simple/message-server-host",
+            "request",
+            pact_result_host_fn(move |input: Value| {
                 let router = router2.clone();
                 async move {
                     let _ph = PhaseLog::new("message_server.request");
@@ -972,19 +985,33 @@ impl Handler for MessageServerHandler {
                         Err(e) => Err(Value::String(e.to_string())),
                     }
                 }
-            })?
-            // list-outstanding-requests() -> list<string>
-            .func_typed("list-outstanding-requests", move |_ctx: &mut Ctx<'_, ActorStore>, _input: Value| {
-                let _ph = PhaseLog::new("message_server.list_outstanding_requests");
-                let requests = outstanding_requests.lock().unwrap();
-                let ids: Vec<Value> = requests.keys().map(|k| Value::String(k.clone())).collect();
-                Value::List {
-                    elem_type: ValueType::String,
-                    items: ids,
+            }),
+        );
+
+        // list-outstanding-requests() -> list<string>
+        imports.define(
+            "theater:simple/message-server-host",
+            "list-outstanding-requests",
+            plain_host_fn(move |_input: Value| {
+                let outstanding_requests = outstanding_requests.clone();
+                async move {
+                    let _ph = PhaseLog::new("message_server.list_outstanding_requests");
+                    let requests = outstanding_requests.lock().unwrap();
+                    let ids: Vec<Value> =
+                        requests.keys().map(|k| Value::String(k.clone())).collect();
+                    Value::List {
+                        elem_type: ValueType::String,
+                        items: ids,
+                    }
                 }
-            })?
-            // respond-to-request(request-id: string, response: list<u8>) -> result<_, string>
-            .func_async_result("respond-to-request", move |_ctx: AsyncCtx<ActorStore>, input: Value| {
+            }),
+        );
+
+        // respond-to-request(request-id: string, response: list<u8>) -> result<_, string>
+        imports.define(
+            "theater:simple/message-server-host",
+            "respond-to-request",
+            pact_result_host_fn(move |input: Value| {
                 let outstanding = outstanding_requests2.clone();
                 async move {
                     let _ph = PhaseLog::new("message_server.respond_to_request");
@@ -1000,9 +1027,14 @@ impl Handler for MessageServerHandler {
                         Err(Value::String(format!("Request ID not found: {}", request_id)))
                     }
                 }
-            })?
-            // cancel-request(request-id: string) -> result<_, string>
-            .func_async_result("cancel-request", move |_ctx: AsyncCtx<ActorStore>, input: Value| {
+            }),
+        );
+
+        // cancel-request(request-id: string) -> result<_, string>
+        imports.define(
+            "theater:simple/message-server-host",
+            "cancel-request",
+            pact_result_host_fn(move |input: Value| {
                 let outstanding = outstanding_requests3.clone();
                 async move {
                     let _ph = PhaseLog::new("message_server.cancel_request");
@@ -1015,14 +1047,19 @@ impl Handler for MessageServerHandler {
                         Err(Value::String(format!("Request ID not found: {}", request_id)))
                     }
                 }
-            })?
-            // open-channel(address: string, initial-msg: list<u8>) -> result<string, string>
-            .func_async_result("open-channel", move |ctx: AsyncCtx<ActorStore>, input: Value| {
+            }),
+        );
+
+        // open-channel(address: string, initial-msg: list<u8>) -> result<string, string>
+        imports.define(
+            "theater:simple/message-server-host",
+            "open-channel",
+            pact_result_host_fn(move |input: Value| {
                 let router = router3.clone();
                 async move {
                     let _ph = PhaseLog::new("message_server.open_channel");
                     let (address, initial_msg) = parse_address_and_message(&input)?;
-                    let current_actor_id = ctx.data().id;
+                    let current_actor_id = id;
 
                     let target_id = match TheaterId::parse(&address) {
                         Ok(id) => ChannelParticipant::Actor(id),
@@ -1060,14 +1097,19 @@ impl Handler for MessageServerHandler {
                         Err(e) => Err(Value::String(format!("Failed to receive response: {}", e))),
                     }
                 }
-            })?
-            // send-on-channel(channel-id: string, msg: list<u8>) -> result<_, string>
-            .func_async_result("send-on-channel", move |ctx: AsyncCtx<ActorStore>, input: Value| {
+            }),
+        );
+
+        // send-on-channel(channel-id: string, msg: list<u8>) -> result<_, string>
+        imports.define(
+            "theater:simple/message-server-host",
+            "send-on-channel",
+            pact_result_host_fn(move |input: Value| {
                 let router = router4.clone();
                 async move {
                     let _ph = PhaseLog::new("message_server.send_on_channel");
                     let (channel_id_str, msg) = parse_address_and_message(&input)?;
-                    let sender_actor_id = ctx.data().id;
+                    let sender_actor_id = id;
 
                     let channel_id = match ChannelId::parse(&channel_id_str) {
                         Ok(id) => id,
@@ -1092,14 +1134,19 @@ impl Handler for MessageServerHandler {
                         Err(e) => Err(Value::String(e.to_string())),
                     }
                 }
-            })?
-            // close-channel(channel-id: string) -> result<_, string>
-            .func_async_result("close-channel", move |ctx: AsyncCtx<ActorStore>, input: Value| {
+            }),
+        );
+
+        // close-channel(channel-id: string) -> result<_, string>
+        imports.define(
+            "theater:simple/message-server-host",
+            "close-channel",
+            pact_result_host_fn(move |input: Value| {
                 let router = router5.clone();
                 async move {
                     let _ph = PhaseLog::new("message_server.close_channel");
                     let channel_id_str = parse_string(&input)?;
-                    let sender_actor_id = ctx.data().id;
+                    let sender_actor_id = id;
 
                     let channel_id = match ChannelId::parse(&channel_id_str) {
                         Ok(id) => id,
@@ -1123,7 +1170,8 @@ impl Handler for MessageServerHandler {
                         Err(e) => Err(Value::String(e.to_string())),
                     }
                 }
-            })?;
+            }),
+        );
 
         ctx.mark_satisfied("theater:simple/message-server-host");
         info!("Message server host functions (Pack) set up successfully");

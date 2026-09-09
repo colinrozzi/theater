@@ -30,7 +30,6 @@ use tracing::{debug, info};
 pub struct RpcHandlerConfig {}
 
 use theater::actor::handle::ActorHandle;
-use theater::actor::store::ActorStore;
 use theater::handler::{Handler, HandlerContext, SharedActorInstance};
 use theater::id::TheaterId;
 use theater::messages::TheaterCommand;
@@ -40,7 +39,7 @@ use tokio::sync::oneshot;
 
 // Pack integration
 use theater::pack_bridge::{
-    parse_pact, AsyncCtx, HostLinkerBuilder, InterfaceImpl, LinkerError, TypeHash, Value, ValueType,
+    pact_result_host_fn, parse_pact, InterfaceImpl, TypeHash, Value, ValueType,
 };
 
 // ============================================================================
@@ -152,11 +151,11 @@ impl Handler for RpcHandler {
         })
     }
 
-    fn setup_host_functions_composite(
+    fn register_host_functions(
         &mut self,
-        builder: &mut HostLinkerBuilder<'_, ActorStore>,
+        imports: &mut theater::pack_bridge::HostImports,
         ctx: &mut HandlerContext,
-    ) -> Result<(), LinkerError> {
+    ) -> anyhow::Result<()> {
         info!("Setting up RPC host functions");
 
         // Check if the interface is already satisfied
@@ -165,14 +164,14 @@ impl Handler for RpcHandler {
             return Ok(());
         }
 
+        // ----------------------------------------------------------------
+        // call: Call a function on another actor
+        // ----------------------------------------------------------------
         let theater_tx = self.theater_tx.clone();
-
-        builder
-            .interface("theater:simple/rpc")?
-            // ----------------------------------------------------------------
-            // call: Call a function on another actor
-            // ----------------------------------------------------------------
-            .func_async_result("call", move |_async_ctx: AsyncCtx<ActorStore>, input: Value| {
+        imports.define(
+            "theater:simple/rpc",
+            "call",
+            pact_result_host_fn(move |input: Value| {
                 let theater_tx = theater_tx.clone();
 
                 async move {
@@ -181,11 +180,11 @@ impl Handler for RpcHandler {
                         Value::Tuple(items) if items.len() >= 3 => {
                             let actor_id = match &items[0] {
                                 Value::String(s) => s.clone(),
-                                _ => return Ok::<Value, String>(make_error("Invalid actor-id: expected string")),
+                                _ => return Ok::<Value, Value>(make_error("Invalid actor-id: expected string")),
                             };
                             let function = match &items[1] {
                                 Value::String(s) => s.clone(),
-                                _ => return Ok::<Value, String>(make_error("Invalid function: expected string")),
+                                _ => return Ok::<Value, Value>(make_error("Invalid function: expected string")),
                             };
                             let params = items[2].clone();
                             let options = if items.len() > 3 {
@@ -195,7 +194,7 @@ impl Handler for RpcHandler {
                             };
                             (actor_id, function, params, options)
                         }
-                        _ => return Ok::<Value, String>(make_error("Invalid input: expected tuple of (actor-id, function, params, options)")),
+                        _ => return Ok::<Value, Value>(make_error("Invalid input: expected tuple of (actor-id, function, params, options)")),
                     };
 
                     debug!("RPC call: actor={}, function={}", actor_id_str, function);
@@ -203,7 +202,7 @@ impl Handler for RpcHandler {
                     // Parse actor ID
                     let target_id = match actor_id_str.parse::<TheaterId>() {
                         Ok(id) => id,
-                        Err(e) => return Ok::<Value, String>(make_error(&format!("Invalid actor ID: {}", e))),
+                        Err(e) => return Ok::<Value, Value>(make_error(&format!("Invalid actor ID: {}", e))),
                     };
 
                     // Get actor handle from theater runtime
@@ -214,13 +213,13 @@ impl Handler for RpcHandler {
                             response_tx,
                         })
                     {
-                        return Ok::<Value, String>(make_error(&format!("Failed to send to theater: {}", e)));
+                        return Ok::<Value, Value>(make_error(&format!("Failed to send to theater: {}", e)));
                     }
 
                     let target_handle = match response_rx.await {
                         Ok(Some(handle)) => handle,
-                        Ok(None) => return Ok::<Value, String>(make_error(&format!("Actor not found: {}", actor_id_str))),
-                        Err(e) => return Ok::<Value, String>(make_error(&format!("Failed to get actor handle: {}", e))),
+                        Ok(None) => return Ok::<Value, Value>(make_error(&format!("Actor not found: {}", actor_id_str))),
+                        Err(e) => return Ok::<Value, Value>(make_error(&format!("Failed to get actor handle: {}", e))),
                     };
 
                     // Call the function on the target actor
@@ -249,13 +248,16 @@ impl Handler for RpcHandler {
                         Err(_) => Ok(make_error("Call timed out")),
                     }
                 }
-            })?
-            // ----------------------------------------------------------------
-            // implements: Check if actor exports an interface
-            // ----------------------------------------------------------------
-            .func_async_result("implements", {
-                let theater_tx = self.theater_tx.clone();
-                move |_ctx: AsyncCtx<ActorStore>, input: Value| {
+            }),
+        );
+        // ----------------------------------------------------------------
+        // implements: Check if actor exports an interface
+        // ----------------------------------------------------------------
+        let theater_tx = self.theater_tx.clone();
+        imports.define(
+            "theater:simple/rpc",
+            "implements",
+            pact_result_host_fn(move |input: Value| {
                     let theater_tx = theater_tx.clone();
 
                     async move {
@@ -264,15 +266,15 @@ impl Handler for RpcHandler {
                             Value::Tuple(items) if items.len() >= 2 => {
                                 let actor_id = match &items[0] {
                                     Value::String(s) => s.clone(),
-                                    _ => return Ok::<Value, String>(make_error("Invalid actor-id: expected string")),
+                                    _ => return Ok::<Value, Value>(make_error("Invalid actor-id: expected string")),
                                 };
                                 let interface = match &items[1] {
                                     Value::String(s) => s.clone(),
-                                    _ => return Ok::<Value, String>(make_error("Invalid interface: expected string")),
+                                    _ => return Ok::<Value, Value>(make_error("Invalid interface: expected string")),
                                 };
                                 (actor_id, interface)
                             }
-                            _ => return Ok::<Value, String>(make_error("Invalid input: expected tuple of (actor-id, interface)")),
+                            _ => return Ok::<Value, Value>(make_error("Invalid input: expected tuple of (actor-id, interface)")),
                         };
 
                         debug!("RPC implements check: actor={}, interface={}", actor_id_str, interface_name);
@@ -280,7 +282,7 @@ impl Handler for RpcHandler {
                         // Parse actor ID
                         let target_id = match actor_id_str.parse::<TheaterId>() {
                             Ok(id) => id,
-                            Err(e) => return Ok::<Value, String>(make_error(&format!("Invalid actor ID: {}", e))),
+                            Err(e) => return Ok::<Value, Value>(make_error(&format!("Invalid actor ID: {}", e))),
                         };
 
                         // Get actor's export hashes from theater runtime
@@ -291,13 +293,13 @@ impl Handler for RpcHandler {
                                 response_tx,
                             })
                         {
-                            return Ok::<Value, String>(make_error(&format!("Failed to send to theater: {}", e)));
+                            return Ok::<Value, Value>(make_error(&format!("Failed to send to theater: {}", e)));
                         }
 
                         let export_hashes = match response_rx.await {
                             Ok(Some(hashes)) => hashes,
-                            Ok(None) => return Ok::<Value, String>(make_error(&format!("Actor not found: {}", actor_id_str))),
-                            Err(e) => return Ok::<Value, String>(make_error(&format!("Failed to get export hashes: {}", e))),
+                            Ok(None) => return Ok::<Value, Value>(make_error(&format!("Actor not found: {}", actor_id_str))),
+                            Err(e) => return Ok::<Value, Value>(make_error(&format!("Failed to get export hashes: {}", e))),
                         };
 
                         // Check if interface is in exports
@@ -310,14 +312,16 @@ impl Handler for RpcHandler {
                             payload: vec![Value::Bool(implements)],
                         })
                     }
-                }
-            })?
-            // ----------------------------------------------------------------
-            // exports: Get list of actor's exported interfaces
-            // ----------------------------------------------------------------
-            .func_async_result("exports", {
-                let theater_tx = self.theater_tx.clone();
-                move |_ctx: AsyncCtx<ActorStore>, input: Value| {
+                }),
+        );
+        // ----------------------------------------------------------------
+        // exports: Get list of actor's exported interfaces
+        // ----------------------------------------------------------------
+        let theater_tx = self.theater_tx.clone();
+        imports.define(
+            "theater:simple/rpc",
+            "exports",
+            pact_result_host_fn(move |input: Value| {
                     let theater_tx = theater_tx.clone();
 
                     async move {
@@ -327,10 +331,10 @@ impl Handler for RpcHandler {
                             Value::Tuple(items) if !items.is_empty() => {
                                 match &items[0] {
                                     Value::String(s) => s.clone(),
-                                    _ => return Ok::<Value, String>(make_error("Invalid actor-id: expected string")),
+                                    _ => return Ok::<Value, Value>(make_error("Invalid actor-id: expected string")),
                                 }
                             }
-                            _ => return Ok::<Value, String>(make_error("Invalid input: expected actor-id string")),
+                            _ => return Ok::<Value, Value>(make_error("Invalid input: expected actor-id string")),
                         };
 
                         debug!("RPC exports query: actor={}", actor_id_str);
@@ -338,7 +342,7 @@ impl Handler for RpcHandler {
                         // Parse actor ID
                         let target_id = match actor_id_str.parse::<TheaterId>() {
                             Ok(id) => id,
-                            Err(e) => return Ok::<Value, String>(make_error(&format!("Invalid actor ID: {}", e))),
+                            Err(e) => return Ok::<Value, Value>(make_error(&format!("Invalid actor ID: {}", e))),
                         };
 
                         // Get actor's export hashes from theater runtime
@@ -349,13 +353,13 @@ impl Handler for RpcHandler {
                                 response_tx,
                             })
                         {
-                            return Ok::<Value, String>(make_error(&format!("Failed to send to theater: {}", e)));
+                            return Ok::<Value, Value>(make_error(&format!("Failed to send to theater: {}", e)));
                         }
 
                         let export_hashes = match response_rx.await {
                             Ok(Some(hashes)) => hashes,
-                            Ok(None) => return Ok::<Value, String>(make_error(&format!("Actor not found: {}", actor_id_str))),
-                            Err(e) => return Ok::<Value, String>(make_error(&format!("Failed to get export hashes: {}", e))),
+                            Ok(None) => return Ok::<Value, Value>(make_error(&format!("Actor not found: {}", actor_id_str))),
+                            Err(e) => return Ok::<Value, Value>(make_error(&format!("Failed to get export hashes: {}", e))),
                         };
 
                         // Convert to list of interface names
@@ -374,8 +378,8 @@ impl Handler for RpcHandler {
                             }],
                         })
                     }
-                }
-            })?;
+                }),
+        );
 
         ctx.mark_satisfied("theater:simple/rpc");
         info!("RPC host functions set up successfully");
