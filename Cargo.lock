@@ -1845,14 +1845,14 @@ checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 
 [[package]]
 name = "packr"
-version = "0.23.0"
+version = "0.24.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2f28679d62f032b18796cdd3b3009b21235f0f506a608faa11bd23d7dd832be9"
+checksum = "70dfef38444ea0ef4bd0d9ec124f0a352d534edcb91e5448c7197d685b5afbb6"
 dependencies = [
  "anyhow",
  "async-trait",
  "clap",
- "packr-abi",
+ "packr-abi 0.24.0",
  "serde",
  "serde_json",
  "sha2",
@@ -1871,7 +1871,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b395c4f437aeeea15c55123b736cb1dcf29145023da0174de3a002d795f6d868"
 dependencies = [
  "hashbrown 0.14.5",
- "packr-derive",
+ "sha2",
+]
+
+[[package]]
+name = "packr-abi"
+version = "0.24.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "491978dde2b52bcbefed839e4bd54bd85ef9b9154dfc51e534d4a99e47848257"
+dependencies = [
+ "hashbrown 0.14.5",
+ "packr-derive 0.24.0",
  "serde",
  "sha2",
 ]
@@ -1888,14 +1898,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "packr-derive"
+version = "0.24.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "15dbc463646981ca2d65828b89e92b200c90b3c7523908943aaad4733291a6dd"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
 name = "packr-guest"
 version = "0.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c5393dd395f681b6ff1aed17deb2fe0096d7389036f3e58b76eb04552e75643b"
 dependencies = [
  "dlmalloc",
- "packr-abi",
- "packr-derive",
+ "packr-abi 0.23.0",
+ "packr-derive 0.23.0",
  "packr-guest-macros",
 ]
 
@@ -1905,7 +1926,7 @@ version = "0.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2f130940e274633ff5b9c205ca3224f75c3787bd141c45795a5842fc84723ef5"
 dependencies = [
- "packr-abi",
+ "packr-abi 0.23.0",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
@@ -2900,7 +2921,7 @@ dependencies = [
  "hex",
  "mockall",
  "packr",
- "packr-abi",
+ "packr-abi 0.24.0",
  "pretty_assertions",
  "rand",
  "reqwest",
@@ -2929,7 +2950,7 @@ dependencies = [
  "console",
  "hex",
  "packr",
- "packr-abi",
+ "packr-abi 0.24.0",
  "serde",
  "sha1",
  "tracing",
