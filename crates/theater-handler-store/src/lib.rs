@@ -58,7 +58,6 @@ impl Drop for PhaseLog {
 
 use serde::{Deserialize, Serialize};
 use theater::actor::handle::ActorHandle;
-use theater::actor::store::ActorStore;
 use theater::actor::types::ActorError;
 use theater::config::permissions::StorePermissions;
 use theater::handler::{Handler, HandlerContext, SharedActorInstance};
@@ -78,7 +77,7 @@ pub struct StoreHandlerConfig {
 
 // Pack integration
 use theater::pack_bridge::{
-    parse_pact, AsyncCtx, Ctx, HostLinkerBuilder, InterfaceImpl, LinkerError, TypeHash, Value,
+    pact_result_host_fn, parse_pact, plain_host_fn, InterfaceImpl, TypeHash, Value,
 };
 
 // ============================================================================
@@ -320,11 +319,11 @@ impl Handler for StoreHandler {
     // Composite Integration
     // =========================================================================
 
-    fn setup_host_functions_composite(
+    fn register_host_functions(
         &mut self,
-        builder: &mut HostLinkerBuilder<'_, ActorStore>,
+        imports: &mut theater::pack_bridge::HostImports,
         ctx: &mut HandlerContext,
-    ) -> Result<(), LinkerError> {
+    ) -> anyhow::Result<()> {
         info!("Setting up store host functions (Pack)");
 
         // Check if already satisfied
@@ -358,37 +357,43 @@ impl Handler for StoreHandler {
             }
         }
 
-        builder
-            .interface("theater:simple/store")?
-            // new() -> result<string, string>
-            .func_typed(
-                "new",
-                move |_ctx: &mut Ctx<'_, ActorStore>, _input: Value| {
-                    let _ph = PhaseLog::new("store.new");
-                    use theater::ValueType;
-                    // If a store_id is configured, use it; otherwise create a new store
-                    let store_id = if let Some(ref id) = configured_store_id {
-                        // Use the configured store ID - just return it without creating new store
-                        id.clone()
+        // new() -> result<string, string>
+        imports.define(
+            "theater:simple/store",
+            "new",
+            plain_host_fn(move |_input: Value| {
+                let configured_store_id = configured_store_id.clone();
+                let bp_new = bp_new.clone();
+                async move {
+                let _ph = PhaseLog::new("store.new");
+                use theater::ValueType;
+                // If a store_id is configured, use it; otherwise create a new store
+                let store_id = if let Some(ref id) = configured_store_id {
+                    // Use the configured store ID - just return it without creating new store
+                    id.clone()
+                } else {
+                    // Create a new store with a new UUID
+                    let store = if let Some(ref bp) = bp_new {
+                        ContentStore::new_with_base_path(bp.clone())
                     } else {
-                        // Create a new store with a new UUID
-                        let store = if let Some(ref bp) = bp_new {
-                            ContentStore::new_with_base_path(bp.clone())
-                        } else {
-                            ContentStore::new()
-                        };
-                        store.id().to_string()
+                        ContentStore::new()
                     };
-                    // Return Ok(store_id) as Result
-                    Value::Result {
-                        ok_type: ValueType::String,
-                        err_type: ValueType::String,
-                        value: Ok(Box::new(Value::String(store_id))),
-                    }
-                },
-            )?
-            // store(store-id: string, content: list<u8>) -> result<string, string>
-            .func_async_result("store", move |_ctx: AsyncCtx<ActorStore>, input: Value| {
+                    store.id().to_string()
+                };
+                // Return Ok(store_id) as Result
+                Value::Result {
+                    ok_type: ValueType::String,
+                    err_type: ValueType::String,
+                    value: Ok(Box::new(Value::String(store_id))),
+                }
+                }
+            }),
+        );
+        // store(store-id: string, content: list<u8>) -> result<string, string>
+        imports.define(
+            "theater:simple/store",
+            "store",
+            pact_result_host_fn(move |input: Value| {
                 let bp = bp_store.clone();
                 async move {
                     let _ph = PhaseLog::new("store.store");
@@ -433,9 +438,13 @@ impl Handler for StoreHandler {
                     // Return content-ref as string (the hash)
                     Ok(Value::String(content_ref.hash().to_string()))
                 }
-            })?
-            // get(store-id: string, content-ref: content-ref) -> result<list<u8>, string>
-            .func_async_result("get", move |_ctx: AsyncCtx<ActorStore>, input: Value| {
+            }),
+        );
+        // get(store-id: string, content-ref: content-ref) -> result<list<u8>, string>
+        imports.define(
+            "theater:simple/store",
+            "get",
+            pact_result_host_fn(move |input: Value| {
                 let bp = bp_get.clone();
                 async move {
                     let _ph = PhaseLog::new("store.get");
@@ -457,9 +466,13 @@ impl Handler for StoreHandler {
                         }
                     }
                 }
-            })?
-            // exists(store-id: string, content-ref: content-ref) -> result<bool, string>
-            .func_async_result("exists", move |_ctx: AsyncCtx<ActorStore>, input: Value| {
+            }),
+        );
+        // exists(store-id: string, content-ref: content-ref) -> result<bool, string>
+        imports.define(
+            "theater:simple/store",
+            "exists",
+            pact_result_host_fn(move |input: Value| {
                 let bp = bp_exists.clone();
                 async move {
                     let _ph = PhaseLog::new("store.exists");
@@ -470,9 +483,13 @@ impl Handler for StoreHandler {
                     debug!("Content existence checked successfully");
                     Ok::<Value, Value>(Value::Bool(exists))
                 }
-            })?
-            // label(store-id: string, label: string, content-ref: content-ref) -> result<_, string>
-            .func_async_result("label", move |_ctx: AsyncCtx<ActorStore>, input: Value| {
+            }),
+        );
+        // label(store-id: string, label: string, content-ref: content-ref) -> result<_, string>
+        imports.define(
+            "theater:simple/store",
+            "label",
+            pact_result_host_fn(move |input: Value| {
                 let bp = bp_label.clone();
                 async move {
                     let _ph = PhaseLog::new("store.label");
@@ -491,11 +508,13 @@ impl Handler for StoreHandler {
                         }
                     }
                 }
-            })?
-            // get-by-label(store-id: string, label: string) -> result<option<string>, string>
-            .func_async_result(
-                "get-by-label",
-                move |_ctx: AsyncCtx<ActorStore>, input: Value| {
+            }),
+        );
+        // get-by-label(store-id: string, label: string) -> result<option<string>, string>
+        imports.define(
+            "theater:simple/store",
+            "get-by-label",
+            pact_result_host_fn(move |input: Value| {
                     let bp = bp_get_by_label.clone();
                     async move {
                         let _ph = PhaseLog::new("store.get_by_label");
@@ -524,12 +543,13 @@ impl Handler for StoreHandler {
                             }
                         }
                     }
-                },
-            )?
-            // remove-label(store-id: string, label: string) -> result<_, string>
-            .func_async_result(
-                "remove-label",
-                move |_ctx: AsyncCtx<ActorStore>, input: Value| {
+                }),
+        );
+        // remove-label(store-id: string, label: string) -> result<_, string>
+        imports.define(
+            "theater:simple/store",
+            "remove-label",
+            pact_result_host_fn(move |input: Value| {
                     let bp = bp_remove_label.clone();
                     async move {
                         let _ph = PhaseLog::new("store.remove_label");
@@ -548,12 +568,13 @@ impl Handler for StoreHandler {
                             }
                         }
                     }
-                },
-            )?
-            // store-at-label(store-id: string, label: string, content: list<u8>) -> result<string, string>
-            .func_async_result(
-                "store-at-label",
-                move |_ctx: AsyncCtx<ActorStore>, input: Value| {
+                }),
+        );
+        // store-at-label(store-id: string, label: string, content: list<u8>) -> result<string, string>
+        imports.define(
+            "theater:simple/store",
+            "store-at-label",
+            pact_result_host_fn(move |input: Value| {
                     let bp = bp_store_at_label.clone();
                     async move {
                         let _ph = PhaseLog::new("store.store_at_label");
@@ -572,12 +593,13 @@ impl Handler for StoreHandler {
                             }
                         }
                     }
-                },
-            )?
-            // replace-content-at-label(store-id: string, label: string, content: list<u8>) -> result<string, string>
-            .func_async_result(
-                "replace-content-at-label",
-                move |_ctx: AsyncCtx<ActorStore>, input: Value| {
+                }),
+        );
+        // replace-content-at-label(store-id: string, label: string, content: list<u8>) -> result<string, string>
+        imports.define(
+            "theater:simple/store",
+            "replace-content-at-label",
+            pact_result_host_fn(move |input: Value| {
                     let bp = bp_replace_content.clone();
                     async move {
                         let _ph = PhaseLog::new("store.replace_content_at_label");
@@ -596,12 +618,13 @@ impl Handler for StoreHandler {
                             }
                         }
                     }
-                },
-            )?
-            // replace-at-label(store-id: string, label: string, content-ref: content-ref) -> result<_, string>
-            .func_async_result(
-                "replace-at-label",
-                move |_ctx: AsyncCtx<ActorStore>, input: Value| {
+                }),
+        );
+        // replace-at-label(store-id: string, label: string, content-ref: content-ref) -> result<_, string>
+        imports.define(
+            "theater:simple/store",
+            "replace-at-label",
+            pact_result_host_fn(move |input: Value| {
                     let bp = bp_replace_at.clone();
                     async move {
                         let _ph = PhaseLog::new("store.replace_at_label");
@@ -620,12 +643,13 @@ impl Handler for StoreHandler {
                             }
                         }
                     }
-                },
-            )?
-            // list-all-content(store-id: string) -> result<list<string>, string>
-            .func_async_result(
-                "list-all-content",
-                move |_ctx: AsyncCtx<ActorStore>, input: Value| {
+                }),
+        );
+        // list-all-content(store-id: string) -> result<list<string>, string>
+        imports.define(
+            "theater:simple/store",
+            "list-all-content",
+            pact_result_host_fn(move |input: Value| {
                     let bp = bp_list_all.clone();
                     async move {
                         let _ph = PhaseLog::new("store.list_all_content");
@@ -651,12 +675,13 @@ impl Handler for StoreHandler {
                             }
                         }
                     }
-                },
-            )?
-            // calculate-total-size(store-id: string) -> result<u64, string>
-            .func_async_result(
-                "calculate-total-size",
-                move |_ctx: AsyncCtx<ActorStore>, input: Value| {
+                }),
+        );
+        // calculate-total-size(store-id: string) -> result<u64, string>
+        imports.define(
+            "theater:simple/store",
+            "calculate-total-size",
+            pact_result_host_fn(move |input: Value| {
                     let bp = bp_calc_size.clone();
                     async move {
                         let _ph = PhaseLog::new("store.calculate_total_size");
@@ -674,12 +699,13 @@ impl Handler for StoreHandler {
                             }
                         }
                     }
-                },
-            )?
-            // list-labels(store-id: string) -> result<list<string>, string>
-            .func_async_result(
-                "list-labels",
-                move |_ctx: AsyncCtx<ActorStore>, input: Value| {
+                }),
+        );
+        // list-labels(store-id: string) -> result<list<string>, string>
+        imports.define(
+            "theater:simple/store",
+            "list-labels",
+            pact_result_host_fn(move |input: Value| {
                     let bp = bp_list_labels.clone();
                     async move {
                         let _ph = PhaseLog::new("store.list_labels");
@@ -703,8 +729,8 @@ impl Handler for StoreHandler {
                             }
                         }
                     }
-                },
-            )?;
+                }),
+        );
 
         ctx.mark_satisfied("theater:simple/store");
         info!("Store host functions (Pack) set up successfully");
