@@ -15,7 +15,6 @@ use tokio::sync::{Mutex, Notify};
 use tracing::{debug, error, info, warn};
 
 use theater::actor::handle::ActorHandle;
-use theater::actor::store::ActorStore;
 use theater::config::actor_manifest::HandlerConfig;
 use theater::handler::{Handler, HandlerContext, SharedActorInstance};
 use theater::shutdown::ShutdownReceiver;
@@ -30,7 +29,7 @@ pub struct TerminalHandlerConfig {
 }
 
 use theater::pack_bridge::{
-    parse_pact, AsyncCtx, HostLinkerBuilder, InterfaceImpl, LinkerError, TypeHash, Value, ValueType,
+    pact_result_host_fn, parse_pact, InterfaceImpl, TypeHash, Value, ValueType,
 };
 
 // ============================================================================
@@ -288,11 +287,11 @@ impl Handler for TerminalHandler {
         })
     }
 
-    fn setup_host_functions_composite(
+    fn register_host_functions(
         &mut self,
-        builder: &mut HostLinkerBuilder<'_, ActorStore>,
+        imports: &mut theater::pack_bridge::HostImports,
         ctx: &mut HandlerContext,
-    ) -> Result<(), LinkerError> {
+    ) -> anyhow::Result<()> {
         info!("Setting up terminal host functions");
 
         if ctx.is_satisfied("theater:simple/terminal") {
@@ -319,68 +318,77 @@ impl Handler for TerminalHandler {
         let st_write_stderr = state.clone();
         let st_set_raw = state.clone();
 
-        builder
-            .interface("theater:simple/terminal")?
-            // write-stdout(data: list<u8>) -> result<u64, string>
-            .func_async_result(
-                "write-stdout",
-                move |_ctx: AsyncCtx<ActorStore>, input: Value| {
-                    let _st = st_write_stdout.clone();
-                    async move {
-                        let data = parse_bytes(&input)?;
-                        let mut stdout = io::stdout().lock();
-                        stdout
-                            .write_all(&data)
-                            .map_err(|e| Value::String(e.to_string()))?;
-                        stdout.flush().map_err(|e| Value::String(e.to_string()))?;
-                        Ok::<Value, Value>(Value::U64(data.len() as u64))
-                    }
-                },
-            )?
-            // write-stderr(data: list<u8>) -> result<u64, string>
-            .func_async_result(
-                "write-stderr",
-                move |_ctx: AsyncCtx<ActorStore>, input: Value| {
-                    let _st = st_write_stderr.clone();
-                    async move {
-                        let data = parse_bytes(&input)?;
-                        let mut stderr = io::stderr().lock();
-                        stderr
-                            .write_all(&data)
-                            .map_err(|e| Value::String(e.to_string()))?;
-                        stderr.flush().map_err(|e| Value::String(e.to_string()))?;
-                        Ok::<Value, Value>(Value::U64(data.len() as u64))
-                    }
-                },
-            )?
-            // set-raw-mode(enabled: bool) -> result<_, string>
-            .func_async_result(
-                "set-raw-mode",
-                move |_ctx: AsyncCtx<ActorStore>, input: Value| {
-                    let st = st_set_raw.clone();
-                    async move {
-                        let enabled = parse_bool(&input)?;
-                        st.set_raw_mode(enabled).await.map_err(Value::String)?;
-                        Ok::<Value, Value>(Value::Tuple(vec![]))
-                    }
-                },
-            )?
-            // get-size() -> result<tuple<u16, u16>, string>
-            .func_async_result(
-                "get-size",
-                move |_ctx: AsyncCtx<ActorStore>, _input: Value| async move {
-                    let (cols, rows) = TerminalState::get_size().map_err(Value::String)?;
-                    Ok::<Value, Value>(Value::Tuple(vec![Value::U16(cols), Value::U16(rows)]))
-                },
-            )?
-            // enable-input() -> result<_, string>
-            // Starts the background input loop that reads from stdin and calls handle-input
-            .func_async_result("enable-input", {
+        // write-stdout(data: list<u8>) -> result<u64, string>
+        imports.define(
+            "theater:simple/terminal",
+            "write-stdout",
+            pact_result_host_fn(move |input: Value| {
+                let _st = st_write_stdout.clone();
+                async move {
+                    let data = parse_bytes(&input)?;
+                    let mut stdout = io::stdout().lock();
+                    stdout
+                        .write_all(&data)
+                        .map_err(|e| Value::String(e.to_string()))?;
+                    stdout.flush().map_err(|e| Value::String(e.to_string()))?;
+                    Ok::<Value, Value>(Value::U64(data.len() as u64))
+                }
+            }),
+        );
+
+        // write-stderr(data: list<u8>) -> result<u64, string>
+        imports.define(
+            "theater:simple/terminal",
+            "write-stderr",
+            pact_result_host_fn(move |input: Value| {
+                let _st = st_write_stderr.clone();
+                async move {
+                    let data = parse_bytes(&input)?;
+                    let mut stderr = io::stderr().lock();
+                    stderr
+                        .write_all(&data)
+                        .map_err(|e| Value::String(e.to_string()))?;
+                    stderr.flush().map_err(|e| Value::String(e.to_string()))?;
+                    Ok::<Value, Value>(Value::U64(data.len() as u64))
+                }
+            }),
+        );
+
+        // set-raw-mode(enabled: bool) -> result<_, string>
+        imports.define(
+            "theater:simple/terminal",
+            "set-raw-mode",
+            pact_result_host_fn(move |input: Value| {
+                let st = st_set_raw.clone();
+                async move {
+                    let enabled = parse_bool(&input)?;
+                    st.set_raw_mode(enabled).await.map_err(Value::String)?;
+                    Ok::<Value, Value>(Value::Tuple(vec![]))
+                }
+            }),
+        );
+
+        // get-size() -> result<tuple<u16, u16>, string>
+        imports.define(
+            "theater:simple/terminal",
+            "get-size",
+            pact_result_host_fn(move |_input: Value| async move {
+                let (cols, rows) = TerminalState::get_size().map_err(Value::String)?;
+                Ok::<Value, Value>(Value::Tuple(vec![Value::U16(cols), Value::U16(rows)]))
+            }),
+        );
+
+        // enable-input() -> result<_, string>
+        // Starts the background input loop that reads from stdin and calls handle-input
+        imports.define(
+            "theater:simple/terminal",
+            "enable-input",
+            pact_result_host_fn({
                 let actor_handle = self.actor_handle.clone();
                 let shutdown_receiver = self.shutdown_receiver.clone();
                 let input_enabled_notify = self.input_enabled_notify.clone();
                 let state = state.clone();
-                move |_ctx: AsyncCtx<ActorStore>, _input: Value| {
+                move |_input: Value| {
                     let actor_handle = actor_handle.clone();
                     let shutdown_receiver = shutdown_receiver.clone();
                     let input_enabled_notify = input_enabled_notify.clone();
@@ -412,7 +420,8 @@ impl Handler for TerminalHandler {
                         Ok::<Value, Value>(Value::Tuple(vec![]))
                     }
                 }
-            })?;
+            }),
+        );
 
         ctx.mark_satisfied("theater:simple/terminal");
         info!("Terminal host functions registered");
