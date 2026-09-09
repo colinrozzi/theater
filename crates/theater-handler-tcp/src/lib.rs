@@ -70,7 +70,6 @@ use stream::{UnifiedReadHalf, UnifiedStream, UnifiedWriteHalf};
 use tls::TlsContext;
 
 use theater::actor::handle::ActorHandle;
-use theater::actor::store::ActorStore;
 use theater::config::actor_manifest::HandlerConfig;
 use theater::handler::{Handler, HandlerContext, SharedActorInstance};
 use theater::id::TheaterId;
@@ -128,7 +127,7 @@ pub struct ServerTlsConfig {
 }
 
 use theater::pack_bridge::{
-    parse_pact, AsyncCtx, HostLinkerBuilder, InterfaceImpl, LinkerError, TypeHash, Value, ValueType,
+    pact_result_host_fn, parse_pact, InterfaceImpl, TypeHash, Value, ValueType,
 };
 
 /// Maximum time a server-side TLS handshake may take before the connection is
@@ -802,11 +801,11 @@ impl Handler for TcpHandler {
         })
     }
 
-    fn setup_host_functions_composite(
+    fn register_host_functions(
         &mut self,
-        builder: &mut HostLinkerBuilder<'_, ActorStore>,
+        imports: &mut theater::pack_bridge::HostImports,
         ctx: &mut HandlerContext,
-    ) -> Result<(), LinkerError> {
+    ) -> anyhow::Result<()> {
         info!("Setting up TCP host functions (Pack)");
 
         if ctx.is_satisfied("theater:simple/tcp") {
@@ -818,6 +817,13 @@ impl Handler for TcpHandler {
         let actor_id = ctx
             .actor_id
             .expect("actor_id should be set in HandlerContext");
+
+        // Captured by the transfer / transfer-async host functions, which used
+        // to reach the theater command channel via `ctx.data().theater_tx`.
+        let theater_tx = ctx
+            .theater_tx
+            .clone()
+            .expect("theater_tx set before registration");
 
         // Store actor_id for this instance
         {
@@ -887,15 +893,14 @@ impl Handler for TcpHandler {
         let st_close_listener = state.clone();
         let aid_close_listener = actor_id_for_closures;
 
-        builder
-            .interface("theater:simple/tcp")?
             // ----------------------------------------------------------------
             // connect(address: string) -> result<string, string>
             // Outbound connections are immediately active
             // ----------------------------------------------------------------
-            .func_async_result(
+        imports.define(
+            "theater:simple/tcp",
                 "connect",
-                move |_ctx: AsyncCtx<ActorStore>, input: Value| {
+                pact_result_host_fn(move |input: Value| {
                     let st = st_connect.clone();
                     let actor_id = aid_connect;
                     let tls_ctx = tls_for_connect.clone();
@@ -963,15 +968,16 @@ impl Handler for TcpHandler {
                         debug!("tcp connected to {} as conn={}", address, id);
                         Ok::<Value, Value>(Value::String(id_to_string(id)))
                     }
-                },
-            )?
+                }),
+            );
             // ----------------------------------------------------------------
             // listen(address: string) -> result<string, string>
             // Binds a listener and spawns a background accept loop
             // ----------------------------------------------------------------
-            .func_async_result(
+        imports.define(
+            "theater:simple/tcp",
                 "listen",
-                move |_ctx: AsyncCtx<ActorStore>, input: Value| {
+                pact_result_host_fn(move |input: Value| {
                     let st = st_listen.clone();
                     let actor_id = aid_listen;
                     let actor_handle_arc = actor_handle_for_listen.clone();
@@ -1029,15 +1035,16 @@ impl Handler for TcpHandler {
 
                         Ok::<Value, Value>(Value::String(id_to_string(listener_id)))
                     }
-                },
-            )?
+                }),
+            );
             // ----------------------------------------------------------------
             // accept(listener-id: string) -> result<string, string>
             // Manual accept - returns connection in PENDING state
             // ----------------------------------------------------------------
-            .func_async_result(
+        imports.define(
+            "theater:simple/tcp",
                 "accept",
-                move |_ctx: AsyncCtx<ActorStore>, input: Value| {
+                pact_result_host_fn(move |input: Value| {
                     let st = st_accept.clone();
                     let actor_id = aid_accept;
                     let tls_ctx = tls_for_accept.clone();
@@ -1101,15 +1108,16 @@ impl Handler for TcpHandler {
                         debug!("tcp accepted conn={} from {} (pending)", conn_id, peer_addr);
                         Ok::<Value, Value>(Value::String(id_to_string(conn_id)))
                     }
-                },
-            )?
+                }),
+            );
             // ----------------------------------------------------------------
             // activate(connection-id: string) -> result<_, string>
             // Activate a pending connection for this actor
             // ----------------------------------------------------------------
-            .func_async_result(
+        imports.define(
+            "theater:simple/tcp",
                 "activate",
-                move |_ctx: AsyncCtx<ActorStore>, input: Value| {
+                pact_result_host_fn(move |input: Value| {
                     let st = st_activate.clone();
                     let actor_id = aid_activate;
                     async move {
@@ -1140,15 +1148,16 @@ impl Handler for TcpHandler {
                         debug!("tcp activated conn={}", conn_id);
                         Ok::<Value, Value>(Value::Tuple(vec![]))
                     }
-                },
-            )?
+                }),
+            );
             // ----------------------------------------------------------------
             // set-active(connection-id: string, mode: string) -> result<_, string>
             // Set data mode: "passive", "active", or "once"
             // ----------------------------------------------------------------
-            .func_async_result(
+        imports.define(
+            "theater:simple/tcp",
                 "set-active",
-                move |_ctx: AsyncCtx<ActorStore>, input: Value| {
+                pact_result_host_fn(move |input: Value| {
                     let st = st_set_active.clone();
                     let actor_id = aid_set_active;
                     let actor_handle_arc = actor_handle_for_set_active.clone();
@@ -1276,17 +1285,20 @@ impl Handler for TcpHandler {
 
                         Ok::<Value, Value>(Value::Tuple(vec![]))
                     }
-                },
-            )?
+                }),
+            );
             // ----------------------------------------------------------------
             // transfer(connection-id: string, target-actor: string) -> result<_, string>
             // Transfer connection to another actor (and activate it)
             // ----------------------------------------------------------------
-            .func_async_result(
+        let theater_tx_for_transfer = theater_tx.clone();
+        imports.define(
+            "theater:simple/tcp",
                 "transfer",
-                move |ctx: AsyncCtx<ActorStore>, input: Value| {
+                pact_result_host_fn(move |input: Value| {
                     let st = st_transfer.clone();
                     let actor_id = aid_transfer;
+                    let theater_tx = theater_tx_for_transfer.clone();
                     async move {
                         let _ph = PhaseLog::new("tcp.transfer");
                         let (conn_id_str, target_actor_str) = parse_two_strings(&input)?;
@@ -1321,9 +1333,6 @@ impl Handler for TcpHandler {
                         }
 
                         // Get target actor's handle and call handle-connection-transfer
-                        let store = ctx.data();
-                        let theater_tx = store.theater_tx.clone();
-
                         let (handle_tx, handle_rx) = tokio::sync::oneshot::channel();
                         let get_handle_cmd = theater::messages::TheaterCommand::GetActorHandle {
                             actor_id: target_actor,
@@ -1355,8 +1364,8 @@ impl Handler for TcpHandler {
 
                         Ok::<Value, Value>(Value::Tuple(vec![]))
                     }
-                },
-            )?
+                }),
+            );
             // ----------------------------------------------------------------
             // transfer-async(connection-id: string, target-actor: string) -> result<_, string>
             //
@@ -1370,25 +1379,27 @@ impl Handler for TcpHandler {
             // Gap B). If the detached call returns Err or the target traps, the
             // connection is closed and removed from the shared map.
             // ----------------------------------------------------------------
-            .func_async_result(
+        imports.define(
+            "theater:simple/tcp",
                 "transfer-async",
-                move |ctx: AsyncCtx<ActorStore>, input: Value| {
+                pact_result_host_fn(move |input: Value| {
                     let st = st_transfer_async.clone();
                     let actor_id = aid_transfer_async;
+                    let theater_tx = theater_tx.clone();
                     async move {
                         let _ph = PhaseLog::new("tcp.transfer_async");
-                        let theater_tx = ctx.data().theater_tx.clone();
                         do_transfer_async(st, actor_id, theater_tx, &input).await
                     }
-                },
-            )?
+                }),
+            );
             // ----------------------------------------------------------------
             // peer-address(connection-id: string) -> result<string, string>
             // Get peer address (works in pending or active state)
             // ----------------------------------------------------------------
-            .func_async_result(
+        imports.define(
+            "theater:simple/tcp",
                 "peer-address",
-                move |_ctx: AsyncCtx<ActorStore>, input: Value| {
+                pact_result_host_fn(move |input: Value| {
                     let st = st_peer.clone();
                     let actor_id = aid_peer;
                     async move {
@@ -1410,14 +1421,15 @@ impl Handler for TcpHandler {
 
                         Ok::<Value, Value>(Value::String(entry.peer_addr.to_string()))
                     }
-                },
-            )?
+                }),
+            );
             // ----------------------------------------------------------------
             // send(connection-id: string, data: list<u8>) -> result<u64, string>
             // ----------------------------------------------------------------
-            .func_async_result(
+        imports.define(
+            "theater:simple/tcp",
                 "send",
-                move |_ctx: AsyncCtx<ActorStore>, input: Value| {
+                pact_result_host_fn(move |input: Value| {
                     let st = st_send.clone();
                     let actor_id = aid_send;
                     async move {
@@ -1478,14 +1490,15 @@ impl Handler for TcpHandler {
                         debug!("tcp send conn={} {} bytes", conn_id, len);
                         Ok::<Value, Value>(Value::U64(len as u64))
                     }
-                },
-            )?
+                }),
+            );
             // ----------------------------------------------------------------
             // receive(connection-id: string, max-bytes: u32) -> result<list<u8>, string>
             // ----------------------------------------------------------------
-            .func_async_result(
+        imports.define(
+            "theater:simple/tcp",
                 "receive",
-                move |_ctx: AsyncCtx<ActorStore>, input: Value| {
+                pact_result_host_fn(move |input: Value| {
                     let st = st_receive.clone();
                     let actor_id = aid_receive;
                     let cancel_token = cancel_token_for_receive.clone();
@@ -1568,8 +1581,8 @@ impl Handler for TcpHandler {
                             items: buf.into_iter().map(Value::U8).collect(),
                         })
                     }
-                },
-            )?
+                }),
+            );
             // ----------------------------------------------------------------
             // close(connection-id: string) -> result<_, string>
             //
@@ -1578,9 +1591,10 @@ impl Handler for TcpHandler {
             // clients (e.g. rustls) don't see an "unexpected EOF". Plain TCP
             // streams get a normal FIN.
             // ----------------------------------------------------------------
-            .func_async_result(
+        imports.define(
+            "theater:simple/tcp",
                 "close",
-                move |_ctx: AsyncCtx<ActorStore>, input: Value| {
+                pact_result_host_fn(move |input: Value| {
                     let st = st_close.clone();
                     let actor_id = aid_close;
                     async move {
@@ -1640,8 +1654,8 @@ impl Handler for TcpHandler {
                         }
                         Ok::<Value, Value>(Value::Tuple(vec![]))
                     }
-                },
-            )?
+                }),
+            );
             // ----------------------------------------------------------------
             // upgrade-to-tls-server(connection-id: string) -> result<_, string>
             //
@@ -1651,9 +1665,10 @@ impl Handler for TcpHandler {
             // configured on this handler. After this returns Ok, the same
             // connection-id transports TLS-encrypted bytes.
             // ----------------------------------------------------------------
-            .func_async_result(
+        imports.define(
+            "theater:simple/tcp",
                 "upgrade-to-tls-server",
-                move |_ctx: AsyncCtx<ActorStore>, input: Value| {
+                pact_result_host_fn(move |input: Value| {
                     let st = st_upgrade_server.clone();
                     let actor_id = aid_upgrade_server;
                     let tls_ctx = tls_for_upgrade_server.clone();
@@ -1749,8 +1764,8 @@ impl Handler for TcpHandler {
                         debug!("tcp upgrade-to-tls-server conn={}", conn_id);
                         Ok::<Value, Value>(Value::Tuple(vec![]))
                     }
-                },
-            )?
+                }),
+            );
             // ----------------------------------------------------------------
             // upgrade-to-tls-client(connection-id, server-name) -> result<_, string>
             //
@@ -1758,9 +1773,10 @@ impl Handler for TcpHandler {
             // existing plain TCP connection with TLS using the client_tls
             // config. server-name is used for SNI and cert verification.
             // ----------------------------------------------------------------
-            .func_async_result(
+        imports.define(
+            "theater:simple/tcp",
                 "upgrade-to-tls-client",
-                move |_ctx: AsyncCtx<ActorStore>, input: Value| {
+                pact_result_host_fn(move |input: Value| {
                     let st = st_upgrade_client.clone();
                     let actor_id = aid_upgrade_client;
                     let tls_ctx = tls_for_upgrade_client.clone();
@@ -1867,14 +1883,15 @@ impl Handler for TcpHandler {
                         );
                         Ok::<Value, Value>(Value::Tuple(vec![]))
                     }
-                },
-            )?
+                }),
+            );
             // ----------------------------------------------------------------
             // close-listener(listener-id: string) -> result<_, string>
             // ----------------------------------------------------------------
-            .func_async_result(
+        imports.define(
+            "theater:simple/tcp",
                 "close-listener",
-                move |_ctx: AsyncCtx<ActorStore>, input: Value| {
+                pact_result_host_fn(move |input: Value| {
                     let st = st_close_listener.clone();
                     let actor_id = aid_close_listener;
                     async move {
@@ -1898,8 +1915,8 @@ impl Handler for TcpHandler {
                         debug!("tcp close listener={}", listener_id);
                         Ok::<Value, Value>(Value::Tuple(vec![]))
                     }
-                },
-            )?;
+                }),
+            );
 
         ctx.mark_satisfied("theater:simple/tcp");
         info!("TCP host functions (Pack) set up successfully");
