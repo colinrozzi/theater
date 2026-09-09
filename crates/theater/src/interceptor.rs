@@ -18,8 +18,8 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::RwLock;
 
 use async_trait::async_trait;
-use packr::abi::Value;
-use packr::CallInterceptor;
+use packr_core::abi::Value;
+use packr_core::CallInterceptor;
 
 use crate::chain::StateChain;
 use crate::events::{ChainEventData, ChainEventPayload};

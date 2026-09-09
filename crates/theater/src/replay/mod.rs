@@ -27,7 +27,7 @@ mod handler;
 pub use handler::{ReplayHandler, ReplayState};
 
 use crate::pack_bridge::GraphValue;
-use packr::abi::Value;
+use packr_core::abi::Value;
 use serde::{Deserialize, Serialize};
 
 /// A recorded host function call with full I/O and type information.

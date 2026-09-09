@@ -1,9 +1,8 @@
 use crate::actor::handle::ActorHandle;
-use crate::actor::store::ActorStore;
 use crate::chain::ChainEvent;
 use crate::config::actor_manifest::HandlerConfig;
 use crate::id::TheaterId;
-use crate::pack_bridge::{HostLinkerBuilder, LinkerError, PackInstance, TypeHash};
+use crate::pack_bridge::{PackInstance, TypeHash};
 use crate::shutdown::{ShutdownController, ShutdownReceiver};
 use anyhow::Result;
 use std::collections::HashSet;
@@ -31,6 +30,10 @@ pub struct HandlerContext {
     pub satisfied_imports: HashSet<String>,
     /// The actor ID for the actor being set up
     pub actor_id: Option<TheaterId>,
+    /// The theater command channel — captured by host functions that need to
+    /// talk to the runtime (spawn, shutdown, message routing, …). The runtime
+    /// sets this before invoking `register_host_functions`.
+    pub theater_tx: Option<mpsc::UnboundedSender<crate::messages::TheaterCommand>>,
     /// Shutdown controller - handlers can subscribe to get shutdown signals
     pub shutdown_controller: Option<ShutdownController>,
 }
@@ -46,6 +49,7 @@ impl HandlerContext {
         Self {
             satisfied_imports: HashSet::new(),
             actor_id: None,
+            theater_tx: None,
             shutdown_controller: None,
         }
     }
@@ -55,6 +59,7 @@ impl HandlerContext {
         Self {
             satisfied_imports: HashSet::new(),
             actor_id: None,
+            theater_tx: None,
             shutdown_controller: Some(shutdown_controller),
         }
     }
@@ -283,38 +288,45 @@ pub trait Handler: Send + Sync + 'static {
         self.run(shutdown_receiver, event_rx)
     }
 
-    /// Set up host functions for this handler (Composite Graph ABI runtime).
+    /// Register this handler's host functions on the actor's [`HostImports`].
     ///
-    /// This is the new method for Composite integration. Handlers should register
-    /// their host functions using the `HostLinkerBuilder`:
+    /// The capture-based engine (packr-core) resolves a guest's imports from the
+    /// [`HostImports`] registry. Each host function is a closure that *captures*
+    /// whatever host state it needs (the theater command channel, the actor id,
+    /// per-handler capabilities) — nothing is threaded through the engine. Use
+    /// [`crate::pack_bridge::result_host_fn`] for pact `result<..>` returns and
+    /// [`packr_core::host_fn`] for plain-value returns.
     ///
     /// ```ignore
-    /// fn setup_host_functions_composite(
+    /// fn register_host_functions(
     ///     &mut self,
-    ///     builder: &mut HostLinkerBuilder<'_, ActorStore>,
+    ///     imports: &mut packr_core::HostImports,
     ///     ctx: &mut HandlerContext,
-    /// ) -> Result<(), LinkerError> {
+    /// ) -> anyhow::Result<()> {
     ///     if ctx.is_satisfied("my:interface") {
     ///         return Ok(());
     ///     }
-    ///
-    ///     builder.interface("my:interface")?
-    ///         .func_typed("my_function", |ctx: &mut Ctx<'_, ActorStore>, input: String| {
-    ///             // handle the call
-    ///             "result".to_string()
-    ///         })?;
-    ///
+    ///     let theater_tx = ctx.theater_tx.clone().unwrap();
+    ///     let id = ctx.actor_id.unwrap();
+    ///     imports.define(
+    ///         "my:interface",
+    ///         "my_function",
+    ///         crate::pack_bridge::result_host_fn(move |input: Value| {
+    ///             let theater_tx = theater_tx.clone();
+    ///             async move { Ok(Ok(Value::String("result".to_string()))) }
+    ///         }),
+    ///     );
     ///     ctx.mark_satisfied("my:interface");
     ///     Ok(())
     /// }
     /// ```
     ///
     /// Default implementation does nothing, allowing gradual migration.
-    fn setup_host_functions_composite(
+    fn register_host_functions(
         &mut self,
-        _builder: &mut HostLinkerBuilder<'_, ActorStore>,
+        _imports: &mut packr_core::HostImports,
         _ctx: &mut HandlerContext,
-    ) -> Result<(), LinkerError> {
+    ) -> anyhow::Result<()> {
         // Default: do nothing - handlers opt-in by overriding
         Ok(())
     }

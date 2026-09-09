@@ -4,16 +4,33 @@
 //! It includes type conversions, wrapper types, and utilities for using
 //! Pack's Graph ABI-based runtime within Theater's actor system.
 //!
+//! ## Engine axis (packr-core 0.24)
+//!
+//! Theater drives wasm actors through the **capture-based** packr-core engine:
+//! [`packr_wasmtime::WasmtimeEngine`] compiles + instantiates modules, host
+//! functions are registered on a [`packr_core::HostImports`] (each closure
+//! captures its own state — no typed store is threaded through the engine), and
+//! exports are called through [`packr_core::call_with_value`]. See
+//! `docs/engine-axis.md`.
+//!
 //! ## Key Components
 //!
 //! - **Re-exports**: Common Pack types for use throughout Theater
 //! - **PackInstance**: Wrapper around a Pack instance with Theater integration
-//! - **Value conversions**: Traits and implementations for converting between
-//!   Pack's `Value` type and Theater's types
+//! - **CachingPackRuntime**: the shared engine + compile cache
+//! - **InterfaceImpl**: handler interface declaration + content-addressed
+//!   hashing (single-sourced with the actor read side via packr-core primitives)
 
 use anyhow::{Context, Result};
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
+
+use packr_core::backend::{WasmEngine, WasmInstance};
+use packr_wasmtime::WasmtimeEngine;
+
+use crate::actor::store::ActorStore;
+use crate::id::TheaterId;
 
 /// How often the epoch ticker advances the shared engine's epoch. Guest
 /// deadlines are expressed in ticks, so with a 1s tick, N ticks ~= N seconds.
@@ -29,33 +46,40 @@ const INIT_EPOCH_DEADLINE_TICKS: u64 = 60;
 /// so this never false-trips but stops a true runaway from pegging a core.
 const DEFAULT_EPOCH_DEADLINE_TICKS: u64 = 300;
 
-// Re-export Pack types for convenient use throughout Theater
-// Now unified: pack re-exports from pack_abi, so Value/FromValue/ConversionError are consistent
-pub use packr::abi::{ConversionError, FromValue, Value, ValueType};
+/// The concrete compiled-module handle for the native backend.
+type CachedModule = <WasmtimeEngine as WasmEngine>::Module;
+/// The concrete live-instance type for the native backend.
+type EngineInstance = <WasmtimeEngine as WasmEngine>::Instance;
+
+// =============================================================================
+// Re-exports
+// =============================================================================
+
+// The graph ABI value types — single-sourced from packr-abi (packr_core::abi is
+// the same crate), so theater/handlers see exactly one `Value`.
+pub use packr_core::abi::{ConversionError, FromValue, Value, ValueType};
 pub use packr_abi::{GraphValue, Pattern};
 
-pub use packr::{
-    AsyncCompiledModule, AsyncCtx, AsyncInstance, AsyncRuntime, CallInterceptor, Ctx,
-    HostFunctionProvider, HostLinkerBuilder, InterfaceBuilder, LinkerError, Module,
-};
-// Re-export metadata types for querying actor exports/imports
-pub use packr::{
-    compute_interface_hash, compute_interface_hashes, decode_metadata_with_hashes,
-    encode_metadata_with_hashes, hash_type, validate_value_in_type_space, FunctionSignature,
-    InterfaceHash, MetadataError, MetadataWithHashes, PackageMetadata, ParamSignature, TypeDesc,
-    TypeValidationError,
-};
-// Re-export type system types for building metadata in tests
-pub use packr::types::{Arena, Function, Param, Type, TypeDef};
-// Re-export interface implementation types for handler interface declarations
-pub use packr::{FuncSignature, InterfaceImpl, PackParams, PackType, TypeHash};
-// Re-export pact parsing for loading interface definitions from .pact files
-pub use packr::{parse_pact, PactInterface};
+// The capture-based host-import surface + the record/replay interceptor trait.
+pub use packr_core::{host_fn, CallInterceptor, HostError, HostFn, HostImports};
 
-use std::collections::HashMap;
+// Content-addressed metadata read from the module's embedded CGRF section, plus
+// the interface-hash primitives.
+pub use packr_core::metadata::{
+    compute_interface_hash, compute_interface_hashes, metadata_with_hashes_from_module,
+    InterfaceHash, MetadataError, MetadataWithHashes,
+};
 
-use crate::actor::store::ActorStore;
-use crate::id::TheaterId;
+// The pact type-system AST.
+pub use packr_abi::types::{Arena, Case, Field, Function, Param, Type, TypeDef, TypePath};
+pub use packr_abi::TypeHash;
+
+// The `.pact` TEXT parser. packr-core 0.24 ships the type-system AST + the hash
+// primitives but NOT a pact-source parser, so the parser is still sourced from
+// the umbrella `packr` crate (its AST is `packr_abi::types`, so the parsed
+// interface feeds straight into the packr-core hashing below). See the
+// engine-axis migration notes.
+pub use packr::{parse_pact, MetadataValue, PactExport, PactInterface};
 
 /// Adapter restoring `func_async_result` ergonomics on packr-core's raw `host_fn`.
 ///
@@ -105,69 +129,62 @@ where
     })
 }
 
-/// Shared wasm runtime with an engine-scoped compile cache.
+/// Shared wasm engine with an engine-scoped compile cache.
 ///
-/// Wraps one `AsyncRuntime` (one `wasmtime::Engine`) plus a map from
-/// content hash of wasm bytes to the compiled `Module`. Spawning N actors
-/// from the same wasm pays the cranelift compile cost once; subsequent
-/// spawns wrap the cached module and skip straight to instantiation.
+/// Wraps one [`WasmtimeEngine`] (one `wasmtime::Engine`) plus a map from content
+/// hash of wasm bytes to the compiled `Module`. Spawning N actors from the same
+/// wasm pays the cranelift compile cost once; subsequent spawns instantiate the
+/// cached module directly.
 ///
-/// The cache key is the SHA-256 of the raw wasm bytes, so invalidation is
-/// a non-issue: different bytes are a different entry, identical bytes are
-/// identical modules. Entries live for the lifetime of this runtime
-/// (in a theater server, the process lifetime).
+/// The cache key is the SHA-256 of the raw wasm bytes, so invalidation is a
+/// non-issue: different bytes are a different entry, identical bytes are
+/// identical modules. Entries live for the lifetime of this runtime.
 ///
 /// Cache and engine are deliberately one struct: a `wasmtime::Module` is
 /// engine-scoped, so a cache keyed only by content hash but shared across
-/// engines would hand out modules that fail instantiation. Owning both
-/// makes that misuse unrepresentable.
+/// engines would hand out modules that fail instantiation. Owning both makes
+/// that misuse unrepresentable.
 pub struct CachingPackRuntime {
-    runtime: AsyncRuntime,
-    modules: std::sync::RwLock<HashMap<[u8; 32], Module>>,
+    engine: WasmtimeEngine,
+    modules: std::sync::RwLock<HashMap<[u8; 32], CachedModule>>,
 }
 
 impl CachingPackRuntime {
     pub fn new() -> Self {
-        let runtime = AsyncRuntime::new();
+        let engine = WasmtimeEngine::new();
 
         // Epoch ticker: advance the shared engine's epoch once per second so a
-        // per-call `set_epoch_deadline` can trap a runaway guest (a decode, a
-        // loop, anything) instead of letting it peg a core forever. One ticker
-        // for the singleton engine. Guarded on Handle::try_current so building
-        // the runtime outside a tokio context (e.g. a sync unit test) doesn't
-        // panic — without a ticker the epoch never advances, so no call traps,
-        // which is the correct behavior for a non-async harness.
+        // per-call `set_deadline` can trap a runaway guest (a decode, a loop,
+        // anything) instead of letting it peg a core forever. One ticker for the
+        // singleton engine. Guarded on Handle::try_current so building the
+        // runtime outside a tokio context (e.g. a sync unit test) doesn't panic —
+        // without a ticker the epoch never advances, so no call traps, which is
+        // the correct behavior for a non-async harness.
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
-            let engine = runtime.engine().clone();
+            let wt_engine = engine.engine().clone();
             handle.spawn(async move {
                 let mut ticker = tokio::time::interval(EPOCH_TICK_INTERVAL);
                 loop {
                     ticker.tick().await;
-                    engine.increment_epoch();
+                    wt_engine.increment_epoch();
                 }
             });
         }
 
         Self {
-            runtime,
+            engine,
             modules: std::sync::RwLock::new(HashMap::new()),
         }
     }
 
     /// Get-or-compile the module for these bytes.
     ///
-    /// Returns the wrapped compiled module and whether it was a cache hit.
+    /// Returns the compiled module and whether it was a cache hit.
     ///
-    /// Concurrent misses on the same bytes both compile and the last
-    /// insert wins — benign (both modules are valid for this engine) and
-    /// preferable to holding the write lock across a multi-millisecond
-    /// cranelift run. For today's stable actor set this is fine because
-    /// cold cache only happens at process start; if burst-on-cold-cache
-    /// ever matters (e.g. an inbound connection storm against a fresh
-    /// host paying N × cranelift instead of 1), the mitigation is to
-    /// change the value type to `Arc<OnceCell<Module>>` so concurrent
-    /// misses on the same bytes share one compile.
-    pub fn load_module_cached(&self, wasm_bytes: &[u8]) -> Result<(AsyncCompiledModule<'_>, bool)> {
+    /// Concurrent misses on the same bytes both compile and the last insert
+    /// wins — benign (both modules are valid for this engine) and preferable to
+    /// holding the write lock across a multi-millisecond cranelift run.
+    pub async fn compile_cached(&self, wasm_bytes: &[u8]) -> Result<(CachedModule, bool)> {
         use sha2::{Digest, Sha256};
         let hash: [u8; 32] = Sha256::digest(wasm_bytes).into();
 
@@ -177,24 +194,24 @@ impl CachingPackRuntime {
             .expect("module cache lock poisoned")
             .get(&hash)
         {
-            return Ok((self.runtime.wrap_module(module.clone()), true));
+            return Ok((module.clone(), true));
         }
 
-        let compiled = self
-            .runtime
-            .load_module(wasm_bytes)
-            .context("Failed to load WASM module with Pack runtime")?;
+        let module = self
+            .engine
+            .compile(wasm_bytes)
+            .await
+            .context("Failed to compile WASM module with Pack engine")?;
         self.modules
             .write()
             .expect("module cache lock poisoned")
-            .insert(hash, compiled.module().clone());
-        Ok((compiled, false))
+            .insert(hash, module.clone());
+        Ok((module, false))
     }
 
-    /// The underlying runtime, for callers that need the uncached path
-    /// or direct engine access.
-    pub fn runtime(&self) -> &AsyncRuntime {
-        &self.runtime
+    /// The underlying engine, for instantiation and direct engine access.
+    pub fn engine(&self) -> &WasmtimeEngine {
+        &self.engine
     }
 
     /// Number of distinct modules currently cached.
@@ -212,194 +229,40 @@ impl Default for CachingPackRuntime {
     }
 }
 
-/// Cached type information for a function's parameters and return types,
-/// used for host-side contract enforcement.
-#[derive(Debug, Clone)]
-pub struct FunctionTypeInfo {
-    /// The declared type for each parameter.
-    pub param_types: Vec<Type>,
-    /// The declared return types.
-    pub result_types: Vec<Type>,
-    /// Type definitions available for resolving Ref types.
-    pub type_defs: Vec<TypeDef>,
-}
-
-/// Extract functions from an Arena by finding a child arena with the given name.
-///
-/// The Arena structure from `decode_metadata` is:
-/// ```text
-/// Arena("package")
-/// ├── Arena("imports")
-/// │   ├── Arena("interface1") → functions
-/// │   └── Arena("interface2") → functions
-/// └── Arena("exports")
-///     ├── Arena("interface1") → functions
-///     └── Arena("interface2") → functions
-/// ```
-///
-/// Returns tuples of (interface_name, function).
-fn extract_functions_from_arena(
-    arena: &PackageMetadata,
-    section: &str,
-) -> Vec<(String, FunctionSignature)> {
-    let mut result = Vec::new();
-
-    // Find the child arena with the given name (e.g., "imports" or "exports")
-    for child in &arena.children {
-        if child.name == section {
-            // Each child of this arena is an interface
-            for interface_arena in &child.children {
-                let interface_name = &interface_arena.name;
-                for func in &interface_arena.functions {
-                    result.push((interface_name.clone(), func.clone()));
-                }
-            }
-        }
-    }
-
-    result
-}
-
 /// An instantiated Pack component with Theater integration.
 ///
-/// This wraps Pack's `AsyncInstance` and provides methods for
-/// calling functions and managing actor state.
-///
-/// ## Creation
-///
-/// Use `PackInstance::new()` to create an instance from WASM bytes:
-///
-/// ```ignore
-/// let runtime = AsyncRuntime::new();
-/// let instance = PackInstance::new(
-///     "my-actor",
-///     &wasm_bytes,
-///     &runtime,
-///     actor_store,
-///     |builder| {
-///         builder.interface("theater:simple/self")?
-///             .func_typed("log", |ctx, msg: String| { ... })?;
-///         Ok(())
-///     }
-/// ).await?;
-/// ```
-///
-/// ## Export Discovery
-///
-/// Pack packages embed type metadata accessible via `get_metadata()`.
-/// This provides full type signatures for all imports and exports,
-/// eliminating the need for manual export registration.
+/// Wraps a live packr-core [`WasmInstance`] and provides the call + metadata
+/// surface the runtime drives. Metadata (interface hashes, export presence) is
+/// served **statically** from the module bytes — no live `__pack_types` call is
+/// needed. The `actor_store` is retained for chain event recording + the actor
+/// id; it is NOT threaded through the engine (host functions capture their own
+/// state).
 pub struct PackInstance {
     /// The actor name
     pub name: String,
-    /// The underlying Pack instance
-    pub instance: AsyncInstance<ActorStore>,
-    /// The actor store
+    /// The underlying packr-core instance
+    pub instance: EngineInstance,
+    /// The actor store — used for chain event recording (`record_event`) and the
+    /// actor id. Not passed to the engine (capture-based host-import model).
     pub actor_store: ActorStore,
-    /// Cached parameter type info per function name, for host-side validation.
-    /// Populated after instantiation via `cache_function_types()`.
-    function_types: HashMap<String, FunctionTypeInfo>,
+    /// The raw wasm bytes, kept so metadata can be served statically.
+    wasm_bytes: Arc<Vec<u8>>,
 }
 
 impl PackInstance {
-    /// Create a new Pack instance from WASM bytes.
-    ///
-    /// This loads and instantiates the module in one step, configuring
-    /// host functions via the provided closure.
-    ///
-    /// ## Parameters
-    ///
-    /// * `name` - Name for this instance (typically the actor name)
-    /// * `wasm_bytes` - The WASM binary to load
-    /// * `runtime` - The async runtime to use
-    /// * `actor_store` - The actor store containing state and communication channels
-    /// * `configure` - A closure that configures host functions using the builder
-    ///
-    /// ## Returns
-    ///
-    /// A `PackInstance` ready for function calls.
-    pub async fn new<F>(
+    /// Wrap a freshly instantiated engine instance for Theater use.
+    pub fn new(
         name: impl Into<String>,
-        wasm_bytes: &[u8],
-        runtime: &AsyncRuntime,
+        instance: EngineInstance,
         actor_store: ActorStore,
-        configure: F,
-    ) -> Result<Self>
-    where
-        F: FnOnce(&mut HostLinkerBuilder<'_, ActorStore>) -> Result<(), LinkerError>,
-    {
-        Self::new_with_interceptor(name, wasm_bytes, runtime, actor_store, None, configure).await
-    }
-
-    /// Create a new Pack instance with an optional call interceptor.
-    ///
-    /// The interceptor is set on both the `HostLinkerBuilder` (to intercept
-    /// import/host function calls) and on the resulting `AsyncInstance`
-    /// (to intercept export/WASM function calls).
-    pub async fn new_with_interceptor<F>(
-        name: impl Into<String>,
-        wasm_bytes: &[u8],
-        runtime: &AsyncRuntime,
-        actor_store: ActorStore,
-        interceptor: Option<Arc<dyn CallInterceptor>>,
-        configure: F,
-    ) -> Result<Self>
-    where
-        F: FnOnce(&mut HostLinkerBuilder<'_, ActorStore>) -> Result<(), LinkerError>,
-    {
-        let module = runtime
-            .load_module(wasm_bytes)
-            .context("Failed to load WASM module with Pack runtime")?;
-
-        let instance = module
-            .instantiate_with_host_and_interceptor_async(
-                actor_store.clone(),
-                interceptor,
-                configure,
-            )
-            .await
-            .context("Failed to instantiate Pack module")?;
-
-        Ok(Self {
+        wasm_bytes: Arc<Vec<u8>>,
+    ) -> Self {
+        Self {
             name: name.into(),
             instance,
             actor_store,
-            function_types: HashMap::new(),
-        })
-    }
-
-    /// Like [`Self::new_with_interceptor`], but compiles through the
-    /// runtime's module cache: spawning the same wasm bytes repeatedly
-    /// pays the cranelift compile once and instantiates from the cached
-    /// module afterwards.
-    pub async fn new_with_interceptor_cached<F>(
-        name: impl Into<String>,
-        wasm_bytes: &[u8],
-        runtime: &CachingPackRuntime,
-        actor_store: ActorStore,
-        interceptor: Option<Arc<dyn CallInterceptor>>,
-        configure: F,
-    ) -> Result<Self>
-    where
-        F: FnOnce(&mut HostLinkerBuilder<'_, ActorStore>) -> Result<(), LinkerError>,
-    {
-        let (module, _cache_hit) = runtime.load_module_cached(wasm_bytes)?;
-
-        let instance = module
-            .instantiate_with_host_and_interceptor_async(
-                actor_store.clone(),
-                interceptor,
-                configure,
-            )
-            .await
-            .context("Failed to instantiate Pack module")?;
-
-        Ok(Self {
-            name: name.into(),
-            instance,
-            actor_store,
-            function_types: HashMap::new(),
-        })
+            wasm_bytes,
+        }
     }
 
     /// Get the actor ID from the store.
@@ -407,140 +270,53 @@ impl PackInstance {
         self.actor_store.id
     }
 
-    /// Get the package metadata describing imports and exports.
-    ///
-    /// This calls the `__pack_types` export embedded in the WASM module
-    /// to retrieve full type signatures for all imports and exports.
-    /// Returns `Err(MetadataError::NotFound)` if the package doesn't
-    /// export `__pack_types`.
-    pub async fn get_metadata(&mut self) -> Result<PackageMetadata, MetadataError> {
-        self.instance.types().await
-    }
-
-    /// Check if the package exports a function with the given name.
-    ///
-    /// This queries the embedded package metadata to check for the export.
-    pub async fn has_export(
-        &mut self,
-        interface: &str,
-        function: &str,
-    ) -> Result<bool, MetadataError> {
-        let exports = self.get_exports().await?;
-        Ok(exports
-            .iter()
-            .any(|(iface, func)| iface == interface && func.name == function))
-    }
-
-    /// Get the list of exported functions with their full type signatures.
-    ///
-    /// Returns tuples of (interface_name, function).
-    pub async fn get_exports(&mut self) -> Result<Vec<(String, FunctionSignature)>, MetadataError> {
-        let metadata = self.get_metadata().await?;
-        Ok(extract_functions_from_arena(&metadata, "exports"))
-    }
-
-    /// Get the list of imported functions with their full type signatures.
-    ///
-    /// Returns tuples of (interface_name, function).
-    pub async fn get_imports(&mut self) -> Result<Vec<(String, FunctionSignature)>, MetadataError> {
-        let metadata = self.get_metadata().await?;
-        Ok(extract_functions_from_arena(&metadata, "imports"))
-    }
-
     /// Get metadata with interface hashes for compatibility checking.
     ///
-    /// Returns the full metadata along with computed Merkle-tree hashes
-    /// for each imported and exported interface. These hashes enable
-    /// O(1) compatibility checking between components and handlers.
-    pub async fn get_metadata_with_hashes(&mut self) -> Result<MetadataWithHashes, MetadataError> {
-        self.instance.types_with_hashes().await
+    /// Served statically from the module's embedded CGRF metadata section (no
+    /// live instance call). Returns [`MetadataError::NotFound`] if the module
+    /// carries no `__pack_types` metadata.
+    pub fn get_metadata_with_hashes(&self) -> Result<MetadataWithHashes, MetadataError> {
+        metadata_with_hashes_from_module(&self.wasm_bytes)?.ok_or(MetadataError::NotFound)
     }
 
     /// Get interface hashes for all imported interfaces.
-    ///
-    /// Returns a list of (interface_name, hash) pairs that can be compared
-    /// against handler interface hashes for compatibility checking.
-    pub async fn get_import_hashes(&mut self) -> Result<Vec<InterfaceHash>, MetadataError> {
-        let metadata = self.get_metadata_with_hashes().await?;
-        Ok(metadata.import_hashes)
+    pub fn get_import_hashes(&self) -> Result<Vec<InterfaceHash>, MetadataError> {
+        Ok(self.get_metadata_with_hashes()?.import_hashes)
     }
 
     /// Get interface hashes for all exported interfaces.
-    pub async fn get_export_hashes(&mut self) -> Result<Vec<InterfaceHash>, MetadataError> {
-        let metadata = self.get_metadata_with_hashes().await?;
-        Ok(metadata.export_hashes)
+    pub fn get_export_hashes(&self) -> Result<Vec<InterfaceHash>, MetadataError> {
+        Ok(self.get_metadata_with_hashes()?.export_hashes)
     }
 
-    /// Cache function type information from the package metadata.
+    /// Check if the package exports a function under the given interface.
     ///
-    /// This reads the metadata once and stores resolved parameter types
-    /// for each exported function, enabling host-side type validation
-    /// before crossing the WASM boundary.
-    pub async fn cache_function_types(&mut self) -> Result<(), MetadataError> {
-        let metadata = self.get_metadata().await?;
-        let mut function_types = HashMap::new();
-
-        // Walk the exports section of the arena
-        for child in &metadata.children {
-            if child.name == "exports" {
-                for interface_arena in &child.children {
-                    // Collect type defs from the interface level
-                    let interface_types = &interface_arena.types;
-
-                    for func in &interface_arena.functions {
-                        let full_name = format!("{}.{}", interface_arena.name, func.name);
-
-                        // Merge function-scoped and interface-scoped type defs
-                        let mut all_types = interface_types.clone();
-                        all_types.extend(func.types.clone());
-
-                        function_types.insert(
-                            full_name,
-                            FunctionTypeInfo {
-                                param_types: func.params.iter().map(|p| p.ty.clone()).collect(),
-                                result_types: func.results.clone(),
-                                type_defs: all_types,
-                            },
-                        );
-                    }
-                }
-            }
-        }
-
-        self.function_types = function_types;
-        Ok(())
+    /// Served from the static metadata arena (same source as the hashes).
+    pub fn has_export(
+        &self,
+        interface: &str,
+        function: &str,
+    ) -> Result<bool, MetadataError> {
+        let metadata = self.get_metadata_with_hashes()?;
+        Ok(metadata
+            .arena
+            .exported_function_names(interface)
+            .iter()
+            .any(|f| f == function))
     }
 
-    /// Call an export function with the given parameters.
-    ///
-    /// This is the primary way to invoke actor functions. It:
-    /// 1. Encodes the input as a Graph ABI value
-    /// 2. Calls the function using the full qualified name
-    /// 3. Decodes the output
-    ///
-    /// Actor state lives *inside* the module (see `docs/in-module-state.md`): the
-    /// runtime never threads it through the call, so only the function's own
-    /// parameters cross the boundary and only its own return comes back.
-    ///
-    /// ## Parameters
-    ///
-    /// * `function_name` - The function name (e.g., "theater:simple/actor.init")
-    /// * `params` - Parameters encoded as bytes (will be decoded and re-encoded as Value)
-    ///
-    /// ## Returns
-    ///
-    /// The function's result encoded as bytes.
+    /// Call an export function with raw ABI-encoded params.
     pub async fn call_function(&mut self, function_name: &str, params: Vec<u8>) -> Result<Vec<u8>> {
         let params_value = bytes_to_value(&params);
         self.call_function_with_value(function_name, params_value)
             .await
     }
 
-    /// Call an export function with structured Value params (no bytes_to_value flattening).
+    /// Call an export function with structured Value params.
     ///
-    /// Unlike `call_function` which converts raw bytes to a flat list of u8,
-    /// this method takes a structured `Value` directly, preserving the type
-    /// information needed for Pack's Graph ABI encoding.
+    /// Actor state lives *inside* the module (see `docs/in-module-state.md`): the
+    /// runtime never threads it through the call, so only the function's own
+    /// parameters cross the boundary and only its own return comes back.
     pub async fn call_function_with_value(
         &mut self,
         function_name: &str,
@@ -554,28 +330,22 @@ impl PackInstance {
             other => Value::Tuple(vec![other]),
         };
 
-        // Arm the epoch deadline before entering the guest: with the 1/sec
-        // ticker above, a runaway call traps once `ticks` seconds pass and
-        // returns Err (an epoch trap) instead of pegging a core. Tight on
-        // actor.init (the spine-wedging path), generous otherwise. The deadline
-        // is per-call, so a legitimately slow call just needs a bigger budget.
+        // Arm the epoch deadline before entering the guest: with the 1/sec ticker
+        // above, a runaway call traps once `ticks` seconds pass and returns Err
+        // (an epoch trap) instead of pegging a core. Tight on actor.init (the
+        // spine-wedging path), generous otherwise. The deadline is per-call, so a
+        // legitimately slow call just needs a bigger budget.
         let epoch_ticks = if function_name == "theater:simple/actor.init" {
             INIT_EPOCH_DEADLINE_TICKS
         } else {
             DEFAULT_EPOCH_DEADLINE_TICKS
         };
-        // Armed on packr >=0.10.6: pack-dev's u64::MAX "never-trap" default
-        // (which overflowed current_epoch()+delta once the ticker advanced the
-        // epoch past 0) is fixed to u64::MAX/2, so this computes cleanly and
-        // traps a runaway call at the deadline instead of pegging a core.
-        self.instance.set_epoch_deadline(epoch_ticks);
+        self.instance.set_deadline(epoch_ticks);
 
         // Diagnostic: capture the EXACT encoded actor.init input (the
         // Tuple[..params] the guest's composite_abi decoder receives) so a
-        // hanging/pathological decode input can be handed to packr verbatim. This
-        // is the real wasm-boundary input — the actor's init config (from the
-        // manifest's initial_state) is delivered here as the init argument.
-        // Off by default; the hex-encode (and re-encode) only run when enabled:
+        // hanging/pathological decode input can be handed to packr verbatim.
+        // Off by default; the hex-encode only runs when enabled:
         //   RUST_LOG=theater::init_encode_dump=trace
         if function_name == "theater:simple/actor.init" {
             tracing::trace!(
@@ -585,9 +355,7 @@ impl PackInstance {
             );
         }
 
-        let output = self
-            .instance
-            .call_with_value_async(function_name, &input)
+        let output = packr_core::call_with_value(&mut self.instance, function_name, &input)
             .await
             .with_context(|| {
                 format!(
@@ -596,41 +364,158 @@ impl PackInstance {
                 )
             })?;
 
-        // Validate the return against the function's declared result type — with
-        // one exception: an `ok(())` (unit ok). A `result<_, E>` return carries no
-        // ok payload to type-check, and packr's metadata surfaces that empty
-        // ok-type to the validator as `bool`, so validating a unit ok spuriously
-        // fails ("expected bool, got tuple<0>"). A unit ok has no data to get
-        // wrong, so it always conforms — skip it. Typed and error returns still
-        // validate.
-        let is_unit_ok = matches!(
-            &output,
-            Value::Result { value: Ok(inner), .. }
-                if matches!(inner.as_ref(), Value::Tuple(items) if items.is_empty())
-        );
-        if !is_unit_ok && !self.function_types.is_empty() {
-            if let Some(info) = self.function_types.get(function_name) {
-                if let Some(result_type) = info.result_types.first() {
-                    validate_value_in_type_space(&output, result_type, &info.type_defs).map_err(
-                        |e| {
-                            anyhow::anyhow!("Return type violation from '{}': {}", function_name, e)
-                        },
-                    )?;
-                }
-            }
-        }
-
         decode_function_result(output)
     }
 
     /// Call a simple function that takes and returns a Value directly.
-    ///
-    /// This is useful for functions that don't follow the state pattern.
     pub async fn call_value(&mut self, function_name: &str, input: &Value) -> Result<Value> {
-        self.instance
-            .call_with_value_async(function_name, input)
+        packr_core::call_with_value(&mut self.instance, function_name, input)
             .await
-            .context(format!("Failed to call function '{}'", function_name))
+            .with_context(|| format!("Failed to call function '{}'", function_name))
+    }
+}
+
+// =============================================================================
+// Handler interface declaration + hashing
+// =============================================================================
+
+/// A single function signature within an interface.
+#[derive(Debug, Clone)]
+pub struct FuncSignature {
+    pub name: String,
+    pub params: Vec<Type>,
+    pub results: Vec<Type>,
+}
+
+/// A declared host interface, used for content-addressed compatibility checking
+/// between an actor's imported interfaces and the handlers that provide them.
+///
+/// Hashes are computed with the packr-core interface-hash primitives
+/// (`hash_type_in` → `hash_function` → `hash_interface`), the SAME algorithm the
+/// actor read side ([`compute_interface_hash`]) uses — so a handler's hash and
+/// the actor's embedded import hash are directly comparable.
+#[derive(Debug, Clone)]
+pub struct InterfaceImpl {
+    /// The interface name (e.g., "theater:simple/runtime").
+    pub name: String,
+    /// Type definitions in scope for ref resolution when hashing.
+    pub types: Vec<TypeDef>,
+    /// Function signatures declared by this interface.
+    pub functions: Vec<FuncSignature>,
+}
+
+impl InterfaceImpl {
+    /// Build an interface declaration from a parsed `.pact` interface.
+    ///
+    /// The full interface name is `@package/interface-name`. Interface-level and
+    /// type-export typedefs are captured so refs in function signatures resolve
+    /// structurally when hashing.
+    pub fn from_pact(pact: &PactInterface) -> Self {
+        // Get package from metadata (e.g., "theater:simple").
+        let package = pact
+            .metadata
+            .iter()
+            .find(|m| m.name == "package")
+            .and_then(|m| match &m.value {
+                MetadataValue::String(s) => Some(s.as_str()),
+                _ => None,
+            })
+            .unwrap_or("");
+
+        let full_name = if package.is_empty() {
+            pact.name.clone()
+        } else {
+            format!("{}/{}", package, pact.name)
+        };
+
+        // Interface-level typedefs + type-style exports form the ref-resolution
+        // scope for function-signature hashing.
+        let mut types = pact.types.clone();
+        let mut functions = Vec::new();
+        for export in &pact.exports {
+            match export {
+                PactExport::Type(td) => types.push(td.clone()),
+                PactExport::Function(func) => {
+                    functions.push(FuncSignature {
+                        name: func.name.clone(),
+                        params: func.params.iter().map(|p| p.ty.clone()).collect(),
+                        results: func.results.clone(),
+                    });
+                }
+            }
+        }
+
+        Self {
+            name: full_name,
+            types,
+            functions,
+        }
+    }
+
+    /// The interface name.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// The function signatures.
+    pub fn signatures(&self) -> &[FuncSignature] {
+        &self.functions
+    }
+
+    fn func_hash(&self, func: &FuncSignature) -> TypeHash {
+        let param_hashes: Vec<_> = func
+            .params
+            .iter()
+            .map(|t| packr_core::metadata::hash_type_in(t, &self.types))
+            .collect();
+        let result_hashes: Vec<_> = func
+            .results
+            .iter()
+            .map(|t| packr_core::metadata::hash_type_in(t, &self.types))
+            .collect();
+        packr_abi::hash_function(&param_hashes, &result_hashes)
+    }
+
+    /// Compute the interface hash over all functions.
+    pub fn hash(&self) -> TypeHash {
+        let mut bindings: Vec<packr_abi::Binding<'_>> = self
+            .functions
+            .iter()
+            .map(|f| packr_abi::Binding {
+                name: &f.name,
+                hash: self.func_hash(f),
+            })
+            .collect();
+        bindings.sort_by(|a, b| a.name.cmp(b.name));
+        packr_abi::hash_interface(&self.name, &[], &bindings)
+    }
+
+    /// Compute the interface hash for a subset of functions.
+    ///
+    /// Enables partial interface matching — an actor that imports only some
+    /// functions from an interface can still verify against a handler that
+    /// provides the full interface. Returns `None` if any requested function is
+    /// missing.
+    pub fn hash_subset(&self, function_names: &[&str]) -> Option<TypeHash> {
+        let mut selected = Vec::with_capacity(function_names.len());
+        for name in function_names {
+            let func = self.functions.iter().find(|f| f.name == *name)?;
+            selected.push((func.name.clone(), self.func_hash(func)));
+        }
+        let mut bindings: Vec<packr_abi::Binding<'_>> = selected
+            .iter()
+            .map(|(name, hash)| packr_abi::Binding { name, hash: *hash })
+            .collect();
+        bindings.sort_by(|a, b| a.name.cmp(b.name));
+        Some(packr_abi::hash_interface(&self.name, &[], &bindings))
+    }
+
+    /// The hash for a single named function, if present.
+    pub fn function_hash(&self, name: &str) -> Option<TypeHash> {
+        self.functions
+            .iter()
+            .find(|f| f.name == name)
+            .map(|f| self.func_hash(f))
     }
 }
 
@@ -640,7 +525,6 @@ impl PackInstance {
 
 /// Convert bytes to a Value (as a list of u8).
 fn bytes_to_value(bytes: &[u8]) -> Value {
-    use packr::abi::ValueType;
     Value::List {
         elem_type: ValueType::U8,
         items: bytes.iter().copied().map(Value::U8).collect(),
@@ -649,12 +533,12 @@ fn bytes_to_value(bytes: &[u8]) -> Value {
 
 /// Encode a Value to bytes using the Graph ABI.
 pub fn encode_value(value: &Value) -> Result<Vec<u8>> {
-    packr::encode(value).map_err(|e| anyhow::anyhow!("Failed to encode value: {:?}", e))
+    packr_core::abi::encode(value).map_err(|e| anyhow::anyhow!("Failed to encode value: {:?}", e))
 }
 
 /// Decode bytes to a Value using the Graph ABI.
 pub fn decode_value(bytes: &[u8]) -> Result<Value> {
-    packr::decode(bytes).map_err(|e| anyhow::anyhow!("Failed to decode value: {:?}", e))
+    packr_core::abi::decode(bytes).map_err(|e| anyhow::anyhow!("Failed to decode value: {:?}", e))
 }
 
 /// Decode a function result.
@@ -707,7 +591,6 @@ fn decode_function_result(value: Value) -> Result<Vec<u8>> {
 // Trait Implementations for Theater Types
 // =============================================================================
 
-/// Trait for converting Theater types to Pack Values.
 // Type→Value conversion is packr's job now: primitives, `Option<T>`, `Vec<T>`,
 // etc. impl `From<T> for Value` in packr-abi, and domain types derive it with
 // `#[derive(GraphValue)]`. Use `Value::from(x)` / `x.into()` rather than a
@@ -717,22 +600,22 @@ fn decode_function_result(value: Value) -> Result<Vec<u8>> {
 mod tests {
     use super::*;
 
-    #[test]
-    fn module_cache_hits_on_identical_bytes() {
+    #[tokio::test]
+    async fn module_cache_hits_on_identical_bytes() {
         let rt = CachingPackRuntime::new();
         // wasmtime's default `wat` feature accepts text modules.
         let wat_a = b"(module)";
         let wat_b = b"(module (func))";
 
-        let (_, hit) = rt.load_module_cached(wat_a).unwrap();
+        let (_, hit) = rt.compile_cached(wat_a).await.unwrap();
         assert!(!hit, "first load of A must be a miss");
         assert_eq!(rt.cached_module_count(), 1);
 
-        let (_, hit) = rt.load_module_cached(wat_a).unwrap();
+        let (_, hit) = rt.compile_cached(wat_a).await.unwrap();
         assert!(hit, "second load of A must be a hit");
         assert_eq!(rt.cached_module_count(), 1);
 
-        let (_, hit) = rt.load_module_cached(wat_b).unwrap();
+        let (_, hit) = rt.compile_cached(wat_b).await.unwrap();
         assert!(!hit, "different bytes must be a miss");
         assert_eq!(rt.cached_module_count(), 2);
     }

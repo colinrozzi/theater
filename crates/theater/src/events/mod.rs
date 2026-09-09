@@ -98,7 +98,7 @@ impl ChainEventData {
     /// The hash field will be empty - it's filled in by `StateChain::add_event`.
     pub fn to_chain_event(&self, parent_hash: Option<Vec<u8>>) -> ChainEvent {
         let encoded_data =
-            packr::abi::encode(&Value::from(self.data.clone())).unwrap_or_else(|_| vec![]);
+            packr_core::abi::encode(&Value::from(self.data.clone())).unwrap_or_else(|_| vec![]);
         ChainEvent {
             parent_hash,
             hash: vec![],
@@ -110,7 +110,7 @@ impl ChainEventData {
 
 /// Decode chain event data from pack-encoded bytes.
 pub fn decode_chain_event_payload(data: &[u8]) -> Option<ChainEventPayload> {
-    let value = packr::abi::decode(data).ok()?;
+    let value = packr_core::abi::decode(data).ok()?;
     ChainEventPayload::try_from(value).ok()
 }
 
