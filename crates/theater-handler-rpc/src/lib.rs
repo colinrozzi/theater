@@ -258,61 +258,92 @@ impl Handler for RpcHandler {
             "theater:simple/rpc",
             "implements",
             pact_result_host_fn(move |input: Value| {
-                    let theater_tx = theater_tx.clone();
+                let theater_tx = theater_tx.clone();
 
-                    async move {
-                        // Parse input: tuple of (actor-id, interface)
-                        let (actor_id_str, interface_name) = match &input {
-                            Value::Tuple(items) if items.len() >= 2 => {
-                                let actor_id = match &items[0] {
-                                    Value::String(s) => s.clone(),
-                                    _ => return Ok::<Value, Value>(make_error("Invalid actor-id: expected string")),
-                                };
-                                let interface = match &items[1] {
-                                    Value::String(s) => s.clone(),
-                                    _ => return Ok::<Value, Value>(make_error("Invalid interface: expected string")),
-                                };
-                                (actor_id, interface)
-                            }
-                            _ => return Ok::<Value, Value>(make_error("Invalid input: expected tuple of (actor-id, interface)")),
-                        };
-
-                        debug!("RPC implements check: actor={}, interface={}", actor_id_str, interface_name);
-
-                        // Parse actor ID
-                        let target_id = match actor_id_str.parse::<TheaterId>() {
-                            Ok(id) => id,
-                            Err(e) => return Ok::<Value, Value>(make_error(&format!("Invalid actor ID: {}", e))),
-                        };
-
-                        // Get actor's export hashes from theater runtime
-                        let (response_tx, response_rx) = oneshot::channel();
-                        if let Err(e) = theater_tx
-                            .send(TheaterCommand::GetActorExportHashes {
-                                actor_id: target_id,
-                                response_tx,
-                            })
-                        {
-                            return Ok::<Value, Value>(make_error(&format!("Failed to send to theater: {}", e)));
+                async move {
+                    // Parse input: tuple of (actor-id, interface)
+                    let (actor_id_str, interface_name) = match &input {
+                        Value::Tuple(items) if items.len() >= 2 => {
+                            let actor_id = match &items[0] {
+                                Value::String(s) => s.clone(),
+                                _ => {
+                                    return Ok::<Value, Value>(make_error(
+                                        "Invalid actor-id: expected string",
+                                    ))
+                                }
+                            };
+                            let interface = match &items[1] {
+                                Value::String(s) => s.clone(),
+                                _ => {
+                                    return Ok::<Value, Value>(make_error(
+                                        "Invalid interface: expected string",
+                                    ))
+                                }
+                            };
+                            (actor_id, interface)
                         }
+                        _ => {
+                            return Ok::<Value, Value>(make_error(
+                                "Invalid input: expected tuple of (actor-id, interface)",
+                            ))
+                        }
+                    };
 
-                        let export_hashes = match response_rx.await {
-                            Ok(Some(hashes)) => hashes,
-                            Ok(None) => return Ok::<Value, Value>(make_error(&format!("Actor not found: {}", actor_id_str))),
-                            Err(e) => return Ok::<Value, Value>(make_error(&format!("Failed to get export hashes: {}", e))),
-                        };
+                    debug!(
+                        "RPC implements check: actor={}, interface={}",
+                        actor_id_str, interface_name
+                    );
 
-                        // Check if interface is in exports
-                        let implements = export_hashes.iter().any(|h| h.name == interface_name);
+                    // Parse actor ID
+                    let target_id = match actor_id_str.parse::<TheaterId>() {
+                        Ok(id) => id,
+                        Err(e) => {
+                            return Ok::<Value, Value>(make_error(&format!(
+                                "Invalid actor ID: {}",
+                                e
+                            )))
+                        }
+                    };
 
-                        Ok(Value::Variant {
-                            type_name: String::from("result"),
-                            case_name: String::from("ok"),
-                            tag: 0,
-                            payload: vec![Value::Bool(implements)],
-                        })
+                    // Get actor's export hashes from theater runtime
+                    let (response_tx, response_rx) = oneshot::channel();
+                    if let Err(e) = theater_tx.send(TheaterCommand::GetActorExportHashes {
+                        actor_id: target_id,
+                        response_tx,
+                    }) {
+                        return Ok::<Value, Value>(make_error(&format!(
+                            "Failed to send to theater: {}",
+                            e
+                        )));
                     }
-                }),
+
+                    let export_hashes = match response_rx.await {
+                        Ok(Some(hashes)) => hashes,
+                        Ok(None) => {
+                            return Ok::<Value, Value>(make_error(&format!(
+                                "Actor not found: {}",
+                                actor_id_str
+                            )))
+                        }
+                        Err(e) => {
+                            return Ok::<Value, Value>(make_error(&format!(
+                                "Failed to get export hashes: {}",
+                                e
+                            )))
+                        }
+                    };
+
+                    // Check if interface is in exports
+                    let implements = export_hashes.iter().any(|h| h.name == interface_name);
+
+                    Ok(Value::Variant {
+                        type_name: String::from("result"),
+                        case_name: String::from("ok"),
+                        tag: 0,
+                        payload: vec![Value::Bool(implements)],
+                    })
+                }
+            }),
         );
         // ----------------------------------------------------------------
         // exports: Get list of actor's exported interfaces
@@ -322,63 +353,85 @@ impl Handler for RpcHandler {
             "theater:simple/rpc",
             "exports",
             pact_result_host_fn(move |input: Value| {
-                    let theater_tx = theater_tx.clone();
+                let theater_tx = theater_tx.clone();
 
-                    async move {
-                        // Parse input: actor-id string (might be wrapped in tuple)
-                        let actor_id_str = match &input {
+                async move {
+                    // Parse input: actor-id string (might be wrapped in tuple)
+                    let actor_id_str = match &input {
+                        Value::String(s) => s.clone(),
+                        Value::Tuple(items) if !items.is_empty() => match &items[0] {
                             Value::String(s) => s.clone(),
-                            Value::Tuple(items) if !items.is_empty() => {
-                                match &items[0] {
-                                    Value::String(s) => s.clone(),
-                                    _ => return Ok::<Value, Value>(make_error("Invalid actor-id: expected string")),
-                                }
+                            _ => {
+                                return Ok::<Value, Value>(make_error(
+                                    "Invalid actor-id: expected string",
+                                ))
                             }
-                            _ => return Ok::<Value, Value>(make_error("Invalid input: expected actor-id string")),
-                        };
-
-                        debug!("RPC exports query: actor={}", actor_id_str);
-
-                        // Parse actor ID
-                        let target_id = match actor_id_str.parse::<TheaterId>() {
-                            Ok(id) => id,
-                            Err(e) => return Ok::<Value, Value>(make_error(&format!("Invalid actor ID: {}", e))),
-                        };
-
-                        // Get actor's export hashes from theater runtime
-                        let (response_tx, response_rx) = oneshot::channel();
-                        if let Err(e) = theater_tx
-                            .send(TheaterCommand::GetActorExportHashes {
-                                actor_id: target_id,
-                                response_tx,
-                            })
-                        {
-                            return Ok::<Value, Value>(make_error(&format!("Failed to send to theater: {}", e)));
+                        },
+                        _ => {
+                            return Ok::<Value, Value>(make_error(
+                                "Invalid input: expected actor-id string",
+                            ))
                         }
+                    };
 
-                        let export_hashes = match response_rx.await {
-                            Ok(Some(hashes)) => hashes,
-                            Ok(None) => return Ok::<Value, Value>(make_error(&format!("Actor not found: {}", actor_id_str))),
-                            Err(e) => return Ok::<Value, Value>(make_error(&format!("Failed to get export hashes: {}", e))),
-                        };
+                    debug!("RPC exports query: actor={}", actor_id_str);
 
-                        // Convert to list of interface names
-                        let interface_names: Vec<Value> = export_hashes
-                            .iter()
-                            .map(|h| Value::String(h.name.clone()))
-                            .collect();
+                    // Parse actor ID
+                    let target_id = match actor_id_str.parse::<TheaterId>() {
+                        Ok(id) => id,
+                        Err(e) => {
+                            return Ok::<Value, Value>(make_error(&format!(
+                                "Invalid actor ID: {}",
+                                e
+                            )))
+                        }
+                    };
 
-                        Ok(Value::Variant {
-                            type_name: String::from("result"),
-                            case_name: String::from("ok"),
-                            tag: 0,
-                            payload: vec![Value::List {
-                                elem_type: ValueType::String,
-                                items: interface_names,
-                            }],
-                        })
+                    // Get actor's export hashes from theater runtime
+                    let (response_tx, response_rx) = oneshot::channel();
+                    if let Err(e) = theater_tx.send(TheaterCommand::GetActorExportHashes {
+                        actor_id: target_id,
+                        response_tx,
+                    }) {
+                        return Ok::<Value, Value>(make_error(&format!(
+                            "Failed to send to theater: {}",
+                            e
+                        )));
                     }
-                }),
+
+                    let export_hashes = match response_rx.await {
+                        Ok(Some(hashes)) => hashes,
+                        Ok(None) => {
+                            return Ok::<Value, Value>(make_error(&format!(
+                                "Actor not found: {}",
+                                actor_id_str
+                            )))
+                        }
+                        Err(e) => {
+                            return Ok::<Value, Value>(make_error(&format!(
+                                "Failed to get export hashes: {}",
+                                e
+                            )))
+                        }
+                    };
+
+                    // Convert to list of interface names
+                    let interface_names: Vec<Value> = export_hashes
+                        .iter()
+                        .map(|h| Value::String(h.name.clone()))
+                        .collect();
+
+                    Ok(Value::Variant {
+                        type_name: String::from("result"),
+                        case_name: String::from("ok"),
+                        tag: 0,
+                        payload: vec![Value::List {
+                            elem_type: ValueType::String,
+                            items: interface_names,
+                        }],
+                    })
+                }
+            }),
         );
 
         ctx.mark_satisfied("theater:simple/rpc");

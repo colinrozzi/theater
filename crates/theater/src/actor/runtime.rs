@@ -311,7 +311,10 @@ impl ActorRuntime {
         // per-handler timing here measures registration cost not compile cost.
         let mut imports = packr_core::HostImports::new();
         for handler in handlers.iter_mut() {
-            debug!("Registering host functions for handler '{}'", handler.name());
+            debug!(
+                "Registering host functions for handler '{}'",
+                handler.name()
+            );
             handler
                 .register_host_functions(&mut imports, &mut handler_ctx)
                 .map_err(|e| {
@@ -340,14 +343,17 @@ impl ActorRuntime {
         // module: unknown import GOT.mem::__data_end" instead of just the top
         // wrapper — critical for diagnosing PIC/version-skew deploys.
         let wasm_bytes = Arc::new(wasm_bytes);
-        let (module, _cache_hit) = pack_runtime.compile_cached(&wasm_bytes).await.map_err(|e| {
-            let err = ActorRuntimeError::WasmInstantiationFailed {
-                id,
-                detail: format!("{:#}", e),
-            };
-            error!("{}", err);
-            err
-        })?;
+        let (module, _cache_hit) = pack_runtime
+            .compile_cached(&wasm_bytes)
+            .await
+            .map_err(|e| {
+                let err = ActorRuntimeError::WasmInstantiationFailed {
+                    id,
+                    detail: format!("{:#}", e),
+                };
+                error!("{}", err);
+                err
+            })?;
         let instance = pack_runtime
             .engine()
             .instantiate(&module, imports)
@@ -360,7 +366,7 @@ impl ActorRuntime {
                 error!("{}", err);
                 err
             })?;
-        let actor_instance =
+        let mut actor_instance =
             PackInstance::new(name.clone(), instance, actor_store, wasm_bytes.clone());
 
         debug!("PackInstance created successfully");
@@ -378,7 +384,7 @@ impl ActorRuntime {
         // `theater:simple/self` which provides `log`, `get-chain`, and `shutdown`.
         // In this case, we compute a subset hash from the handler's functions and
         // compare against the actor's declared interface hash.
-        match actor_instance.get_metadata_with_hashes() {
+        match actor_instance.get_metadata_with_hashes().await {
             Ok(metadata) => {
                 let actor_import_hashes = &metadata.import_hashes;
                 info!(
@@ -945,6 +951,7 @@ impl ActorRuntime {
                             Some(instance) => {
                                 let has_get_state = instance
                                     .has_export("theater:simple/actor", "get-state")
+                                    .await
                                     .unwrap_or(false);
                                 let state = if has_get_state {
                                     match instance
@@ -980,7 +987,7 @@ impl ActorRuntime {
                     ActorInfo::GetExportHashes { response_tx } => {
                         match &mut *actor_instance_wrapper.write().await {
                             Some(instance) => {
-                                match instance.get_export_hashes() {
+                                match instance.get_export_hashes().await {
                                     Ok(hashes) => {
                                         if let Err(e) = response_tx.send(Ok(hashes)) {
                                             error!("Failed to send export hashes response: {:?}", e);

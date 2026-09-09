@@ -893,42 +893,43 @@ impl Handler for TcpHandler {
         let st_close_listener = state.clone();
         let aid_close_listener = actor_id_for_closures;
 
-            // ----------------------------------------------------------------
-            // connect(address: string) -> result<string, string>
-            // Outbound connections are immediately active
-            // ----------------------------------------------------------------
+        // ----------------------------------------------------------------
+        // connect(address: string) -> result<string, string>
+        // Outbound connections are immediately active
+        // ----------------------------------------------------------------
         imports.define(
             "theater:simple/tcp",
-                "connect",
-                pact_result_host_fn(move |input: Value| {
-                    let st = st_connect.clone();
-                    let actor_id = aid_connect;
-                    let tls_ctx = tls_for_connect.clone();
-                    async move {
-                        let _ph = PhaseLog::new("tcp.connect");
-                        let address = parse_string(&input)?;
-                        st.check_connection_limit().await?;
-                        debug!("tcp connect to {}", address);
+            "connect",
+            pact_result_host_fn(move |input: Value| {
+                let st = st_connect.clone();
+                let actor_id = aid_connect;
+                let tls_ctx = tls_for_connect.clone();
+                async move {
+                    let _ph = PhaseLog::new("tcp.connect");
+                    let address = parse_string(&input)?;
+                    st.check_connection_limit().await?;
+                    debug!("tcp connect to {}", address);
 
-                        let tcp_stream = TcpStream::connect(&address)
-                            .await
-                            .map_err(|e| Value::String(e.to_string()))?;
+                    let tcp_stream = TcpStream::connect(&address)
+                        .await
+                        .map_err(|e| Value::String(e.to_string()))?;
 
-                        let peer_addr = tcp_stream
-                            .peer_addr()
-                            .map_err(|e| Value::String(e.to_string()))?;
+                    let peer_addr = tcp_stream
+                        .peer_addr()
+                        .map_err(|e| Value::String(e.to_string()))?;
 
-                        // Apply TLS if configured AND auto_handshake is enabled.
-                        // STARTTLS-style protocols set client_tls.auto_handshake = false:
-                        // the connector is built (so upgrade-to-tls-client works) but
-                        // connect() returns a plain TCP stream until the actor explicitly
-                        // upgrades it after negotiating the STARTTLS handshake.
-                        let auto_handshake = tls_ctx
-                            .as_ref()
-                            .as_ref()
-                            .map(|c| c.client_auto_handshake)
-                            .unwrap_or(true);
-                        let unified_stream = if !auto_handshake {
+                    // Apply TLS if configured AND auto_handshake is enabled.
+                    // STARTTLS-style protocols set client_tls.auto_handshake = false:
+                    // the connector is built (so upgrade-to-tls-client works) but
+                    // connect() returns a plain TCP stream until the actor explicitly
+                    // upgrades it after negotiating the STARTTLS handshake.
+                    let auto_handshake = tls_ctx
+                        .as_ref()
+                        .as_ref()
+                        .map(|c| c.client_auto_handshake)
+                        .unwrap_or(true);
+                    let unified_stream =
+                        if !auto_handshake {
                             UnifiedStream::Plain(tcp_stream)
                         } else if let Some(ref ctx) = *tls_ctx {
                             if let Some(ref connector) = ctx.client_connector {
@@ -938,11 +939,14 @@ impl Handler for TcpHandler {
                                 )
                                 .map_err(|e| Value::String(e.to_string()))?;
 
-                                debug!("tcp connect: performing TLS handshake with SNI {:?}", server_name);
-                                let tls_stream = connector
-                                    .connect(server_name, tcp_stream)
-                                    .await
-                                    .map_err(|e| Value::String(format!("TLS handshake failed: {}", e)))?;
+                                debug!(
+                                    "tcp connect: performing TLS handshake with SNI {:?}",
+                                    server_name
+                                );
+                                let tls_stream =
+                                    connector.connect(server_name, tcp_stream).await.map_err(
+                                        |e| Value::String(format!("TLS handshake failed: {}", e)),
+                                    )?;
                                 info!("tcp connect: TLS handshake complete");
                                 UnifiedStream::ClientTls(tls_stream)
                             } else {
@@ -952,208 +956,213 @@ impl Handler for TcpHandler {
                             UnifiedStream::Plain(tcp_stream)
                         };
 
-                        let id = st.next_id();
-                        st.connections.lock().await.insert(
-                            id,
-                            ConnectionEntry {
-                                stream: Arc::new(Mutex::new(StreamState::Full(Box::new(
-                                    unified_stream,
-                                )))),
-                                peer_addr,
-                                owner: actor_id,
-                                state: ConnectionState::Active, // Outbound = active
-                                data_mode: DataMode::Passive,
-                            },
-                        );
-                        debug!("tcp connected to {} as conn={}", address, id);
-                        Ok::<Value, Value>(Value::String(id_to_string(id)))
-                    }
-                }),
-            );
-            // ----------------------------------------------------------------
-            // listen(address: string) -> result<string, string>
-            // Binds a listener and spawns a background accept loop
-            // ----------------------------------------------------------------
+                    let id = st.next_id();
+                    st.connections.lock().await.insert(
+                        id,
+                        ConnectionEntry {
+                            stream: Arc::new(Mutex::new(StreamState::Full(Box::new(
+                                unified_stream,
+                            )))),
+                            peer_addr,
+                            owner: actor_id,
+                            state: ConnectionState::Active, // Outbound = active
+                            data_mode: DataMode::Passive,
+                        },
+                    );
+                    debug!("tcp connected to {} as conn={}", address, id);
+                    Ok::<Value, Value>(Value::String(id_to_string(id)))
+                }
+            }),
+        );
+        // ----------------------------------------------------------------
+        // listen(address: string) -> result<string, string>
+        // Binds a listener and spawns a background accept loop
+        // ----------------------------------------------------------------
         imports.define(
             "theater:simple/tcp",
-                "listen",
-                pact_result_host_fn(move |input: Value| {
-                    let st = st_listen.clone();
-                    let actor_id = aid_listen;
-                    let actor_handle_arc = actor_handle_for_listen.clone();
-                    let cancel_token = cancel_token_for_listen.clone();
-                    let tls_ctx = tls_for_listen.clone();
+            "listen",
+            pact_result_host_fn(move |input: Value| {
+                let st = st_listen.clone();
+                let actor_id = aid_listen;
+                let actor_handle_arc = actor_handle_for_listen.clone();
+                let cancel_token = cancel_token_for_listen.clone();
+                let tls_ctx = tls_for_listen.clone();
 
-                    async move {
-                        let _ph = PhaseLog::new("tcp.listen");
-                        let address = parse_string(&input)?;
-                        debug!("tcp listen on {}", address);
+                async move {
+                    let _ph = PhaseLog::new("tcp.listen");
+                    let address = parse_string(&input)?;
+                    debug!("tcp listen on {}", address);
 
-                        let listener = TcpListener::bind(&address)
-                            .await
-                            .map_err(|e| Value::String(e.to_string()))?;
+                    let listener = TcpListener::bind(&address)
+                        .await
+                        .map_err(|e| Value::String(e.to_string()))?;
 
-                        let listener_id = st.next_id();
-                        let has_tls = match tls_ctx.as_ref() {
-                            Some(ctx) => ctx.server_acceptor.is_some(),
-                            None => false,
-                        };
-                        info!(
-                            "tcp listening on {} as listener={} (tls={})",
-                            address, listener_id, has_tls
-                        );
+                    let listener_id = st.next_id();
+                    let has_tls = match tls_ctx.as_ref() {
+                        Some(ctx) => ctx.server_acceptor.is_some(),
+                        None => false,
+                    };
+                    info!(
+                        "tcp listening on {} as listener={} (tls={})",
+                        address, listener_id, has_tls
+                    );
 
-                        // Take the actor_handle for use in the accept loop
-                        let actor_handle = {
-                            let guard = actor_handle_arc.lock().unwrap();
-                            guard.clone()
-                        };
-                        let Some(actor_handle) = actor_handle else {
-                            return Err(Value::String(
-                                "Actor handle not available - setup() not called?".to_string(),
-                            ));
-                        };
-
-                        // Clone state for the background task
-                        let st_for_task = st.clone();
-                        let actor_id_for_task = actor_id;
-                        let tls_ctx_for_task = tls_ctx.clone();
-
-                        // Spawn background accept loop with cancellation support.
-                        // The loop body lives in run_accept_loop (a free fn) so it
-                        // can be unit-tested directly.
-                        tokio::spawn(run_accept_loop(
-                            listener,
-                            listener_id,
-                            cancel_token,
-                            tls_ctx_for_task,
-                            st_for_task,
-                            actor_id_for_task,
-                            actor_handle,
-                            TLS_HANDSHAKE_TIMEOUT,
+                    // Take the actor_handle for use in the accept loop
+                    let actor_handle = {
+                        let guard = actor_handle_arc.lock().unwrap();
+                        guard.clone()
+                    };
+                    let Some(actor_handle) = actor_handle else {
+                        return Err(Value::String(
+                            "Actor handle not available - setup() not called?".to_string(),
                         ));
+                    };
 
-                        Ok::<Value, Value>(Value::String(id_to_string(listener_id)))
-                    }
-                }),
-            );
-            // ----------------------------------------------------------------
-            // accept(listener-id: string) -> result<string, string>
-            // Manual accept - returns connection in PENDING state
-            // ----------------------------------------------------------------
+                    // Clone state for the background task
+                    let st_for_task = st.clone();
+                    let actor_id_for_task = actor_id;
+                    let tls_ctx_for_task = tls_ctx.clone();
+
+                    // Spawn background accept loop with cancellation support.
+                    // The loop body lives in run_accept_loop (a free fn) so it
+                    // can be unit-tested directly.
+                    tokio::spawn(run_accept_loop(
+                        listener,
+                        listener_id,
+                        cancel_token,
+                        tls_ctx_for_task,
+                        st_for_task,
+                        actor_id_for_task,
+                        actor_handle,
+                        TLS_HANDSHAKE_TIMEOUT,
+                    ));
+
+                    Ok::<Value, Value>(Value::String(id_to_string(listener_id)))
+                }
+            }),
+        );
+        // ----------------------------------------------------------------
+        // accept(listener-id: string) -> result<string, string>
+        // Manual accept - returns connection in PENDING state
+        // ----------------------------------------------------------------
         imports.define(
             "theater:simple/tcp",
-                "accept",
-                pact_result_host_fn(move |input: Value| {
-                    let st = st_accept.clone();
-                    let actor_id = aid_accept;
-                    let tls_ctx = tls_for_accept.clone();
-                    async move {
-                        let _ph = PhaseLog::new("tcp.accept");
-                        let listener_id_str = parse_string(&input)?;
-                        let listener_id = string_to_id(&listener_id_str)?;
-                        debug!("tcp accept on listener={}", listener_id);
+            "accept",
+            pact_result_host_fn(move |input: Value| {
+                let st = st_accept.clone();
+                let actor_id = aid_accept;
+                let tls_ctx = tls_for_accept.clone();
+                async move {
+                    let _ph = PhaseLog::new("tcp.accept");
+                    let listener_id_str = parse_string(&input)?;
+                    let listener_id = string_to_id(&listener_id_str)?;
+                    debug!("tcp accept on listener={}", listener_id);
 
-                        // Check ownership
-                        let mut listeners = st.listeners.lock().await;
-                        let entry = listeners.get_mut(&listener_id).ok_or_else(|| {
-                            Value::String(format!("Listener not found: {}", listener_id_str))
-                        })?;
+                    // Check ownership
+                    let mut listeners = st.listeners.lock().await;
+                    let entry = listeners.get_mut(&listener_id).ok_or_else(|| {
+                        Value::String(format!("Listener not found: {}", listener_id_str))
+                    })?;
 
-                        if entry.owner != actor_id {
-                            return Err(Value::String(format!(
-                                "Listener {} not owned by this actor",
-                                listener_id_str
-                            )));
-                        }
+                    if entry.owner != actor_id {
+                        return Err(Value::String(format!(
+                            "Listener {} not owned by this actor",
+                            listener_id_str
+                        )));
+                    }
 
-                        let (tcp_stream, peer_addr) = entry
-                            .listener
-                            .accept()
-                            .await
-                            .map_err(|e| Value::String(e.to_string()))?;
+                    let (tcp_stream, peer_addr) = entry
+                        .listener
+                        .accept()
+                        .await
+                        .map_err(|e| Value::String(e.to_string()))?;
 
-                        let conn_id = st.next_id();
-                        drop(listeners); // Release lock before acquiring connections lock
+                    let conn_id = st.next_id();
+                    drop(listeners); // Release lock before acquiring connections lock
 
-                        // Apply TLS if configured
-                        let unified_stream = if let Some(ref ctx) = *tls_ctx {
-                            if let Some(ref acceptor) = ctx.server_acceptor {
-                                debug!("tcp manual accept: performing TLS handshake for conn={}", conn_id);
-                                let tls_stream = acceptor
-                                    .accept(tcp_stream)
-                                    .await
-                                    .map_err(|e| Value::String(format!("TLS handshake failed: {}", e)))?;
-                                info!("tcp manual accept: TLS handshake complete for conn={}", conn_id);
-                                UnifiedStream::ServerTls(tls_stream)
-                            } else {
-                                UnifiedStream::Plain(tcp_stream)
-                            }
+                    // Apply TLS if configured
+                    let unified_stream = if let Some(ref ctx) = *tls_ctx {
+                        if let Some(ref acceptor) = ctx.server_acceptor {
+                            debug!(
+                                "tcp manual accept: performing TLS handshake for conn={}",
+                                conn_id
+                            );
+                            let tls_stream = acceptor.accept(tcp_stream).await.map_err(|e| {
+                                Value::String(format!("TLS handshake failed: {}", e))
+                            })?;
+                            info!(
+                                "tcp manual accept: TLS handshake complete for conn={}",
+                                conn_id
+                            );
+                            UnifiedStream::ServerTls(tls_stream)
                         } else {
                             UnifiedStream::Plain(tcp_stream)
-                        };
+                        }
+                    } else {
+                        UnifiedStream::Plain(tcp_stream)
+                    };
 
-                        st.connections.lock().await.insert(
-                            conn_id,
-                            ConnectionEntry {
-                                stream: Arc::new(Mutex::new(StreamState::Full(Box::new(
-                                    unified_stream,
-                                )))),
-                                peer_addr,
-                                owner: actor_id,
-                                state: ConnectionState::Pending, // Starts pending!
-                                data_mode: DataMode::Passive,
-                            },
-                        );
-                        debug!("tcp accepted conn={} from {} (pending)", conn_id, peer_addr);
-                        Ok::<Value, Value>(Value::String(id_to_string(conn_id)))
-                    }
-                }),
-            );
-            // ----------------------------------------------------------------
-            // activate(connection-id: string) -> result<_, string>
-            // Activate a pending connection for this actor
-            // ----------------------------------------------------------------
+                    st.connections.lock().await.insert(
+                        conn_id,
+                        ConnectionEntry {
+                            stream: Arc::new(Mutex::new(StreamState::Full(Box::new(
+                                unified_stream,
+                            )))),
+                            peer_addr,
+                            owner: actor_id,
+                            state: ConnectionState::Pending, // Starts pending!
+                            data_mode: DataMode::Passive,
+                        },
+                    );
+                    debug!("tcp accepted conn={} from {} (pending)", conn_id, peer_addr);
+                    Ok::<Value, Value>(Value::String(id_to_string(conn_id)))
+                }
+            }),
+        );
+        // ----------------------------------------------------------------
+        // activate(connection-id: string) -> result<_, string>
+        // Activate a pending connection for this actor
+        // ----------------------------------------------------------------
         imports.define(
             "theater:simple/tcp",
-                "activate",
-                pact_result_host_fn(move |input: Value| {
-                    let st = st_activate.clone();
-                    let actor_id = aid_activate;
-                    async move {
-                        let _ph = PhaseLog::new("tcp.activate");
-                        let conn_id_str = parse_string(&input)?;
-                        let conn_id = string_to_id(&conn_id_str)?;
+            "activate",
+            pact_result_host_fn(move |input: Value| {
+                let st = st_activate.clone();
+                let actor_id = aid_activate;
+                async move {
+                    let _ph = PhaseLog::new("tcp.activate");
+                    let conn_id_str = parse_string(&input)?;
+                    let conn_id = string_to_id(&conn_id_str)?;
 
-                        let mut connections = st.connections.lock().await;
-                        let entry = connections.get_mut(&conn_id).ok_or_else(|| {
-                            Value::String(format!("Connection not found: {}", conn_id_str))
-                        })?;
+                    let mut connections = st.connections.lock().await;
+                    let entry = connections.get_mut(&conn_id).ok_or_else(|| {
+                        Value::String(format!("Connection not found: {}", conn_id_str))
+                    })?;
 
-                        if entry.owner != actor_id {
-                            return Err(Value::String(format!(
-                                "Connection {} not owned by this actor",
-                                conn_id_str
-                            )));
-                        }
-
-                        if entry.state == ConnectionState::Active {
-                            return Err(Value::String(format!(
-                                "Connection {} is already active",
-                                conn_id_str
-                            )));
-                        }
-
-                        entry.state = ConnectionState::Active;
-                        debug!("tcp activated conn={}", conn_id);
-                        Ok::<Value, Value>(Value::Tuple(vec![]))
+                    if entry.owner != actor_id {
+                        return Err(Value::String(format!(
+                            "Connection {} not owned by this actor",
+                            conn_id_str
+                        )));
                     }
-                }),
-            );
-            // ----------------------------------------------------------------
-            // set-active(connection-id: string, mode: string) -> result<_, string>
-            // Set data mode: "passive", "active", or "once"
-            // ----------------------------------------------------------------
+
+                    if entry.state == ConnectionState::Active {
+                        return Err(Value::String(format!(
+                            "Connection {} is already active",
+                            conn_id_str
+                        )));
+                    }
+
+                    entry.state = ConnectionState::Active;
+                    debug!("tcp activated conn={}", conn_id);
+                    Ok::<Value, Value>(Value::Tuple(vec![]))
+                }
+            }),
+        );
+        // ----------------------------------------------------------------
+        // set-active(connection-id: string, mode: string) -> result<_, string>
+        // Set data mode: "passive", "active", or "once"
+        // ----------------------------------------------------------------
         imports.define(
             "theater:simple/tcp",
                 "set-active",
@@ -1287,126 +1296,166 @@ impl Handler for TcpHandler {
                     }
                 }),
             );
-            // ----------------------------------------------------------------
-            // transfer(connection-id: string, target-actor: string) -> result<_, string>
-            // Transfer connection to another actor (and activate it)
-            // ----------------------------------------------------------------
+        // ----------------------------------------------------------------
+        // transfer(connection-id: string, target-actor: string) -> result<_, string>
+        // Transfer connection to another actor (and activate it)
+        // ----------------------------------------------------------------
         let theater_tx_for_transfer = theater_tx.clone();
         imports.define(
             "theater:simple/tcp",
-                "transfer",
-                pact_result_host_fn(move |input: Value| {
-                    let st = st_transfer.clone();
-                    let actor_id = aid_transfer;
-                    let theater_tx = theater_tx_for_transfer.clone();
-                    async move {
-                        let _ph = PhaseLog::new("tcp.transfer");
-                        let (conn_id_str, target_actor_str) = parse_two_strings(&input)?;
-                        let conn_id = string_to_id(&conn_id_str)?;
+            "transfer",
+            pact_result_host_fn(move |input: Value| {
+                let st = st_transfer.clone();
+                let actor_id = aid_transfer;
+                let theater_tx = theater_tx_for_transfer.clone();
+                async move {
+                    let _ph = PhaseLog::new("tcp.transfer");
+                    let (conn_id_str, target_actor_str) = parse_two_strings(&input)?;
+                    let conn_id = string_to_id(&conn_id_str)?;
 
-                        let target_actor: TheaterId = target_actor_str
-                            .parse()
-                            .map_err(|e| Value::String(format!("Invalid actor ID: {}", e)))?;
+                    let target_actor: TheaterId = target_actor_str
+                        .parse()
+                        .map_err(|e| Value::String(format!("Invalid actor ID: {}", e)))?;
 
-                        {
-                            let mut connections = st.connections.lock().await;
-                            let entry = connections.get_mut(&conn_id).ok_or_else(|| {
-                                Value::String(format!("Connection not found: {}", conn_id_str))
-                            })?;
+                    {
+                        let mut connections = st.connections.lock().await;
+                        let entry = connections.get_mut(&conn_id).ok_or_else(|| {
+                            Value::String(format!("Connection not found: {}", conn_id_str))
+                        })?;
 
-                            if entry.owner != actor_id {
-                                return Err(Value::String(format!(
-                                    "Connection {} not owned by this actor",
-                                    conn_id_str
-                                )));
-                            }
-
-                            // Transfer ownership and activate
-                            let old_owner = entry.owner;
-                            entry.owner = target_actor;
-                            entry.state = ConnectionState::Active;
-
-                            info!(
-                                "tcp transferred conn={} from {} to {} (now active)",
-                                conn_id, old_owner, target_actor
-                            );
+                        if entry.owner != actor_id {
+                            return Err(Value::String(format!(
+                                "Connection {} not owned by this actor",
+                                conn_id_str
+                            )));
                         }
 
-                        // Get target actor's handle and call handle-connection-transfer
-                        let (handle_tx, handle_rx) = tokio::sync::oneshot::channel();
-                        let get_handle_cmd = theater::messages::TheaterCommand::GetActorHandle {
-                            actor_id: target_actor,
-                            response_tx: handle_tx,
-                        };
-                        theater_tx
-                            .send(get_handle_cmd)
-                            .map_err(|e| Value::String(format!("Failed to get target handle: {}", e)))?;
+                        // Transfer ownership and activate
+                        let old_owner = entry.owner;
+                        entry.owner = target_actor;
+                        entry.state = ConnectionState::Active;
 
-                        let target_handle = match handle_rx.await {
-                            Ok(Some(handle)) => handle,
-                            Ok(None) => return Err(Value::String("Target actor handle not found".to_string())),
-                            Err(e) => return Err(Value::String(format!("Failed to receive handle: {}", e))),
-                        };
+                        info!(
+                            "tcp transferred conn={} from {} to {} (now active)",
+                            conn_id, old_owner, target_actor
+                        );
+                    }
 
-                        // Call handle-connection-transfer on target
-                        // Just pass conn_id - runtime will prepend state to make (state, conn_id)
-                        let params = Value::String(conn_id_str.clone());
-                        if let Err(e) = target_handle
-                            .call_function(
-                                "theater:simple/tcp-client.handle-connection-transfer".to_string(),
-                                params,
-                            )
-                            .await
-                        {
-                            warn!("Failed to call handle-connection-transfer: {:?}", e);
-                            // Don't fail the transfer, just log the warning
+                    // Get target actor's handle and call handle-connection-transfer
+                    let (handle_tx, handle_rx) = tokio::sync::oneshot::channel();
+                    let get_handle_cmd = theater::messages::TheaterCommand::GetActorHandle {
+                        actor_id: target_actor,
+                        response_tx: handle_tx,
+                    };
+                    theater_tx.send(get_handle_cmd).map_err(|e| {
+                        Value::String(format!("Failed to get target handle: {}", e))
+                    })?;
+
+                    let target_handle = match handle_rx.await {
+                        Ok(Some(handle)) => handle,
+                        Ok(None) => {
+                            return Err(Value::String("Target actor handle not found".to_string()))
                         }
+                        Err(e) => {
+                            return Err(Value::String(format!("Failed to receive handle: {}", e)))
+                        }
+                    };
 
-                        Ok::<Value, Value>(Value::Tuple(vec![]))
+                    // Call handle-connection-transfer on target
+                    // Just pass conn_id - runtime will prepend state to make (state, conn_id)
+                    let params = Value::String(conn_id_str.clone());
+                    if let Err(e) = target_handle
+                        .call_function(
+                            "theater:simple/tcp-client.handle-connection-transfer".to_string(),
+                            params,
+                        )
+                        .await
+                    {
+                        warn!("Failed to call handle-connection-transfer: {:?}", e);
+                        // Don't fail the transfer, just log the warning
                     }
-                }),
-            );
-            // ----------------------------------------------------------------
-            // transfer-async(connection-id: string, target-actor: string) -> result<_, string>
-            //
-            // Non-blocking sibling of `transfer`. Flips ownership (Pending ->
-            // Active, owner = target) in the shared map, then dispatches the
-            // target's handle-connection-transfer in a DETACHED task and
-            // returns immediately — it does NOT await the target's full
-            // request lifecycle the way `transfer` does. This lets a single
-            // acceptor hand off many connections without serializing on each
-            // target's handler completing (see changes/proposals/warm-actor-pool.md,
-            // Gap B). If the detached call returns Err or the target traps, the
-            // connection is closed and removed from the shared map.
-            // ----------------------------------------------------------------
+
+                    Ok::<Value, Value>(Value::Tuple(vec![]))
+                }
+            }),
+        );
+        // ----------------------------------------------------------------
+        // transfer-async(connection-id: string, target-actor: string) -> result<_, string>
+        //
+        // Non-blocking sibling of `transfer`. Flips ownership (Pending ->
+        // Active, owner = target) in the shared map, then dispatches the
+        // target's handle-connection-transfer in a DETACHED task and
+        // returns immediately — it does NOT await the target's full
+        // request lifecycle the way `transfer` does. This lets a single
+        // acceptor hand off many connections without serializing on each
+        // target's handler completing (see changes/proposals/warm-actor-pool.md,
+        // Gap B). If the detached call returns Err or the target traps, the
+        // connection is closed and removed from the shared map.
+        // ----------------------------------------------------------------
         imports.define(
             "theater:simple/tcp",
-                "transfer-async",
-                pact_result_host_fn(move |input: Value| {
-                    let st = st_transfer_async.clone();
-                    let actor_id = aid_transfer_async;
-                    let theater_tx = theater_tx.clone();
-                    async move {
-                        let _ph = PhaseLog::new("tcp.transfer_async");
-                        do_transfer_async(st, actor_id, theater_tx, &input).await
-                    }
-                }),
-            );
-            // ----------------------------------------------------------------
-            // peer-address(connection-id: string) -> result<string, string>
-            // Get peer address (works in pending or active state)
-            // ----------------------------------------------------------------
+            "transfer-async",
+            pact_result_host_fn(move |input: Value| {
+                let st = st_transfer_async.clone();
+                let actor_id = aid_transfer_async;
+                let theater_tx = theater_tx.clone();
+                async move {
+                    let _ph = PhaseLog::new("tcp.transfer_async");
+                    do_transfer_async(st, actor_id, theater_tx, &input).await
+                }
+            }),
+        );
+        // ----------------------------------------------------------------
+        // peer-address(connection-id: string) -> result<string, string>
+        // Get peer address (works in pending or active state)
+        // ----------------------------------------------------------------
         imports.define(
             "theater:simple/tcp",
-                "peer-address",
-                pact_result_host_fn(move |input: Value| {
-                    let st = st_peer.clone();
-                    let actor_id = aid_peer;
-                    async move {
-                        let _ph = PhaseLog::new("tcp.peer_address");
-                        let conn_id_str = parse_string(&input)?;
-                        let conn_id = string_to_id(&conn_id_str)?;
+            "peer-address",
+            pact_result_host_fn(move |input: Value| {
+                let st = st_peer.clone();
+                let actor_id = aid_peer;
+                async move {
+                    let _ph = PhaseLog::new("tcp.peer_address");
+                    let conn_id_str = parse_string(&input)?;
+                    let conn_id = string_to_id(&conn_id_str)?;
 
+                    let connections = st.connections.lock().await;
+                    let entry = connections.get(&conn_id).ok_or_else(|| {
+                        Value::String(format!("Connection not found: {}", conn_id_str))
+                    })?;
+
+                    if entry.owner != actor_id {
+                        return Err(Value::String(format!(
+                            "Connection {} not owned by this actor",
+                            conn_id_str
+                        )));
+                    }
+
+                    Ok::<Value, Value>(Value::String(entry.peer_addr.to_string()))
+                }
+            }),
+        );
+        // ----------------------------------------------------------------
+        // send(connection-id: string, data: list<u8>) -> result<u64, string>
+        // ----------------------------------------------------------------
+        imports.define(
+            "theater:simple/tcp",
+            "send",
+            pact_result_host_fn(move |input: Value| {
+                let st = st_send.clone();
+                let actor_id = aid_send;
+                async move {
+                    let _ph = PhaseLog::new("tcp.send");
+                    let (conn_id_str, data) = parse_string_and_bytes(&input)?;
+                    let conn_id = string_to_id(&conn_id_str)?;
+                    let len = data.len();
+
+                    // Lock the outer map only long enough to validate metadata
+                    // and clone the per-connection stream Arc. The actual I/O
+                    // runs without holding the outer lock — that lets two
+                    // actors do I/O on different connections in parallel.
+                    let stream_arc = {
                         let connections = st.connections.lock().await;
                         let entry = connections.get(&conn_id).ok_or_else(|| {
                             Value::String(format!("Connection not found: {}", conn_id_str))
@@ -1419,82 +1468,46 @@ impl Handler for TcpHandler {
                             )));
                         }
 
-                        Ok::<Value, Value>(Value::String(entry.peer_addr.to_string()))
-                    }
-                }),
-            );
-            // ----------------------------------------------------------------
-            // send(connection-id: string, data: list<u8>) -> result<u64, string>
-            // ----------------------------------------------------------------
-        imports.define(
-            "theater:simple/tcp",
-                "send",
-                pact_result_host_fn(move |input: Value| {
-                    let st = st_send.clone();
-                    let actor_id = aid_send;
-                    async move {
-                        let _ph = PhaseLog::new("tcp.send");
-                        let (conn_id_str, data) = parse_string_and_bytes(&input)?;
-                        let conn_id = string_to_id(&conn_id_str)?;
-                        let len = data.len();
-
-                        // Lock the outer map only long enough to validate metadata
-                        // and clone the per-connection stream Arc. The actual I/O
-                        // runs without holding the outer lock — that lets two
-                        // actors do I/O on different connections in parallel.
-                        let stream_arc = {
-                            let connections = st.connections.lock().await;
-                            let entry = connections.get(&conn_id).ok_or_else(|| {
-                                Value::String(format!("Connection not found: {}", conn_id_str))
-                            })?;
-
-                            if entry.owner != actor_id {
-                                return Err(Value::String(format!(
-                                    "Connection {} not owned by this actor",
-                                    conn_id_str
-                                )));
-                            }
-
-                            if entry.state == ConnectionState::Pending {
-                                return Err(Value::String(format!(
-                                    "Connection {} is pending - call activate() or transfer() first",
-                                    conn_id_str
-                                )));
-                            }
-
-                            entry.stream.clone()
-                        };
-
-                        let mut stream_guard = stream_arc.lock().await;
-                        match &mut *stream_guard {
-                            StreamState::Full(stream) => {
-                                stream
-                                    .write_all(&data)
-                                    .await
-                                    .map_err(|e| Value::String(e.to_string()))?;
-                            }
-                            StreamState::WriteOnly(write_half) => {
-                                write_half
-                                    .write_all(&data)
-                                    .await
-                                    .map_err(|e| Value::String(e.to_string()))?;
-                            }
-                            StreamState::Closed => {
-                                return Err(Value::String(format!(
-                                    "Connection {} is closed",
-                                    conn_id_str
-                                )));
-                            }
+                        if entry.state == ConnectionState::Pending {
+                            return Err(Value::String(format!(
+                                "Connection {} is pending - call activate() or transfer() first",
+                                conn_id_str
+                            )));
                         }
 
-                        debug!("tcp send conn={} {} bytes", conn_id, len);
-                        Ok::<Value, Value>(Value::U64(len as u64))
+                        entry.stream.clone()
+                    };
+
+                    let mut stream_guard = stream_arc.lock().await;
+                    match &mut *stream_guard {
+                        StreamState::Full(stream) => {
+                            stream
+                                .write_all(&data)
+                                .await
+                                .map_err(|e| Value::String(e.to_string()))?;
+                        }
+                        StreamState::WriteOnly(write_half) => {
+                            write_half
+                                .write_all(&data)
+                                .await
+                                .map_err(|e| Value::String(e.to_string()))?;
+                        }
+                        StreamState::Closed => {
+                            return Err(Value::String(format!(
+                                "Connection {} is closed",
+                                conn_id_str
+                            )));
+                        }
                     }
-                }),
-            );
-            // ----------------------------------------------------------------
-            // receive(connection-id: string, max-bytes: u32) -> result<list<u8>, string>
-            // ----------------------------------------------------------------
+
+                    debug!("tcp send conn={} {} bytes", conn_id, len);
+                    Ok::<Value, Value>(Value::U64(len as u64))
+                }
+            }),
+        );
+        // ----------------------------------------------------------------
+        // receive(connection-id: string, max-bytes: u32) -> result<list<u8>, string>
+        // ----------------------------------------------------------------
         imports.define(
             "theater:simple/tcp",
                 "receive",
@@ -1583,14 +1596,14 @@ impl Handler for TcpHandler {
                     }
                 }),
             );
-            // ----------------------------------------------------------------
-            // close(connection-id: string) -> result<_, string>
-            //
-            // Gracefully shuts the write side of the stream before dropping —
-            // for TLS streams this sends the close_notify alert so strict
-            // clients (e.g. rustls) don't see an "unexpected EOF". Plain TCP
-            // streams get a normal FIN.
-            // ----------------------------------------------------------------
+        // ----------------------------------------------------------------
+        // close(connection-id: string) -> result<_, string>
+        //
+        // Gracefully shuts the write side of the stream before dropping —
+        // for TLS streams this sends the close_notify alert so strict
+        // clients (e.g. rustls) don't see an "unexpected EOF". Plain TCP
+        // streams get a normal FIN.
+        // ----------------------------------------------------------------
         imports.define(
             "theater:simple/tcp",
                 "close",
@@ -1656,267 +1669,265 @@ impl Handler for TcpHandler {
                     }
                 }),
             );
-            // ----------------------------------------------------------------
-            // upgrade-to-tls-server(connection-id: string) -> result<_, string>
-            //
-            // For STARTTLS-style protocols: the actor accepts a plain TCP
-            // connection, exchanges a few protocol lines, then calls this to
-            // wrap the existing stream with TLS using the server_tls cert
-            // configured on this handler. After this returns Ok, the same
-            // connection-id transports TLS-encrypted bytes.
-            // ----------------------------------------------------------------
+        // ----------------------------------------------------------------
+        // upgrade-to-tls-server(connection-id: string) -> result<_, string>
+        //
+        // For STARTTLS-style protocols: the actor accepts a plain TCP
+        // connection, exchanges a few protocol lines, then calls this to
+        // wrap the existing stream with TLS using the server_tls cert
+        // configured on this handler. After this returns Ok, the same
+        // connection-id transports TLS-encrypted bytes.
+        // ----------------------------------------------------------------
         imports.define(
             "theater:simple/tcp",
-                "upgrade-to-tls-server",
-                pact_result_host_fn(move |input: Value| {
-                    let st = st_upgrade_server.clone();
-                    let actor_id = aid_upgrade_server;
-                    let tls_ctx = tls_for_upgrade_server.clone();
-                    async move {
-                        let _ph = PhaseLog::new("tcp.upgrade_to_tls_server");
-                        let conn_id_str = parse_string(&input)?;
-                        let conn_id = string_to_id(&conn_id_str)?;
+            "upgrade-to-tls-server",
+            pact_result_host_fn(move |input: Value| {
+                let st = st_upgrade_server.clone();
+                let actor_id = aid_upgrade_server;
+                let tls_ctx = tls_for_upgrade_server.clone();
+                async move {
+                    let _ph = PhaseLog::new("tcp.upgrade_to_tls_server");
+                    let conn_id_str = parse_string(&input)?;
+                    let conn_id = string_to_id(&conn_id_str)?;
 
-                        let acceptor = match tls_ctx.as_ref() {
-                            Some(ctx) => match &ctx.server_acceptor {
-                                Some(a) => a.clone(),
-                                None => {
-                                    return Err(Value::String(
-                                        "server_tls not configured on this handler".into(),
-                                    ))
-                                }
-                            },
+                    let acceptor = match tls_ctx.as_ref() {
+                        Some(ctx) => match &ctx.server_acceptor {
+                            Some(a) => a.clone(),
                             None => {
                                 return Err(Value::String(
                                     "server_tls not configured on this handler".into(),
                                 ))
                             }
-                        };
+                        },
+                        None => {
+                            return Err(Value::String(
+                                "server_tls not configured on this handler".into(),
+                            ))
+                        }
+                    };
 
-                        let stream_arc = {
-                            let connections = st.connections.lock().await;
-                            let entry = connections.get(&conn_id).ok_or_else(|| {
-                                Value::String(format!("Connection not found: {}", conn_id_str))
-                            })?;
-                            if entry.owner != actor_id {
-                                return Err(Value::String(format!(
-                                    "Connection {} not owned by this actor",
-                                    conn_id_str
-                                )));
-                            }
-                            if entry.state != ConnectionState::Active {
-                                return Err(Value::String(format!(
-                                    "Connection {} must be activated before TLS upgrade",
-                                    conn_id_str
-                                )));
-                            }
-                            if entry.data_mode != DataMode::Passive {
-                                return Err(Value::String(format!(
-                                    "Connection {} must be in passive mode for TLS upgrade",
-                                    conn_id_str
-                                )));
-                            }
-                            entry.stream.clone()
-                        };
+                    let stream_arc = {
+                        let connections = st.connections.lock().await;
+                        let entry = connections.get(&conn_id).ok_or_else(|| {
+                            Value::String(format!("Connection not found: {}", conn_id_str))
+                        })?;
+                        if entry.owner != actor_id {
+                            return Err(Value::String(format!(
+                                "Connection {} not owned by this actor",
+                                conn_id_str
+                            )));
+                        }
+                        if entry.state != ConnectionState::Active {
+                            return Err(Value::String(format!(
+                                "Connection {} must be activated before TLS upgrade",
+                                conn_id_str
+                            )));
+                        }
+                        if entry.data_mode != DataMode::Passive {
+                            return Err(Value::String(format!(
+                                "Connection {} must be in passive mode for TLS upgrade",
+                                conn_id_str
+                            )));
+                        }
+                        entry.stream.clone()
+                    };
 
-                        let mut guard = stream_arc.lock().await;
-                        let taken = std::mem::replace(&mut *guard, StreamState::Closed);
-                        let inner = match taken {
-                            StreamState::Full(boxed) => *boxed,
-                            StreamState::WriteOnly(w) => {
-                                *guard = StreamState::WriteOnly(w);
-                                return Err(Value::String(format!(
-                                    "Connection {} is split; TLS upgrade not supported",
-                                    conn_id_str
-                                )));
-                            }
-                            StreamState::Closed => {
-                                return Err(Value::String(format!(
-                                    "Connection {} is closed",
-                                    conn_id_str
-                                )));
-                            }
-                        };
-                        let tcp = match inner {
-                            UnifiedStream::Plain(tcp) => tcp,
-                            other => {
-                                *guard = StreamState::Full(Box::new(other));
-                                return Err(Value::String(format!(
-                                    "Connection {} is already TLS",
-                                    conn_id_str
-                                )));
-                            }
-                        };
+                    let mut guard = stream_arc.lock().await;
+                    let taken = std::mem::replace(&mut *guard, StreamState::Closed);
+                    let inner = match taken {
+                        StreamState::Full(boxed) => *boxed,
+                        StreamState::WriteOnly(w) => {
+                            *guard = StreamState::WriteOnly(w);
+                            return Err(Value::String(format!(
+                                "Connection {} is split; TLS upgrade not supported",
+                                conn_id_str
+                            )));
+                        }
+                        StreamState::Closed => {
+                            return Err(Value::String(format!(
+                                "Connection {} is closed",
+                                conn_id_str
+                            )));
+                        }
+                    };
+                    let tcp = match inner {
+                        UnifiedStream::Plain(tcp) => tcp,
+                        other => {
+                            *guard = StreamState::Full(Box::new(other));
+                            return Err(Value::String(format!(
+                                "Connection {} is already TLS",
+                                conn_id_str
+                            )));
+                        }
+                    };
 
-                        let tls_stream = match acceptor.accept(tcp).await {
-                            Ok(s) => s,
-                            Err(e) => {
-                                // Stream is gone — leave entry as Closed.
-                                return Err(Value::String(format!(
-                                    "TLS server handshake failed: {}",
-                                    e
-                                )));
-                            }
-                        };
-                        *guard = StreamState::Full(Box::new(UnifiedStream::ServerTls(tls_stream)));
-                        drop(guard);
+                    let tls_stream = match acceptor.accept(tcp).await {
+                        Ok(s) => s,
+                        Err(e) => {
+                            // Stream is gone — leave entry as Closed.
+                            return Err(Value::String(format!(
+                                "TLS server handshake failed: {}",
+                                e
+                            )));
+                        }
+                    };
+                    *guard = StreamState::Full(Box::new(UnifiedStream::ServerTls(tls_stream)));
+                    drop(guard);
 
-                        debug!("tcp upgrade-to-tls-server conn={}", conn_id);
-                        Ok::<Value, Value>(Value::Tuple(vec![]))
-                    }
-                }),
-            );
-            // ----------------------------------------------------------------
-            // upgrade-to-tls-client(connection-id, server-name) -> result<_, string>
-            //
-            // The client-side mirror of upgrade-to-tls-server: wraps an
-            // existing plain TCP connection with TLS using the client_tls
-            // config. server-name is used for SNI and cert verification.
-            // ----------------------------------------------------------------
+                    debug!("tcp upgrade-to-tls-server conn={}", conn_id);
+                    Ok::<Value, Value>(Value::Tuple(vec![]))
+                }
+            }),
+        );
+        // ----------------------------------------------------------------
+        // upgrade-to-tls-client(connection-id, server-name) -> result<_, string>
+        //
+        // The client-side mirror of upgrade-to-tls-server: wraps an
+        // existing plain TCP connection with TLS using the client_tls
+        // config. server-name is used for SNI and cert verification.
+        // ----------------------------------------------------------------
         imports.define(
             "theater:simple/tcp",
-                "upgrade-to-tls-client",
-                pact_result_host_fn(move |input: Value| {
-                    let st = st_upgrade_client.clone();
-                    let actor_id = aid_upgrade_client;
-                    let tls_ctx = tls_for_upgrade_client.clone();
-                    async move {
-                        let _ph = PhaseLog::new("tcp.upgrade_to_tls_client");
-                        let (conn_id_str, server_name_str) = parse_two_strings(&input)?;
-                        let conn_id = string_to_id(&conn_id_str)?;
+            "upgrade-to-tls-client",
+            pact_result_host_fn(move |input: Value| {
+                let st = st_upgrade_client.clone();
+                let actor_id = aid_upgrade_client;
+                let tls_ctx = tls_for_upgrade_client.clone();
+                async move {
+                    let _ph = PhaseLog::new("tcp.upgrade_to_tls_client");
+                    let (conn_id_str, server_name_str) = parse_two_strings(&input)?;
+                    let conn_id = string_to_id(&conn_id_str)?;
 
-                        let connector = match tls_ctx.as_ref() {
-                            Some(ctx) => match &ctx.client_connector {
-                                Some(c) => c.clone(),
-                                None => {
-                                    return Err(Value::String(
-                                        "client_tls not configured on this handler".into(),
-                                    ))
-                                }
-                            },
+                    let connector = match tls_ctx.as_ref() {
+                        Some(ctx) => match &ctx.client_connector {
+                            Some(c) => c.clone(),
                             None => {
                                 return Err(Value::String(
                                     "client_tls not configured on this handler".into(),
                                 ))
                             }
-                        };
+                        },
+                        None => {
+                            return Err(Value::String(
+                                "client_tls not configured on this handler".into(),
+                            ))
+                        }
+                    };
 
-                        let server_name =
-                            rustls::pki_types::ServerName::try_from(server_name_str.clone())
-                                .map_err(|e| {
-                                    Value::String(format!(
-                                        "Invalid server name {:?}: {}",
-                                        server_name_str, e
-                                    ))
-                                })?;
+                    let server_name = rustls::pki_types::ServerName::try_from(
+                        server_name_str.clone(),
+                    )
+                    .map_err(|e| {
+                        Value::String(format!("Invalid server name {:?}: {}", server_name_str, e))
+                    })?;
 
-                        let stream_arc = {
-                            let connections = st.connections.lock().await;
-                            let entry = connections.get(&conn_id).ok_or_else(|| {
-                                Value::String(format!("Connection not found: {}", conn_id_str))
-                            })?;
-                            if entry.owner != actor_id {
-                                return Err(Value::String(format!(
-                                    "Connection {} not owned by this actor",
-                                    conn_id_str
-                                )));
-                            }
-                            if entry.state != ConnectionState::Active {
-                                return Err(Value::String(format!(
-                                    "Connection {} must be activated before TLS upgrade",
-                                    conn_id_str
-                                )));
-                            }
-                            if entry.data_mode != DataMode::Passive {
-                                return Err(Value::String(format!(
-                                    "Connection {} must be in passive mode for TLS upgrade",
-                                    conn_id_str
-                                )));
-                            }
-                            entry.stream.clone()
-                        };
-
-                        let mut guard = stream_arc.lock().await;
-                        let taken = std::mem::replace(&mut *guard, StreamState::Closed);
-                        let inner = match taken {
-                            StreamState::Full(boxed) => *boxed,
-                            StreamState::WriteOnly(w) => {
-                                *guard = StreamState::WriteOnly(w);
-                                return Err(Value::String(format!(
-                                    "Connection {} is split; TLS upgrade not supported",
-                                    conn_id_str
-                                )));
-                            }
-                            StreamState::Closed => {
-                                return Err(Value::String(format!(
-                                    "Connection {} is closed",
-                                    conn_id_str
-                                )));
-                            }
-                        };
-                        let tcp = match inner {
-                            UnifiedStream::Plain(tcp) => tcp,
-                            other => {
-                                *guard = StreamState::Full(Box::new(other));
-                                return Err(Value::String(format!(
-                                    "Connection {} is already TLS",
-                                    conn_id_str
-                                )));
-                            }
-                        };
-
-                        let tls_stream = match connector.connect(server_name, tcp).await {
-                            Ok(s) => s,
-                            Err(e) => {
-                                return Err(Value::String(format!(
-                                    "TLS client handshake failed: {}",
-                                    e
-                                )));
-                            }
-                        };
-                        *guard = StreamState::Full(Box::new(UnifiedStream::ClientTls(tls_stream)));
-                        drop(guard);
-
-                        debug!(
-                            "tcp upgrade-to-tls-client conn={} server_name={}",
-                            conn_id, server_name_str
-                        );
-                        Ok::<Value, Value>(Value::Tuple(vec![]))
-                    }
-                }),
-            );
-            // ----------------------------------------------------------------
-            // close-listener(listener-id: string) -> result<_, string>
-            // ----------------------------------------------------------------
-        imports.define(
-            "theater:simple/tcp",
-                "close-listener",
-                pact_result_host_fn(move |input: Value| {
-                    let st = st_close_listener.clone();
-                    let actor_id = aid_close_listener;
-                    async move {
-                        let _ph = PhaseLog::new("tcp.close_listener");
-                        let listener_id_str = parse_string(&input)?;
-                        let listener_id = string_to_id(&listener_id_str)?;
-
-                        let mut listeners = st.listeners.lock().await;
-                        let entry = listeners.get(&listener_id).ok_or_else(|| {
-                            Value::String(format!("Listener not found: {}", listener_id_str))
+                    let stream_arc = {
+                        let connections = st.connections.lock().await;
+                        let entry = connections.get(&conn_id).ok_or_else(|| {
+                            Value::String(format!("Connection not found: {}", conn_id_str))
                         })?;
-
                         if entry.owner != actor_id {
                             return Err(Value::String(format!(
-                                "Listener {} not owned by this actor",
-                                listener_id_str
+                                "Connection {} not owned by this actor",
+                                conn_id_str
                             )));
                         }
+                        if entry.state != ConnectionState::Active {
+                            return Err(Value::String(format!(
+                                "Connection {} must be activated before TLS upgrade",
+                                conn_id_str
+                            )));
+                        }
+                        if entry.data_mode != DataMode::Passive {
+                            return Err(Value::String(format!(
+                                "Connection {} must be in passive mode for TLS upgrade",
+                                conn_id_str
+                            )));
+                        }
+                        entry.stream.clone()
+                    };
 
-                        listeners.remove(&listener_id);
-                        debug!("tcp close listener={}", listener_id);
-                        Ok::<Value, Value>(Value::Tuple(vec![]))
+                    let mut guard = stream_arc.lock().await;
+                    let taken = std::mem::replace(&mut *guard, StreamState::Closed);
+                    let inner = match taken {
+                        StreamState::Full(boxed) => *boxed,
+                        StreamState::WriteOnly(w) => {
+                            *guard = StreamState::WriteOnly(w);
+                            return Err(Value::String(format!(
+                                "Connection {} is split; TLS upgrade not supported",
+                                conn_id_str
+                            )));
+                        }
+                        StreamState::Closed => {
+                            return Err(Value::String(format!(
+                                "Connection {} is closed",
+                                conn_id_str
+                            )));
+                        }
+                    };
+                    let tcp = match inner {
+                        UnifiedStream::Plain(tcp) => tcp,
+                        other => {
+                            *guard = StreamState::Full(Box::new(other));
+                            return Err(Value::String(format!(
+                                "Connection {} is already TLS",
+                                conn_id_str
+                            )));
+                        }
+                    };
+
+                    let tls_stream = match connector.connect(server_name, tcp).await {
+                        Ok(s) => s,
+                        Err(e) => {
+                            return Err(Value::String(format!(
+                                "TLS client handshake failed: {}",
+                                e
+                            )));
+                        }
+                    };
+                    *guard = StreamState::Full(Box::new(UnifiedStream::ClientTls(tls_stream)));
+                    drop(guard);
+
+                    debug!(
+                        "tcp upgrade-to-tls-client conn={} server_name={}",
+                        conn_id, server_name_str
+                    );
+                    Ok::<Value, Value>(Value::Tuple(vec![]))
+                }
+            }),
+        );
+        // ----------------------------------------------------------------
+        // close-listener(listener-id: string) -> result<_, string>
+        // ----------------------------------------------------------------
+        imports.define(
+            "theater:simple/tcp",
+            "close-listener",
+            pact_result_host_fn(move |input: Value| {
+                let st = st_close_listener.clone();
+                let actor_id = aid_close_listener;
+                async move {
+                    let _ph = PhaseLog::new("tcp.close_listener");
+                    let listener_id_str = parse_string(&input)?;
+                    let listener_id = string_to_id(&listener_id_str)?;
+
+                    let mut listeners = st.listeners.lock().await;
+                    let entry = listeners.get(&listener_id).ok_or_else(|| {
+                        Value::String(format!("Listener not found: {}", listener_id_str))
+                    })?;
+
+                    if entry.owner != actor_id {
+                        return Err(Value::String(format!(
+                            "Listener {} not owned by this actor",
+                            listener_id_str
+                        )));
                     }
-                }),
-            );
+
+                    listeners.remove(&listener_id);
+                    debug!("tcp close listener={}", listener_id);
+                    Ok::<Value, Value>(Value::Tuple(vec![]))
+                }
+            }),
+        );
 
         ctx.mark_satisfied("theater:simple/tcp");
         info!("TCP host functions (Pack) set up successfully");

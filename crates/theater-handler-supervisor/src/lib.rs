@@ -1103,7 +1103,9 @@ impl Handler for SupervisorHandler {
                         .map_err(|_| SupervisorError::RuntimeUnavailable)?;
                         match rrx.await {
                             Ok(Ok(status)) => Ok(Value::String(format!("{:?}", status))),
-                            Ok(Err(e)) => Err(Value::from(SupervisorError::Internal(e.to_string()))),
+                            Ok(Err(e)) => {
+                                Err(Value::from(SupervisorError::Internal(e.to_string())))
+                            }
                             Err(_) => Err(Value::from(SupervisorError::RuntimeUnavailable)),
                         }
                     }
@@ -1142,7 +1144,9 @@ impl Handler for SupervisorHandler {
                         .map_err(|_| SupervisorError::RuntimeUnavailable)?;
                         match rrx.await {
                             Ok(Ok(state)) => Ok(state),
-                            Ok(Err(e)) => Err(Value::from(SupervisorError::Internal(e.to_string()))),
+                            Ok(Err(e)) => {
+                                Err(Value::from(SupervisorError::Internal(e.to_string())))
+                            }
                             Err(_) => Err(Value::from(SupervisorError::RuntimeUnavailable)),
                         }
                     }
@@ -1180,10 +1184,15 @@ impl Handler for SupervisorHandler {
                         })
                         .map_err(|_| SupervisorError::RuntimeUnavailable)?;
                         match rrx.await {
-                            Ok(Ok(m)) => serde_json::to_string(&m).map(Value::String).map_err(|e| {
-                                SupervisorError::Internal(format!("serialize manifest: {}", e)).into()
-                            }),
-                            Ok(Err(e)) => Err(Value::from(SupervisorError::Internal(e.to_string()))),
+                            Ok(Ok(m)) => {
+                                serde_json::to_string(&m).map(Value::String).map_err(|e| {
+                                    SupervisorError::Internal(format!("serialize manifest: {}", e))
+                                        .into()
+                                })
+                            }
+                            Ok(Err(e)) => {
+                                Err(Value::from(SupervisorError::Internal(e.to_string())))
+                            }
                             Err(_) => Err(Value::from(SupervisorError::RuntimeUnavailable)),
                         }
                     }
@@ -1222,7 +1231,9 @@ impl Handler for SupervisorHandler {
                         .map_err(|_| SupervisorError::RuntimeUnavailable)?;
                         match rrx.await {
                             Ok(Ok(())) => Ok(Value::Tuple(vec![])),
-                            Ok(Err(e)) => Err(Value::from(SupervisorError::Internal(e.to_string()))),
+                            Ok(Err(e)) => {
+                                Err(Value::from(SupervisorError::Internal(e.to_string())))
+                            }
                             Err(_) => Err(Value::from(SupervisorError::RuntimeUnavailable)),
                         }
                     }
@@ -1261,7 +1272,9 @@ impl Handler for SupervisorHandler {
                         .map_err(|_| SupervisorError::RuntimeUnavailable)?;
                         match rrx.await {
                             Ok(Ok(())) => Ok(Value::Tuple(vec![])),
-                            Ok(Err(e)) => Err(Value::from(SupervisorError::Internal(e.to_string()))),
+                            Ok(Err(e)) => {
+                                Err(Value::from(SupervisorError::Internal(e.to_string())))
+                            }
                             Err(_) => Err(Value::from(SupervisorError::RuntimeUnavailable)),
                         }
                     }
@@ -1396,9 +1409,11 @@ impl Handler for SupervisorHandler {
                     let iface = "theater:simple/supervisor-handlers";
                     let e1 = instance
                         .has_export(iface, "handle-actor-event")
+                        .await
                         .unwrap_or(false);
                     let e2 = instance
                         .has_export(iface, "handle-lifecycle-event")
+                        .await
                         .unwrap_or(false);
                     (e1, e2)
                 } else {

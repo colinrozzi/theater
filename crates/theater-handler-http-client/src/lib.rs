@@ -158,10 +158,7 @@ impl Handler for HttpClientHandler {
 
                     // Permission check: the URL host must be allowlisted.
                     let url = reqwest::Url::parse(&parts.url).map_err(|e| {
-                        Value::String(format!(
-                            "http-client: invalid url '{}': {}",
-                            parts.url, e
-                        ))
+                        Value::String(format!("http-client: invalid url '{}': {}", parts.url, e))
                     })?;
                     let host = url.host_str().ok_or_else(|| {
                         Value::String(format!("http-client: url '{}' has no host", parts.url))

@@ -2975,7 +2975,6 @@ version = "0.3.11"
 dependencies = [
  "console",
  "hex",
- "packr",
  "packr-abi 0.24.0",
  "serde",
  "sha1",

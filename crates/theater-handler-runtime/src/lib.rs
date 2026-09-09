@@ -295,6 +295,7 @@ impl Handler for RuntimeHandler {
                 if let Some(instance) = instance_guard.as_mut() {
                     instance
                         .has_export("theater:simple/runtime-handlers", "handle-actor-spawn")
+                        .await
                         .unwrap_or(false)
                 } else {
                     false

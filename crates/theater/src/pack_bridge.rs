@@ -57,8 +57,8 @@ type EngineInstance = <WasmtimeEngine as WasmEngine>::Instance;
 
 // The graph ABI value types — single-sourced from packr-abi (packr_core::abi is
 // the same crate), so theater/handlers see exactly one `Value`.
-pub use packr_core::abi::{ConversionError, FromValue, Value, ValueType};
 pub use packr_abi::{GraphValue, Pattern};
+pub use packr_core::abi::{ConversionError, FromValue, Value, ValueType};
 
 // The capture-based host-import surface + the record/replay interceptor trait.
 pub use packr_core::{host_fn, CallInterceptor, HostError, HostFn, HostImports};
@@ -95,8 +95,9 @@ pub use packr::{parse_pact, MetadataValue, PactExport, PactInterface};
 pub fn result_host_fn<F, Fut>(f: F) -> packr_core::HostFn
 where
     F: Fn(Value) -> Fut + Send + Sync + 'static,
-    Fut: std::future::Future<Output = Result<std::result::Result<Value, Value>, packr_core::HostError>>
-        + Send
+    Fut: std::future::Future<
+            Output = Result<std::result::Result<Value, Value>, packr_core::HostError>,
+        > + Send
         + 'static,
 {
     packr_core::host_fn(move |input| {
@@ -307,32 +308,88 @@ impl PackInstance {
 
     /// Get metadata with interface hashes for compatibility checking.
     ///
-    /// Served statically from the module's embedded CGRF metadata section (no
-    /// live instance call). Returns [`MetadataError::NotFound`] if the module
-    /// carries no `__pack_types` metadata.
-    pub fn get_metadata_with_hashes(&self) -> Result<MetadataWithHashes, MetadataError> {
-        metadata_with_hashes_from_module(&self.wasm_bytes)?.ok_or(MetadataError::NotFound)
+    /// Two sources, in order:
+    /// 1. the module's embedded CGRF data segment (static, no guest call) — the
+    ///    packr-guest 0.24 convention;
+    /// 2. the guest's `__pack_types` export (a runtime call) — the packr-guest
+    ///    0.23 convention, where the CGRF blob lives in general rodata behind a
+    ///    callable accessor rather than a dedicated data segment.
+    ///
+    /// Returns [`MetadataError::NotFound`] if neither is present.
+    pub async fn get_metadata_with_hashes(&mut self) -> Result<MetadataWithHashes, MetadataError> {
+        if let Some(md) = metadata_with_hashes_from_module(&self.wasm_bytes)? {
+            return Ok(md);
+        }
+        self.metadata_via_export().await
+    }
+
+    /// Call the guest's `__pack_types` export to fetch its CGRF metadata.
+    ///
+    /// Convention (unchanged from the umbrella runtime): the export has signature
+    /// `(out_ptr_slot, out_len_slot) -> status`; it writes the `(ptr, len)` of
+    /// the CGRF blob into the two guest-memory slots and returns 0 on success.
+    async fn metadata_via_export(&mut self) -> Result<MetadataWithHashes, MetadataError> {
+        use packr_core::{Val, RESULT_LEN_OFFSET, RESULT_PTR_OFFSET};
+
+        if !self.instance.has_export("__pack_types") {
+            return Err(MetadataError::NotFound);
+        }
+
+        let results = self
+            .instance
+            .call(
+                "__pack_types",
+                &[
+                    Val::I32(RESULT_PTR_OFFSET as i32),
+                    Val::I32(RESULT_LEN_OFFSET as i32),
+                ],
+            )
+            .await
+            .map_err(|e| MetadataError::CallFailed(e.to_string()))?;
+        let status = results.first().copied().and_then(Val::as_i32).unwrap_or(-1);
+        if status != 0 {
+            return Err(MetadataError::CallFailed(
+                "non-zero status from __pack_types".into(),
+            ));
+        }
+
+        let mut ptr_bytes = [0u8; 4];
+        let mut len_bytes = [0u8; 4];
+        self.instance
+            .read_memory(RESULT_PTR_OFFSET, &mut ptr_bytes)
+            .map_err(|e| MetadataError::CallFailed(e.to_string()))?;
+        self.instance
+            .read_memory(RESULT_LEN_OFFSET, &mut len_bytes)
+            .map_err(|e| MetadataError::CallFailed(e.to_string()))?;
+        let out_ptr = u32::from_le_bytes(ptr_bytes) as usize;
+        let out_len = u32::from_le_bytes(len_bytes) as usize;
+
+        // Static rodata — no `__pack_free` needed.
+        let mut bytes = vec![0u8; out_len];
+        self.instance
+            .read_memory(out_ptr, &mut bytes)
+            .map_err(|e| MetadataError::CallFailed(e.to_string()))?;
+
+        packr_core::metadata::decode_metadata_with_hashes(&bytes)
     }
 
     /// Get interface hashes for all imported interfaces.
-    pub fn get_import_hashes(&self) -> Result<Vec<InterfaceHash>, MetadataError> {
-        Ok(self.get_metadata_with_hashes()?.import_hashes)
+    pub async fn get_import_hashes(&mut self) -> Result<Vec<InterfaceHash>, MetadataError> {
+        Ok(self.get_metadata_with_hashes().await?.import_hashes)
     }
 
     /// Get interface hashes for all exported interfaces.
-    pub fn get_export_hashes(&self) -> Result<Vec<InterfaceHash>, MetadataError> {
-        Ok(self.get_metadata_with_hashes()?.export_hashes)
+    pub async fn get_export_hashes(&mut self) -> Result<Vec<InterfaceHash>, MetadataError> {
+        Ok(self.get_metadata_with_hashes().await?.export_hashes)
     }
 
     /// Check if the package exports a function under the given interface.
-    ///
-    /// Served from the static metadata arena (same source as the hashes).
-    pub fn has_export(
-        &self,
+    pub async fn has_export(
+        &mut self,
         interface: &str,
         function: &str,
     ) -> Result<bool, MetadataError> {
-        let metadata = self.get_metadata_with_hashes()?;
+        let metadata = self.get_metadata_with_hashes().await?;
         Ok(metadata
             .arena
             .exported_function_names(interface)

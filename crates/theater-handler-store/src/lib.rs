@@ -365,27 +365,27 @@ impl Handler for StoreHandler {
                 let configured_store_id = configured_store_id.clone();
                 let bp_new = bp_new.clone();
                 async move {
-                let _ph = PhaseLog::new("store.new");
-                use theater::ValueType;
-                // If a store_id is configured, use it; otherwise create a new store
-                let store_id = if let Some(ref id) = configured_store_id {
-                    // Use the configured store ID - just return it without creating new store
-                    id.clone()
-                } else {
-                    // Create a new store with a new UUID
-                    let store = if let Some(ref bp) = bp_new {
-                        ContentStore::new_with_base_path(bp.clone())
+                    let _ph = PhaseLog::new("store.new");
+                    use theater::ValueType;
+                    // If a store_id is configured, use it; otherwise create a new store
+                    let store_id = if let Some(ref id) = configured_store_id {
+                        // Use the configured store ID - just return it without creating new store
+                        id.clone()
                     } else {
-                        ContentStore::new()
+                        // Create a new store with a new UUID
+                        let store = if let Some(ref bp) = bp_new {
+                            ContentStore::new_with_base_path(bp.clone())
+                        } else {
+                            ContentStore::new()
+                        };
+                        store.id().to_string()
                     };
-                    store.id().to_string()
-                };
-                // Return Ok(store_id) as Result
-                Value::Result {
-                    ok_type: ValueType::String,
-                    err_type: ValueType::String,
-                    value: Ok(Box::new(Value::String(store_id))),
-                }
+                    // Return Ok(store_id) as Result
+                    Value::Result {
+                        ok_type: ValueType::String,
+                        err_type: ValueType::String,
+                        value: Ok(Box::new(Value::String(store_id))),
+                    }
                 }
             }),
         );
@@ -515,221 +515,221 @@ impl Handler for StoreHandler {
             "theater:simple/store",
             "get-by-label",
             pact_result_host_fn(move |input: Value| {
-                    let bp = bp_get_by_label.clone();
-                    async move {
-                        let _ph = PhaseLog::new("store.get_by_label");
-                        let (store_id, label_string) = parse_store_id_and_label(&input)?;
-                        let store = make_store(&store_id, &bp);
-                        let label = Label::new(label_string);
+                let bp = bp_get_by_label.clone();
+                async move {
+                    let _ph = PhaseLog::new("store.get_by_label");
+                    let (store_id, label_string) = parse_store_id_and_label(&input)?;
+                    let store = make_store(&store_id, &bp);
+                    let label = Label::new(label_string);
 
-                        match store.get_by_label(&label).await {
-                            Ok(content_ref_opt) => {
-                                use theater::ValueType;
-                                debug!("Content reference by label retrieved successfully");
-                                match content_ref_opt {
-                                    Some(cr) => Ok(Value::Option {
-                                        inner_type: ValueType::String,
-                                        value: Some(Box::new(Value::String(cr.hash().to_string()))),
-                                    }),
-                                    None => Ok(Value::Option {
-                                        inner_type: ValueType::String,
-                                        value: None,
-                                    }),
-                                }
-                            }
-                            Err(e) => {
-                                error!("Error retrieving content by label: {}", e);
-                                Err(Value::String(e.to_string()))
+                    match store.get_by_label(&label).await {
+                        Ok(content_ref_opt) => {
+                            use theater::ValueType;
+                            debug!("Content reference by label retrieved successfully");
+                            match content_ref_opt {
+                                Some(cr) => Ok(Value::Option {
+                                    inner_type: ValueType::String,
+                                    value: Some(Box::new(Value::String(cr.hash().to_string()))),
+                                }),
+                                None => Ok(Value::Option {
+                                    inner_type: ValueType::String,
+                                    value: None,
+                                }),
                             }
                         }
+                        Err(e) => {
+                            error!("Error retrieving content by label: {}", e);
+                            Err(Value::String(e.to_string()))
+                        }
                     }
-                }),
+                }
+            }),
         );
         // remove-label(store-id: string, label: string) -> result<_, string>
         imports.define(
             "theater:simple/store",
             "remove-label",
             pact_result_host_fn(move |input: Value| {
-                    let bp = bp_remove_label.clone();
-                    async move {
-                        let _ph = PhaseLog::new("store.remove_label");
-                        let (store_id, label_string) = parse_store_id_and_label(&input)?;
-                        let store = make_store(&store_id, &bp);
-                        let label = Label::new(label_string);
+                let bp = bp_remove_label.clone();
+                async move {
+                    let _ph = PhaseLog::new("store.remove_label");
+                    let (store_id, label_string) = parse_store_id_and_label(&input)?;
+                    let store = make_store(&store_id, &bp);
+                    let label = Label::new(label_string);
 
-                        match store.remove_label(&label).await {
-                            Ok(_) => {
-                                debug!("Label removed successfully");
-                                Ok(Value::Tuple(vec![]))
-                            }
-                            Err(e) => {
-                                error!("Error removing label: {}", e);
-                                Err(Value::String(e.to_string()))
-                            }
+                    match store.remove_label(&label).await {
+                        Ok(_) => {
+                            debug!("Label removed successfully");
+                            Ok(Value::Tuple(vec![]))
+                        }
+                        Err(e) => {
+                            error!("Error removing label: {}", e);
+                            Err(Value::String(e.to_string()))
                         }
                     }
-                }),
+                }
+            }),
         );
         // store-at-label(store-id: string, label: string, content: list<u8>) -> result<string, string>
         imports.define(
             "theater:simple/store",
             "store-at-label",
             pact_result_host_fn(move |input: Value| {
-                    let bp = bp_store_at_label.clone();
-                    async move {
-                        let _ph = PhaseLog::new("store.store_at_label");
-                        let (store_id, label_string, content) = parse_store_label_content(&input)?;
-                        let store = make_store(&store_id, &bp);
-                        let label = Label::new(label_string);
+                let bp = bp_store_at_label.clone();
+                async move {
+                    let _ph = PhaseLog::new("store.store_at_label");
+                    let (store_id, label_string, content) = parse_store_label_content(&input)?;
+                    let store = make_store(&store_id, &bp);
+                    let label = Label::new(label_string);
 
-                        match store.store_at_label(&label, content).await {
-                            Ok(content_ref) => {
-                                debug!("Content stored at label successfully");
-                                Ok(Value::String(content_ref.hash().to_string()))
-                            }
-                            Err(e) => {
-                                error!("Error storing content at label: {}", e);
-                                Err(Value::String(e.to_string()))
-                            }
+                    match store.store_at_label(&label, content).await {
+                        Ok(content_ref) => {
+                            debug!("Content stored at label successfully");
+                            Ok(Value::String(content_ref.hash().to_string()))
+                        }
+                        Err(e) => {
+                            error!("Error storing content at label: {}", e);
+                            Err(Value::String(e.to_string()))
                         }
                     }
-                }),
+                }
+            }),
         );
         // replace-content-at-label(store-id: string, label: string, content: list<u8>) -> result<string, string>
         imports.define(
             "theater:simple/store",
             "replace-content-at-label",
             pact_result_host_fn(move |input: Value| {
-                    let bp = bp_replace_content.clone();
-                    async move {
-                        let _ph = PhaseLog::new("store.replace_content_at_label");
-                        let (store_id, label_string, content) = parse_store_label_content(&input)?;
-                        let store = make_store(&store_id, &bp);
-                        let label = Label::new(label_string);
+                let bp = bp_replace_content.clone();
+                async move {
+                    let _ph = PhaseLog::new("store.replace_content_at_label");
+                    let (store_id, label_string, content) = parse_store_label_content(&input)?;
+                    let store = make_store(&store_id, &bp);
+                    let label = Label::new(label_string);
 
-                        match store.replace_content_at_label(&label, content).await {
-                            Ok(content_ref) => {
-                                debug!("Content at label replaced successfully");
-                                Ok(Value::String(content_ref.hash().to_string()))
-                            }
-                            Err(e) => {
-                                error!("Error replacing content at label: {}", e);
-                                Err(Value::String(e.to_string()))
-                            }
+                    match store.replace_content_at_label(&label, content).await {
+                        Ok(content_ref) => {
+                            debug!("Content at label replaced successfully");
+                            Ok(Value::String(content_ref.hash().to_string()))
+                        }
+                        Err(e) => {
+                            error!("Error replacing content at label: {}", e);
+                            Err(Value::String(e.to_string()))
                         }
                     }
-                }),
+                }
+            }),
         );
         // replace-at-label(store-id: string, label: string, content-ref: content-ref) -> result<_, string>
         imports.define(
             "theater:simple/store",
             "replace-at-label",
             pact_result_host_fn(move |input: Value| {
-                    let bp = bp_replace_at.clone();
-                    async move {
-                        let _ph = PhaseLog::new("store.replace_at_label");
-                        let (store_id, label_string, content_ref) = parse_store_label_ref(&input)?;
-                        let store = make_store(&store_id, &bp);
-                        let label = Label::new(label_string);
+                let bp = bp_replace_at.clone();
+                async move {
+                    let _ph = PhaseLog::new("store.replace_at_label");
+                    let (store_id, label_string, content_ref) = parse_store_label_ref(&input)?;
+                    let store = make_store(&store_id, &bp);
+                    let label = Label::new(label_string);
 
-                        match store.replace_at_label(&label, &content_ref).await {
-                            Ok(_) => {
-                                debug!("Content at label replaced with reference successfully");
-                                Ok(Value::Tuple(vec![]))
-                            }
-                            Err(e) => {
-                                error!("Error replacing content at label: {}", e);
-                                Err(Value::String(e.to_string()))
-                            }
+                    match store.replace_at_label(&label, &content_ref).await {
+                        Ok(_) => {
+                            debug!("Content at label replaced with reference successfully");
+                            Ok(Value::Tuple(vec![]))
+                        }
+                        Err(e) => {
+                            error!("Error replacing content at label: {}", e);
+                            Err(Value::String(e.to_string()))
                         }
                     }
-                }),
+                }
+            }),
         );
         // list-all-content(store-id: string) -> result<list<string>, string>
         imports.define(
             "theater:simple/store",
             "list-all-content",
             pact_result_host_fn(move |input: Value| {
-                    let bp = bp_list_all.clone();
-                    async move {
-                        let _ph = PhaseLog::new("store.list_all_content");
-                        let store_id = parse_store_id(&input)?;
-                        let store = make_store(&store_id, &bp);
+                let bp = bp_list_all.clone();
+                async move {
+                    let _ph = PhaseLog::new("store.list_all_content");
+                    let store_id = parse_store_id(&input)?;
+                    let store = make_store(&store_id, &bp);
 
-                        match store.list_all_content().await {
-                            Ok(content_refs) => {
-                                use theater::ValueType;
-                                debug!("All content references listed successfully");
-                                let refs: Vec<Value> = content_refs
-                                    .into_iter()
-                                    .map(|cr| Value::String(cr.hash().to_string()))
-                                    .collect();
-                                Ok(Value::List {
-                                    elem_type: ValueType::String,
-                                    items: refs,
-                                })
-                            }
-                            Err(e) => {
-                                error!("Error listing all content: {}", e);
-                                Err(Value::String(e.to_string()))
-                            }
+                    match store.list_all_content().await {
+                        Ok(content_refs) => {
+                            use theater::ValueType;
+                            debug!("All content references listed successfully");
+                            let refs: Vec<Value> = content_refs
+                                .into_iter()
+                                .map(|cr| Value::String(cr.hash().to_string()))
+                                .collect();
+                            Ok(Value::List {
+                                elem_type: ValueType::String,
+                                items: refs,
+                            })
+                        }
+                        Err(e) => {
+                            error!("Error listing all content: {}", e);
+                            Err(Value::String(e.to_string()))
                         }
                     }
-                }),
+                }
+            }),
         );
         // calculate-total-size(store-id: string) -> result<u64, string>
         imports.define(
             "theater:simple/store",
             "calculate-total-size",
             pact_result_host_fn(move |input: Value| {
-                    let bp = bp_calc_size.clone();
-                    async move {
-                        let _ph = PhaseLog::new("store.calculate_total_size");
-                        let store_id = parse_store_id(&input)?;
-                        let store = make_store(&store_id, &bp);
+                let bp = bp_calc_size.clone();
+                async move {
+                    let _ph = PhaseLog::new("store.calculate_total_size");
+                    let store_id = parse_store_id(&input)?;
+                    let store = make_store(&store_id, &bp);
 
-                        match store.calculate_total_size().await {
-                            Ok(total_size) => {
-                                debug!("Total size calculated successfully");
-                                Ok(Value::U64(total_size))
-                            }
-                            Err(e) => {
-                                error!("Error calculating total size: {}", e);
-                                Err(Value::String(e.to_string()))
-                            }
+                    match store.calculate_total_size().await {
+                        Ok(total_size) => {
+                            debug!("Total size calculated successfully");
+                            Ok(Value::U64(total_size))
+                        }
+                        Err(e) => {
+                            error!("Error calculating total size: {}", e);
+                            Err(Value::String(e.to_string()))
                         }
                     }
-                }),
+                }
+            }),
         );
         // list-labels(store-id: string) -> result<list<string>, string>
         imports.define(
             "theater:simple/store",
             "list-labels",
             pact_result_host_fn(move |input: Value| {
-                    let bp = bp_list_labels.clone();
-                    async move {
-                        let _ph = PhaseLog::new("store.list_labels");
-                        let store_id = parse_store_id(&input)?;
-                        let store = make_store(&store_id, &bp);
+                let bp = bp_list_labels.clone();
+                async move {
+                    let _ph = PhaseLog::new("store.list_labels");
+                    let store_id = parse_store_id(&input)?;
+                    let store = make_store(&store_id, &bp);
 
-                        match store.list_labels().await {
-                            Ok(labels) => {
-                                use theater::ValueType;
-                                debug!("Labels listed successfully");
-                                let label_values: Vec<Value> =
-                                    labels.into_iter().map(Value::String).collect();
-                                Ok(Value::List {
-                                    elem_type: ValueType::String,
-                                    items: label_values,
-                                })
-                            }
-                            Err(e) => {
-                                error!("Error listing labels: {}", e);
-                                Err(Value::String(e.to_string()))
-                            }
+                    match store.list_labels().await {
+                        Ok(labels) => {
+                            use theater::ValueType;
+                            debug!("Labels listed successfully");
+                            let label_values: Vec<Value> =
+                                labels.into_iter().map(Value::String).collect();
+                            Ok(Value::List {
+                                elem_type: ValueType::String,
+                                items: label_values,
+                            })
+                        }
+                        Err(e) => {
+                            error!("Error listing labels: {}", e);
+                            Err(Value::String(e.to_string()))
                         }
                     }
-                }),
+                }
+            }),
         );
 
         ctx.mark_satisfied("theater:simple/store");

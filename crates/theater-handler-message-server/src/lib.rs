@@ -916,7 +916,9 @@ impl Handler for MessageServerHandler {
 
                     let target_id = match TheaterId::parse(&address) {
                         Ok(id) => id,
-                        Err(e) => return Err(Value::String(format!("Failed to parse actor ID: {}", e))),
+                        Err(e) => {
+                            return Err(Value::String(format!("Failed to parse actor ID: {}", e)))
+                        }
                     };
 
                     let (response_tx, response_rx) = tokio::sync::oneshot::channel();
@@ -951,7 +953,9 @@ impl Handler for MessageServerHandler {
 
                     let target_id = match TheaterId::parse(&address) {
                         Ok(id) => id,
-                        Err(e) => return Err(Value::String(format!("Failed to parse actor ID: {}", e))),
+                        Err(e) => {
+                            return Err(Value::String(format!("Failed to parse actor ID: {}", e)))
+                        }
                     };
 
                     let (response_tx, response_rx) = tokio::sync::oneshot::channel();
@@ -971,16 +975,13 @@ impl Handler for MessageServerHandler {
                     }
 
                     match cmd_response_rx.await {
-                        Ok(Ok(())) => {
-
-                            match response_rx.await {
-                                Ok(response) => Ok(Value::List {
-                                    elem_type: ValueType::U8,
-                                    items: response.into_iter().map(Value::U8).collect(),
-                                }),
-                                Err(e) => Err(Value::String(e.to_string())),
-                            }
-                        }
+                        Ok(Ok(())) => match response_rx.await {
+                            Ok(response) => Ok(Value::List {
+                                elem_type: ValueType::U8,
+                                items: response.into_iter().map(Value::U8).collect(),
+                            }),
+                            Err(e) => Err(Value::String(e.to_string())),
+                        },
                         Ok(Err(e)) => Err(Value::String(e.to_string())),
                         Err(e) => Err(Value::String(e.to_string())),
                     }
@@ -1021,10 +1022,15 @@ impl Handler for MessageServerHandler {
                     if let Some(sender) = requests.remove(&request_id) {
                         match sender.send(response_data) {
                             Ok(_) => Ok(Value::Tuple(vec![])),
-                            Err(e) => Err(Value::String(format!("Failed to send response: {:?}", e))),
+                            Err(e) => {
+                                Err(Value::String(format!("Failed to send response: {:?}", e)))
+                            }
                         }
                     } else {
-                        Err(Value::String(format!("Request ID not found: {}", request_id)))
+                        Err(Value::String(format!(
+                            "Request ID not found: {}",
+                            request_id
+                        )))
                     }
                 }
             }),
@@ -1044,7 +1050,10 @@ impl Handler for MessageServerHandler {
                     if requests.remove(&request_id).is_some() {
                         Ok(Value::Tuple(vec![]))
                     } else {
-                        Err(Value::String(format!("Request ID not found: {}", request_id)))
+                        Err(Value::String(format!(
+                            "Request ID not found: {}",
+                            request_id
+                        )))
                     }
                 }
             }),
@@ -1063,13 +1072,13 @@ impl Handler for MessageServerHandler {
 
                     let target_id = match TheaterId::parse(&address) {
                         Ok(id) => ChannelParticipant::Actor(id),
-                        Err(e) => return Err(Value::String(format!("Failed to parse actor ID: {}", e))),
+                        Err(e) => {
+                            return Err(Value::String(format!("Failed to parse actor ID: {}", e)))
+                        }
                     };
 
-                    let channel_id = ChannelId::new(
-                        &ChannelParticipant::Actor(current_actor_id),
-                        &target_id,
-                    );
+                    let channel_id =
+                        ChannelId::new(&ChannelParticipant::Actor(current_actor_id), &target_id);
                     let channel_id_str = channel_id.as_str().to_string();
 
                     let (response_tx, response_rx) = tokio::sync::oneshot::channel();
@@ -1113,7 +1122,9 @@ impl Handler for MessageServerHandler {
 
                     let channel_id = match ChannelId::parse(&channel_id_str) {
                         Ok(id) => id,
-                        Err(e) => return Err(Value::String(format!("Failed to parse channel ID: {}", e))),
+                        Err(e) => {
+                            return Err(Value::String(format!("Failed to parse channel ID: {}", e)))
+                        }
                     };
 
                     let (response_tx, response_rx) = tokio::sync::oneshot::channel();
@@ -1150,7 +1161,9 @@ impl Handler for MessageServerHandler {
 
                     let channel_id = match ChannelId::parse(&channel_id_str) {
                         Ok(id) => id,
-                        Err(e) => return Err(Value::String(format!("Failed to parse channel ID: {}", e))),
+                        Err(e) => {
+                            return Err(Value::String(format!("Failed to parse channel ID: {}", e)))
+                        }
                     };
 
                     let (response_tx, response_rx) = tokio::sync::oneshot::channel();

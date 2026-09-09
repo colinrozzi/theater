@@ -191,73 +191,70 @@ impl Handler for TimerHandler {
             pact_result_host_fn(move |input: Value| {
                 let state = state_interval.clone();
                 async move {
-                        let (name, interval_ms) = parse_set_interval(&input)?;
+                    let (name, interval_ms) = parse_set_interval(&input)?;
 
-                        // Get actor handle
-                        let actor_handle = {
-                            let guard = state.actor_handle.lock().unwrap();
-                            guard.clone().ok_or_else(|| {
-                                Value::String("Actor handle not available".to_string())
-                            })?
-                        };
+                    // Get actor handle
+                    let actor_handle = {
+                        let guard = state.actor_handle.lock().unwrap();
+                        guard.clone().ok_or_else(|| {
+                            Value::String("Actor handle not available".to_string())
+                        })?
+                    };
 
-                        // Check if timer already exists
-                        {
-                            let timers = state.active_timers.lock().await;
-                            if timers.contains_key(&name) {
-                                return Err(Value::String(format!(
-                                    "Timer '{}' already exists",
-                                    name
-                                )));
-                            }
+                    // Check if timer already exists
+                    {
+                        let timers = state.active_timers.lock().await;
+                        if timers.contains_key(&name) {
+                            return Err(Value::String(format!("Timer '{}' already exists", name)));
                         }
+                    }
 
-                        // Create cancel channel
-                        let (cancel_tx, mut cancel_rx) = mpsc::channel::<()>(1);
+                    // Create cancel channel
+                    let (cancel_tx, mut cancel_rx) = mpsc::channel::<()>(1);
 
-                        // Store timer
-                        {
-                            let mut timers = state.active_timers.lock().await;
-                            timers.insert(name.clone(), cancel_tx);
-                        }
+                    // Store timer
+                    {
+                        let mut timers = state.active_timers.lock().await;
+                        timers.insert(name.clone(), cancel_tx);
+                    }
 
-                        // Spawn timer task
-                        let timer_name = name.clone();
-                        let timers = state.active_timers.clone();
-                        tokio::spawn(async move {
-                            let mut interval =
-                                tokio::time::interval(Duration::from_millis(interval_ms));
+                    // Spawn timer task
+                    let timer_name = name.clone();
+                    let timers = state.active_timers.clone();
+                    tokio::spawn(async move {
+                        let mut interval =
+                            tokio::time::interval(Duration::from_millis(interval_ms));
 
-                            loop {
-                                tokio::select! {
-                                    _ = interval.tick() => {
-                                        let input = Value::String(timer_name.clone());
-                                        if let Err(e) = actor_handle
-                                            .call_function(
-                                                "theater:simple/timer.handle-tick".to_string(),
-                                                input,
-                                            )
-                                            .await
-                                        {
-                                            debug!("Timer tick call failed: {:?}", e);
-                                            // Remove timer on error
-                                            let mut timers_guard = timers.lock().await;
-                                            timers_guard.remove(&timer_name);
-                                            break;
-                                        }
-                                    }
-                                    _ = cancel_rx.recv() => {
-                                        info!("Timer '{}' cancelled", timer_name);
+                        loop {
+                            tokio::select! {
+                                _ = interval.tick() => {
+                                    let input = Value::String(timer_name.clone());
+                                    if let Err(e) = actor_handle
+                                        .call_function(
+                                            "theater:simple/timer.handle-tick".to_string(),
+                                            input,
+                                        )
+                                        .await
+                                    {
+                                        debug!("Timer tick call failed: {:?}", e);
+                                        // Remove timer on error
+                                        let mut timers_guard = timers.lock().await;
+                                        timers_guard.remove(&timer_name);
                                         break;
                                     }
                                 }
+                                _ = cancel_rx.recv() => {
+                                    info!("Timer '{}' cancelled", timer_name);
+                                    break;
+                                }
                             }
-                        });
+                        }
+                    });
 
-                        info!("Timer '{}' started with {}ms interval", name, interval_ms);
-                        Ok::<Value, Value>(Value::String(name))
-                    }
-                }),
+                    info!("Timer '{}' started with {}ms interval", name, interval_ms);
+                    Ok::<Value, Value>(Value::String(name))
+                }
+            }),
         );
 
         // clear-interval(name: string) -> result<_, string>
@@ -267,23 +264,23 @@ impl Handler for TimerHandler {
             pact_result_host_fn(move |input: Value| {
                 let state = state_clear.clone();
                 async move {
-                        let name = parse_string(&input)?;
+                    let name = parse_string(&input)?;
 
-                        // Find and cancel the timer
-                        let cancel_tx = {
-                            let mut timers = state.active_timers.lock().await;
-                            timers.remove(&name)
-                        };
+                    // Find and cancel the timer
+                    let cancel_tx = {
+                        let mut timers = state.active_timers.lock().await;
+                        timers.remove(&name)
+                    };
 
-                        if let Some(tx) = cancel_tx {
-                            let _ = tx.send(()).await;
-                            info!("Timer '{}' cleared", name);
-                            Ok::<Value, Value>(Value::Tuple(vec![]))
-                        } else {
-                            Err(Value::String(format!("Timer '{}' not found", name)))
-                        }
+                    if let Some(tx) = cancel_tx {
+                        let _ = tx.send(()).await;
+                        info!("Timer '{}' cleared", name);
+                        Ok::<Value, Value>(Value::Tuple(vec![]))
+                    } else {
+                        Err(Value::String(format!("Timer '{}' not found", name)))
                     }
-                }),
+                }
+            }),
         );
 
         // now() -> u64

@@ -164,6 +164,7 @@ impl Handler for LifecycleHandler {
                             "theater:simple/lifecycle-handlers",
                             "handle-lifecycle-event",
                         )
+                        .await
                         .unwrap_or(false),
                     None => false,
                 }
