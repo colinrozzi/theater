@@ -369,7 +369,7 @@ mod tests {
         assert_eq!(
             sig.results,
             vec![Type::U64],
-            "timer.now() must return bare u64 (not a result); the host registration in setup_host_functions_composite assumes this"
+            "timer.now() must return bare u64 (not a result); the host registration in register_host_functions assumes this"
         );
     }
 }

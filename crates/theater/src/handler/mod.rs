@@ -349,7 +349,7 @@ pub trait Handler: Send + Sync + 'static {
     /// Handlers compute these hashes from `.pact` files using `InterfaceImpl::from_pact()`:
     ///
     /// ```ignore
-    /// use packr::{parse_pact, InterfaceImpl, TypeHash};
+    /// use theater::pack_bridge::{parse_pact, InterfaceImpl, TypeHash};
     ///
     /// const MY_PACT: &str = include_str!("../../../pact/my-interface.pact");
     ///
@@ -378,7 +378,7 @@ pub trait Handler: Send + Sync + 'static {
     /// Handlers should load interfaces from `.pact` files:
     ///
     /// ```ignore
-    /// use packr::{parse_pact, InterfaceImpl};
+    /// use theater::pack_bridge::{parse_pact, InterfaceImpl};
     ///
     /// const MY_PACT: &str = include_str!("../../../pact/my-interface.pact");
     ///
