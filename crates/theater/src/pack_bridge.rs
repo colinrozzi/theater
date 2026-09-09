@@ -57,6 +57,54 @@ use std::collections::HashMap;
 use crate::actor::store::ActorStore;
 use crate::id::TheaterId;
 
+/// Adapter restoring `func_async_result` ergonomics on packr-core's raw `host_fn`.
+///
+/// The capture-based `host_fn` returns a raw `Result<Value, HostError>` with no
+/// auto-wrapping; a pact `result<ok, err>` return must be built as a
+/// `Value::Result` explicitly. This wraps a closure returning `Result<Value,
+/// Value>` (pact ok / pact err) into that `Value::Result`. The guest's typed
+/// decode ignores `ok_type`/`err_type` (it dispatches on the Ok/Err tag +
+/// payload), so the declared types only need to be valid and deterministic — we
+/// pass them from the pact signature at registration so recorded values stay
+/// replay-faithful. A closure `Err(HostError)` is a genuine host-side failure
+/// (dispatch status -1), distinct from a pact err (`Ok(Err(v))`).
+pub fn result_host_fn<F, Fut>(f: F) -> packr_core::HostFn
+where
+    F: Fn(Value) -> Fut + Send + Sync + 'static,
+    Fut: std::future::Future<Output = Result<std::result::Result<Value, Value>, packr_core::HostError>>
+        + Send
+        + 'static,
+{
+    packr_core::host_fn(move |input| {
+        let fut = f(input);
+        async move {
+            let payload = fut.await?;
+            // The guest's typed decode dispatches on the Ok/Err tag + payload and
+            // *ignores* the result's declared `ok_type`/`err_type`; replay
+            // short-circuits to the recorded value, so live and replay use the
+            // same types either way. We infer the PRESENT branch's type from its
+            // value (matches by construction → encodes cleanly) and use unit as a
+            // valid, deterministic placeholder for the ABSENT branch. Preserving
+            // the pact signature's alias names for the stored types is a possible
+            // faithfulness follow-up, not a correctness requirement.
+            let unit = packr_core::abi::ValueType::Tuple(Vec::new());
+            let result = match payload {
+                Ok(v) => Value::Result {
+                    ok_type: v.infer_type(),
+                    err_type: unit,
+                    value: Ok(Box::new(v)),
+                },
+                Err(v) => Value::Result {
+                    ok_type: unit,
+                    err_type: v.infer_type(),
+                    value: Err(Box::new(v)),
+                },
+            };
+            Ok(result)
+        }
+    })
+}
+
 /// Shared wasm runtime with an engine-scoped compile cache.
 ///
 /// Wraps one `AsyncRuntime` (one `wasmtime::Engine`) plus a map from

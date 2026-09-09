@@ -1887,6 +1887,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "packr-core"
+version = "0.24.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5e505632258740b87b98cabfbdbd87b4b67526119c3af3e3daaebb2b7ad787d2"
+dependencies = [
+ "async-trait",
+ "packr-abi 0.24.0",
+ "sha2",
+ "thiserror 1.0.69",
+ "wasmparser 0.219.2",
+]
+
+[[package]]
 name = "packr-derive"
 version = "0.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1930,6 +1943,17 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "packr-wasmtime"
+version = "0.24.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2f14a79a0213109176d4961773d186c108ac52449f2d61c5eef797a19b992e0f"
+dependencies = [
+ "async-trait",
+ "packr-core",
+ "wasmtime 27.0.0",
 ]
 
 [[package]]
@@ -2922,6 +2946,8 @@ dependencies = [
  "mockall",
  "packr",
  "packr-abi 0.24.0",
+ "packr-core",
+ "packr-wasmtime",
  "pretty_assertions",
  "rand",
  "reqwest",

@@ -27,8 +27,13 @@ theater-store.workspace = true
 # WebAssembly runtime
 wasmtime = { version = "31.0", features = ["component-model", "async"] }
 
-# Pack runtime (Graph ABI-based WASM runtime)
+# Pack runtime (Graph ABI-based WASM runtime).
+# Engine axis: packr-core (backend-free traits + HostImports + metadata) +
+# packr-wasmtime (native backend). `packr` (umbrella) kept transitionally during
+# the pack_bridge/handler migration; dropped once nothing uses it.
 packr.workspace = true
+packr-core.workspace = true
+packr-wasmtime.workspace = true
 packr-abi = { workspace = true, features = ["derive"] }
 async-trait = "0.1"
 sha2.workspace = true
