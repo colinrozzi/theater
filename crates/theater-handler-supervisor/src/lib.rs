@@ -7,7 +7,6 @@ pub mod events;
 use serde::{Deserialize, Serialize};
 use theater::actor::handle::ActorHandle;
 use theater::actor::runtime::ActorRuntimeError;
-use theater::actor::store::ActorStore;
 use theater::chain::ChainEvent;
 use theater::config::permissions::{SupervisorPermissions, ViewScope};
 
@@ -24,7 +23,7 @@ use theater::SpawnError;
 
 // Pack integration
 use theater::pack_bridge::{
-    parse_pact, AsyncCtx, HostLinkerBuilder, InterfaceImpl, LinkerError, TypeHash, Value, ValueType,
+    pact_result_host_fn, parse_pact, InterfaceImpl, TypeHash, Value, ValueType,
 };
 
 use anyhow::Result;
@@ -579,11 +578,11 @@ impl Handler for SupervisorHandler {
         vec![supervisor_interface()]
     }
 
-    fn setup_host_functions_composite(
+    fn register_host_functions(
         &mut self,
-        builder: &mut HostLinkerBuilder<'_, ActorStore>,
+        imports: &mut theater::pack_bridge::HostImports,
         ctx: &mut HandlerContext,
-    ) -> Result<(), LinkerError> {
+    ) -> anyhow::Result<()> {
         info!("Setting up supervisor host functions (Pack)");
 
         // Check if already satisfied
@@ -597,22 +596,31 @@ impl Handler for SupervisorHandler {
         let theater_tx_holder = self.theater_tx.clone();
         let resource_cache = self.resource_cache.clone();
         let permissions = self.permissions.clone();
+        let id = ctx.actor_id.expect("actor_id set before registration");
+        let theater_tx = ctx
+            .theater_tx
+            .clone()
+            .expect("theater_tx set before registration");
 
-        builder.interface("theater:simple/supervisor")?
-            // spawn: func(manifest: string, wasm-bytes: option<list<u8>>) -> result<string, string>
-            // Spawns a child actor. If wasm-bytes is provided, uses those bytes instead of loading from manifest.package.
-            .func_async_result("spawn", {
+        // spawn: func(manifest: string, wasm-bytes: option<list<u8>>) -> result<string, string>
+        // Spawns a child actor. If wasm-bytes is provided, uses those bytes instead of loading from manifest.package.
+        imports.define(
+            "theater:simple/supervisor",
+            "spawn",
+            pact_result_host_fn({
                 let event_tx = event_tx.clone();
                 let children = children.clone();
                 let theater_tx_holder = theater_tx_holder.clone();
                 let resource_cache = resource_cache.clone();
                 let permissions = permissions.clone();
-                move |ctx: AsyncCtx<ActorStore>, input: Value| {
+                let theater_tx = theater_tx.clone();
+                move |input: Value| {
                     let event_tx = event_tx.clone();
                     let children = children.clone();
                     let theater_tx_holder = theater_tx_holder.clone();
                     let resource_cache = resource_cache.clone();
                     let permissions = permissions.clone();
+                    let theater_tx = theater_tx.clone();
                     async move {
                         // spawn creates a new actor parented to the caller; needs mutate.
                         require_capability(&permissions, true)?;
@@ -727,8 +735,6 @@ impl Handler for SupervisorHandler {
                             "spawn phase complete",
                         );
 
-                        let store = ctx.data();
-                        let theater_tx = store.theater_tx.clone();
                         let name = Some(manifest.name.clone());
                         let (response_tx, response_rx) = oneshot::channel();
                         // Resolve init-state: explicit override wins; else fall
@@ -758,7 +764,7 @@ impl Handler for SupervisorHandler {
                             response_tx,
                             subscription_tx: None,
                             // This child is spawned by the calling actor.
-                            parent_id: Some(store.id),
+                            parent_id: Some(id),
                         };
 
                         // runtime_setup_and_init covers: send to runtime command
@@ -774,7 +780,7 @@ impl Handler for SupervisorHandler {
                         {
                             let mut holder = theater_tx_holder.lock().unwrap();
                             if holder.is_none() {
-                                *holder = Some(theater_tx);
+                                *holder = Some(theater_tx.clone());
                             }
                         }
 
@@ -805,9 +811,7 @@ impl Handler for SupervisorHandler {
                                 // its terminal event drives handle-lifecycle-event
                                 // + tracking cleanup. Best-effort — a failure here
                                 // just means no death notification for this child.
-                                if ctx
-                                    .data()
-                                    .theater_tx
+                                if theater_tx
                                     .send(TheaterCommand::SubscribeToActor {
                                         actor_id,
                                         event_tx: event_tx.clone(),
@@ -823,18 +827,24 @@ impl Handler for SupervisorHandler {
                         }
                     }
                 }
-            })?
-            // spawn-and-wait: func(manifest: string, init-state: option<value>, wasm-bytes: option<list<u8>>, timeout-ms: option<u64>) -> result<option<list<u8>>, string>
-            // Spawns a child actor (setup + init) and waits for it to complete.
-            // Returns the child's final result. If timeout-ms is provided,
-            // returns an error if the child doesn't complete within that time.
-            // Same init-state semantics as `spawn` — see that function's docs.
-            .func_async_result("spawn-and-wait", {
+            }),
+        );
+        // spawn-and-wait: func(manifest: string, init-state: option<value>, wasm-bytes: option<list<u8>>, timeout-ms: option<u64>) -> result<option<list<u8>>, string>
+        // Spawns a child actor (setup + init) and waits for it to complete.
+        // Returns the child's final result. If timeout-ms is provided,
+        // returns an error if the child doesn't complete within that time.
+        // Same init-state semantics as `spawn` — see that function's docs.
+        imports.define(
+            "theater:simple/supervisor",
+            "spawn-and-wait",
+            pact_result_host_fn({
                 let resource_cache = resource_cache.clone();
                 let permissions = permissions.clone();
-                move |ctx: AsyncCtx<ActorStore>, input: Value| {
+                let theater_tx = theater_tx.clone();
+                move |input: Value| {
                     let resource_cache = resource_cache.clone();
                     let permissions = permissions.clone();
+                    let theater_tx = theater_tx.clone();
                     async move {
                         // spawn-and-wait creates a new actor parented to the caller; needs mutate.
                         require_capability(&permissions, true)?;
@@ -913,9 +923,6 @@ impl Handler for SupervisorHandler {
                             "spawn phase complete",
                         );
 
-                        let store = ctx.data();
-                        let theater_tx = store.theater_tx.clone();
-
                         // Subscribe to the child's chain AT SPAWN (subscription_tx
                         // registers before init, so the terminal event can't be
                         // missed — no supervisor_tx / ActorResult needed).
@@ -940,7 +947,7 @@ impl Handler for SupervisorHandler {
                             response_tx,
                             subscription_tx: Some(ev_tx),
                             // This child is spawned by the calling actor.
-                            parent_id: Some(store.id),
+                            parent_id: Some(id),
                         };
 
                         if theater_tx.send(cmd).is_err() {
@@ -1002,19 +1009,25 @@ impl Handler for SupervisorHandler {
                         }
                     }
                 }
-            })?
-            // list-actors: func() -> result<list<actor-info>, supervisor-error>
-            // Every actor in the caller's view (subtree, or all).
-            .func_async_result("list-actors", {
+            }),
+        );
+        // list-actors: func() -> result<list<actor-info>, supervisor-error>
+        // Every actor in the caller's view (subtree, or all).
+        imports.define(
+            "theater:simple/supervisor",
+            "list-actors",
+            pact_result_host_fn({
                 let permissions = permissions.clone();
                 let children = children.clone();
-                move |ctx: AsyncCtx<ActorStore>, _input: Value| {
+                let theater_tx = theater_tx.clone();
+                move |_input: Value| {
                     let permissions = permissions.clone();
                     let children = children.clone();
+                    let theater_tx = theater_tx.clone();
                     async move {
                         let scope = require_capability(&permissions, false)?.scope;
-                        let caller = ctx.data().id;
-                        let tx = ctx.data().theater_tx.clone();
+                        let caller = id;
+                        let tx = theater_tx.clone();
                         // Direct-children view-scope: `all` is every live actor
                         // (the runtime holds no lineage, so `parent-id` is `None`);
                         // `subtree` is the caller's own children, each reported with
@@ -1056,17 +1069,31 @@ impl Handler for SupervisorHandler {
                         })
                     }
                 }
-            })?
-            // get-actor-status: func(id: string) -> result<string, supervisor-error>
-            .func_async_result("get-actor-status", {
+            }),
+        );
+        // get-actor-status: func(id: string) -> result<string, supervisor-error>
+        imports.define(
+            "theater:simple/supervisor",
+            "get-actor-status",
+            pact_result_host_fn({
                 let permissions = permissions.clone();
                 let children = children.clone();
-                move |ctx: AsyncCtx<ActorStore>, id: String| {
+                let theater_tx = theater_tx.clone();
+                move |input: Value| {
                     let permissions = permissions.clone();
                     let children = children.clone();
+                    let theater_tx = theater_tx.clone();
                     async move {
+                        let id = match input {
+                            Value::String(s) => s,
+                            _ => {
+                                return Err(Value::from(SupervisorError::InvalidArgument(
+                                    "expected actor id string".to_string(),
+                                )))
+                            }
+                        };
                         let target = parse_actor_id(&id)?;
-                        let tx = ctx.data().theater_tx.clone();
+                        let tx = theater_tx.clone();
                         authorize(&tx, &permissions, target, false, &children).await?;
                         let (rtx, rrx) = oneshot::channel();
                         tx.send(TheaterCommand::GetActorStatus {
@@ -1081,17 +1108,31 @@ impl Handler for SupervisorHandler {
                         }
                     }
                 }
-            })?
-            // get-actor-state: func(id: string) -> result<option<list<u8>>, supervisor-error>
-            .func_async_result("get-actor-state", {
+            }),
+        );
+        // get-actor-state: func(id: string) -> result<option<list<u8>>, supervisor-error>
+        imports.define(
+            "theater:simple/supervisor",
+            "get-actor-state",
+            pact_result_host_fn({
                 let permissions = permissions.clone();
                 let children = children.clone();
-                move |ctx: AsyncCtx<ActorStore>, id: String| {
+                let theater_tx = theater_tx.clone();
+                move |input: Value| {
                     let permissions = permissions.clone();
                     let children = children.clone();
+                    let theater_tx = theater_tx.clone();
                     async move {
+                        let id = match input {
+                            Value::String(s) => s,
+                            _ => {
+                                return Err(Value::from(SupervisorError::InvalidArgument(
+                                    "expected actor id string".to_string(),
+                                )))
+                            }
+                        };
                         let target = parse_actor_id(&id)?;
-                        let tx = ctx.data().theater_tx.clone();
+                        let tx = theater_tx.clone();
                         authorize(&tx, &permissions, target, false, &children).await?;
                         let (rtx, rrx) = oneshot::channel();
                         tx.send(TheaterCommand::GetActorState {
@@ -1106,17 +1147,31 @@ impl Handler for SupervisorHandler {
                         }
                     }
                 }
-            })?
-            // get-actor-manifest: func(id: string) -> result<string, supervisor-error>
-            .func_async_result("get-actor-manifest", {
+            }),
+        );
+        // get-actor-manifest: func(id: string) -> result<string, supervisor-error>
+        imports.define(
+            "theater:simple/supervisor",
+            "get-actor-manifest",
+            pact_result_host_fn({
                 let permissions = permissions.clone();
                 let children = children.clone();
-                move |ctx: AsyncCtx<ActorStore>, id: String| {
+                let theater_tx = theater_tx.clone();
+                move |input: Value| {
                     let permissions = permissions.clone();
                     let children = children.clone();
+                    let theater_tx = theater_tx.clone();
                     async move {
+                        let id = match input {
+                            Value::String(s) => s,
+                            _ => {
+                                return Err(Value::from(SupervisorError::InvalidArgument(
+                                    "expected actor id string".to_string(),
+                                )))
+                            }
+                        };
                         let target = parse_actor_id(&id)?;
-                        let tx = ctx.data().theater_tx.clone();
+                        let tx = theater_tx.clone();
                         authorize(&tx, &permissions, target, false, &children).await?;
                         let (rtx, rrx) = oneshot::channel();
                         tx.send(TheaterCommand::GetActorManifest {
@@ -1133,17 +1188,31 @@ impl Handler for SupervisorHandler {
                         }
                     }
                 }
-            })?
-            // stop-actor: func(id: string) -> result<_, supervisor-error>   (graceful)
-            .func_async_result("stop-actor", {
+            }),
+        );
+        // stop-actor: func(id: string) -> result<_, supervisor-error>   (graceful)
+        imports.define(
+            "theater:simple/supervisor",
+            "stop-actor",
+            pact_result_host_fn({
                 let permissions = permissions.clone();
                 let children = children.clone();
-                move |ctx: AsyncCtx<ActorStore>, id: String| {
+                let theater_tx = theater_tx.clone();
+                move |input: Value| {
                     let permissions = permissions.clone();
                     let children = children.clone();
+                    let theater_tx = theater_tx.clone();
                     async move {
+                        let id = match input {
+                            Value::String(s) => s,
+                            _ => {
+                                return Err(Value::from(SupervisorError::InvalidArgument(
+                                    "expected actor id string".to_string(),
+                                )))
+                            }
+                        };
                         let target = parse_actor_id(&id)?;
-                        let tx = ctx.data().theater_tx.clone();
+                        let tx = theater_tx.clone();
                         authorize(&tx, &permissions, target, true, &children).await?;
                         let (rtx, rrx) = oneshot::channel();
                         tx.send(TheaterCommand::StopActor {
@@ -1158,17 +1227,31 @@ impl Handler for SupervisorHandler {
                         }
                     }
                 }
-            })?
-            // kill-actor: func(id: string) -> result<_, supervisor-error>   (force)
-            .func_async_result("kill-actor", {
+            }),
+        );
+        // kill-actor: func(id: string) -> result<_, supervisor-error>   (force)
+        imports.define(
+            "theater:simple/supervisor",
+            "kill-actor",
+            pact_result_host_fn({
                 let permissions = permissions.clone();
                 let children = children.clone();
-                move |ctx: AsyncCtx<ActorStore>, id: String| {
+                let theater_tx = theater_tx.clone();
+                move |input: Value| {
                     let permissions = permissions.clone();
                     let children = children.clone();
+                    let theater_tx = theater_tx.clone();
                     async move {
+                        let id = match input {
+                            Value::String(s) => s,
+                            _ => {
+                                return Err(Value::from(SupervisorError::InvalidArgument(
+                                    "expected actor id string".to_string(),
+                                )))
+                            }
+                        };
                         let target = parse_actor_id(&id)?;
-                        let tx = ctx.data().theater_tx.clone();
+                        let tx = theater_tx.clone();
                         authorize(&tx, &permissions, target, true, &children).await?;
                         let (rtx, rrx) = oneshot::channel();
                         tx.send(TheaterCommand::TerminateActor {
@@ -1183,23 +1266,37 @@ impl Handler for SupervisorHandler {
                         }
                     }
                 }
-            })?
-            // subscribe-to-actor: func(id: string) -> result<_, supervisor-error>
-            // Opt in to chain events from an actor in the caller's view. Events
-            // are delivered to this actor's handle-actor-event export. Idempotent
-            // (the chain identifies subscribers by Sender channel identity).
-            .func_async_result("subscribe-to-actor", {
+            }),
+        );
+        // subscribe-to-actor: func(id: string) -> result<_, supervisor-error>
+        // Opt in to chain events from an actor in the caller's view. Events
+        // are delivered to this actor's handle-actor-event export. Idempotent
+        // (the chain identifies subscribers by Sender channel identity).
+        imports.define(
+            "theater:simple/supervisor",
+            "subscribe-to-actor",
+            pact_result_host_fn({
                 let event_tx = event_tx.clone();
                 let permissions = permissions.clone();
                 let children = children.clone();
-                move |ctx: AsyncCtx<ActorStore>, id: String| {
+                let theater_tx = theater_tx.clone();
+                move |input: Value| {
                     let event_tx = event_tx.clone();
                     let permissions = permissions.clone();
                     let children = children.clone();
+                    let theater_tx = theater_tx.clone();
                     async move {
                         let _ph = PhaseLog::new("supervisor.subscribe_to_actor");
+                        let id = match input {
+                            Value::String(s) => s,
+                            _ => {
+                                return Err(Value::from(SupervisorError::InvalidArgument(
+                                    "expected actor id string".to_string(),
+                                )))
+                            }
+                        };
                         let target = parse_actor_id(&id)?;
-                        let tx = ctx.data().theater_tx.clone();
+                        let tx = theater_tx.clone();
                         authorize(&tx, &permissions, target, false, &children).await?;
                         if tx
                             .send(TheaterCommand::SubscribeToActor {
@@ -1213,22 +1310,36 @@ impl Handler for SupervisorHandler {
                         Ok(Value::Tuple(vec![]))
                     }
                 }
-            })?
-            // unsubscribe-from-actor: func(id: string) -> result<_, supervisor-error>
-            // Stop receiving chain events from an actor. Idempotent; also
-            // auto-released when the actor exits.
-            .func_async_result("unsubscribe-from-actor", {
+            }),
+        );
+        // unsubscribe-from-actor: func(id: string) -> result<_, supervisor-error>
+        // Stop receiving chain events from an actor. Idempotent; also
+        // auto-released when the actor exits.
+        imports.define(
+            "theater:simple/supervisor",
+            "unsubscribe-from-actor",
+            pact_result_host_fn({
                 let event_tx = event_tx.clone();
                 let permissions = permissions.clone();
                 let children = children.clone();
-                move |ctx: AsyncCtx<ActorStore>, id: String| {
+                let theater_tx = theater_tx.clone();
+                move |input: Value| {
                     let event_tx = event_tx.clone();
                     let permissions = permissions.clone();
                     let children = children.clone();
+                    let theater_tx = theater_tx.clone();
                     async move {
                         let _ph = PhaseLog::new("supervisor.unsubscribe_from_actor");
+                        let id = match input {
+                            Value::String(s) => s,
+                            _ => {
+                                return Err(Value::from(SupervisorError::InvalidArgument(
+                                    "expected actor id string".to_string(),
+                                )))
+                            }
+                        };
                         let target = parse_actor_id(&id)?;
-                        let tx = ctx.data().theater_tx.clone();
+                        let tx = theater_tx.clone();
                         authorize(&tx, &permissions, target, false, &children).await?;
                         if tx
                             .send(TheaterCommand::UnsubscribeFromActor {
@@ -1242,7 +1353,8 @@ impl Handler for SupervisorHandler {
                         Ok(Value::Tuple(vec![]))
                     }
                 }
-            })?;
+            }),
+        );
 
         ctx.mark_satisfied("theater:simple/supervisor");
         Ok(())
@@ -1284,11 +1396,9 @@ impl Handler for SupervisorHandler {
                     let iface = "theater:simple/supervisor-handlers";
                     let e1 = instance
                         .has_export(iface, "handle-actor-event")
-                        .await
                         .unwrap_or(false);
                     let e2 = instance
                         .has_export(iface, "handle-lifecycle-event")
-                        .await
                         .unwrap_or(false);
                     (e1, e2)
                 } else {
