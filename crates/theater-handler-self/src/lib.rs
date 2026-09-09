@@ -19,7 +19,9 @@ use tokio::sync::mpsc::UnboundedSender;
 pub struct SelfHostConfig {}
 
 // Pack integration
-use theater::pack_bridge::{host_fn, parse_pact, result_host_fn, InterfaceImpl, TypeHash, Value};
+use theater::pack_bridge::{
+    pact_result_host_fn, parse_pact, plain_host_fn, InterfaceImpl, TypeHash, Value,
+};
 
 // ============================================================================
 // Interface Declarations
@@ -124,7 +126,7 @@ impl Handler for SelfHandler {
         imports.define(
             "theater:simple/self",
             "log",
-            host_fn(move |input: Value| async move {
+            plain_host_fn(move |input: Value| async move {
                 if show_logs {
                     if let Value::String(msg) = &input {
                         // Print to stdout with short actor ID prefix
@@ -132,7 +134,7 @@ impl Handler for SelfHandler {
                         println!("[{}] {}", short_id, msg);
                     }
                 }
-                Ok(Value::Tuple(vec![]))
+                Value::Tuple(vec![])
             }),
         );
 
@@ -141,14 +143,14 @@ impl Handler for SelfHandler {
         imports.define(
             "theater:simple/self",
             "self",
-            host_fn(move |_input: Value| async move { Ok(Value::String(id.to_string())) }),
+            plain_host_fn(move |_input: Value| async move { Value::String(id.to_string()) }),
         );
 
         // Shutdown function: shutdown(data: option<list<u8>>) -> result<(), string>
         imports.define(
             "theater:simple/self",
             "shutdown",
-            result_host_fn(move |input: Value| {
+            pact_result_host_fn(move |input: Value| {
                 let theater_tx = theater_tx.clone();
 
                 async move {
@@ -199,7 +201,7 @@ impl Handler for SelfHandler {
                         }
                     });
 
-                    Ok::<std::result::Result<Value, Value>, _>(Ok(Value::Tuple(vec![])))
+                    Ok::<Value, Value>(Value::Tuple(vec![]))
                 }
             }),
         );

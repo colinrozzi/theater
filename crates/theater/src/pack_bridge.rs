@@ -129,6 +129,41 @@ where
     })
 }
 
+/// Like [`result_host_fn`] but for closures that cannot fail at the HOST level:
+/// the closure returns `Result<Value, Value>` (pact ok / pact err) directly, and
+/// this lifts it into the `Ok(..)` (no [`HostError`]) the engine expects.
+///
+/// This is the drop-in for the old `func_async_result` host functions, whose
+/// bodies already return `Ok::<Value, Value>(..)` for a pact ok and
+/// `Err(pact_err_value)` for a pact err — so the body transfers verbatim; only
+/// the captured state changes (no `ctx`). A genuine host trap is not expressible
+/// here (there was none in the old bodies); use [`result_host_fn`] directly if a
+/// host-level `Err(HostError)` is ever needed.
+pub fn pact_result_host_fn<F, Fut>(f: F) -> packr_core::HostFn
+where
+    F: Fn(Value) -> Fut + Send + Sync + 'static,
+    Fut: std::future::Future<Output = std::result::Result<Value, Value>> + Send + 'static,
+{
+    result_host_fn(move |input| {
+        let fut = f(input);
+        async move { Ok(fut.await) }
+    })
+}
+
+/// Wrap a closure returning a PLAIN [`Value`] (a non-`result` pact return) as a
+/// [`HostFn`]. The drop-in for the old `func_typed` / `func_async` host
+/// functions, whose bodies produce a `Value` directly.
+pub fn plain_host_fn<F, Fut>(f: F) -> packr_core::HostFn
+where
+    F: Fn(Value) -> Fut + Send + Sync + 'static,
+    Fut: std::future::Future<Output = Value> + Send + 'static,
+{
+    packr_core::host_fn(move |input| {
+        let fut = f(input);
+        async move { Ok(fut.await) }
+    })
+}
+
 /// Shared wasm engine with an engine-scoped compile cache.
 ///
 /// Wraps one [`WasmtimeEngine`] (one `wasmtime::Engine`) plus a map from content
