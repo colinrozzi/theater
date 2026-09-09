@@ -44,7 +44,7 @@ pub fn format_event(event: &ChainEvent) -> String {
         None => writeln!(out, "parent: root").unwrap(),
     }
 
-    if let Ok(value) = packr::decode(&event.data) {
+    if let Ok(value) = packr_abi::decode(&event.data) {
         writeln!(out, "{}", value).unwrap();
     } else if !event.data.is_empty() {
         writeln!(out, "raw: {} bytes", event.data.len()).unwrap();
@@ -121,7 +121,7 @@ pub fn parse_events(reader: &mut dyn BufRead) -> io::Result<Vec<ChainEvent>> {
                 vec![]
             } else {
                 match parse_value(&line) {
-                    Ok(value) => packr::encode(&value).unwrap_or_default(),
+                    Ok(value) => packr_abi::encode(&value).unwrap_or_default(),
                     Err(_) => vec![],
                 }
             });

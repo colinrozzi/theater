@@ -49,7 +49,7 @@ impl fmt::Display for ChainEvent {
             None => "(root)".to_string(),
         };
 
-        let content = if let Ok(value) = packr::abi::decode(&self.data) {
+        let content = if let Ok(value) = packr_abi::decode(&self.data) {
             format!("{}", value)
         } else if let Ok(text) = std::str::from_utf8(&self.data) {
             let preview = if text.len() > 80 {
