@@ -364,6 +364,18 @@ impl PackInstance {
         let out_ptr = u32::from_le_bytes(ptr_bytes) as usize;
         let out_len = u32::from_le_bytes(len_bytes) as usize;
 
+        // `out_len` comes straight from guest memory, so cap it before allocating:
+        // a broken or hostile 0.23 actor returning a bogus length must not force a
+        // huge allocation ahead of any sanity check. `__pack_types` metadata is
+        // embedded rodata (kilobytes in practice), so a generous ceiling never
+        // bites a legitimate actor.
+        const MAX_METADATA_LEN: usize = 64 * 1024 * 1024;
+        if out_len > MAX_METADATA_LEN {
+            return Err(MetadataError::CallFailed(format!(
+                "__pack_types metadata length {out_len} exceeds the {MAX_METADATA_LEN}-byte cap"
+            )));
+        }
+
         // Static rodata — no `__pack_free` needed.
         let mut bytes = vec![0u8; out_len];
         self.instance

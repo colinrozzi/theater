@@ -249,7 +249,9 @@ impl Handler for LifecycleHandler {
             return Ok(());
         }
 
-        let id = ctx.actor_id.expect("actor_id set before registration");
+        let id = ctx
+            .actor_id
+            .ok_or_else(|| anyhow::anyhow!("actor_id not set in HandlerContext"))?;
 
         let link = (
             self.theater_tx.clone(),

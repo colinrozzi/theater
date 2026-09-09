@@ -806,7 +806,9 @@ impl Handler for MessageServerHandler {
 
         // This actor's own id, captured for the channel host functions that
         // previously read it from `ctx.data().id`.
-        let id = ctx.actor_id.expect("actor_id set before registration");
+        let id = ctx
+            .actor_id
+            .ok_or_else(|| anyhow::anyhow!("actor_id not set in HandlerContext"))?;
 
         // register() -> result<(), string>
         // Registers with the message router and starts the consumption loop

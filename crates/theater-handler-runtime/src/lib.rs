@@ -186,7 +186,7 @@ impl Handler for RuntimeHandler {
         let theater_tx = ctx
             .theater_tx
             .clone()
-            .expect("theater_tx set before registration");
+            .ok_or_else(|| anyhow::anyhow!("theater_tx not set in HandlerContext"))?;
 
         // shutdown-runtime: func() -> result<_, runtime-error>   (mutate)
         imports.define(

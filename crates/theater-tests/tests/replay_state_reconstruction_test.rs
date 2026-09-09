@@ -240,6 +240,20 @@ async fn replay_reconstructs_in_module_state_full_runtime() {
         !recorded_chain.is_empty(),
         "the driven calls must record a chain"
     );
+    // Export (wasm) events are recorded by the RUNTIME itself (execute_call_pack ->
+    // WasmCall/WasmResult), not by the interceptor (whose after_export is a no-op).
+    // The driven calls above are exports, so assert those events are present — this
+    // guards the export-recording path so a regression can't slip past a
+    // host-fn-only replay test (PR #194 review).
+    assert!(
+        recorded_chain.iter().any(|e| e.event_type == "wasm"),
+        "the driven export calls must record WasmCall/WasmResult (event_type=\"wasm\") \
+         events; got event types: {:?}",
+        recorded_chain
+            .iter()
+            .map(|e| e.event_type.as_str())
+            .collect::<Vec<_>>()
+    );
 
     let recorded_state = get_actor_state(&theater_tx, record_id).await;
     assert_eq!(

@@ -295,7 +295,7 @@ pub trait Handler: Send + Sync + 'static {
     /// whatever host state it needs (the theater command channel, the actor id,
     /// per-handler capabilities) — nothing is threaded through the engine. Use
     /// [`crate::pack_bridge::result_host_fn`] for pact `result<..>` returns and
-    /// [`packr_core::host_fn`] for plain-value returns.
+    /// [`crate::pack_bridge::plain_host_fn`] for plain-value returns.
     ///
     /// ```ignore
     /// fn register_host_functions(

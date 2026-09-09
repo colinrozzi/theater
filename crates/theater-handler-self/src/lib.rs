@@ -119,7 +119,9 @@ impl Handler for SelfHandler {
 
         let theater_tx = self.theater_tx.clone();
         let show_logs = self.show_logs;
-        let id = ctx.actor_id.expect("actor_id set before registration");
+        let id = ctx
+            .actor_id
+            .ok_or_else(|| anyhow::anyhow!("actor_id not set in HandlerContext"))?;
 
         // Log function: log(msg: string)
         // Actor logs are printed directly to stdout (configurable via show_logs).

@@ -596,11 +596,13 @@ impl Handler for SupervisorHandler {
         let theater_tx_holder = self.theater_tx.clone();
         let resource_cache = self.resource_cache.clone();
         let permissions = self.permissions.clone();
-        let id = ctx.actor_id.expect("actor_id set before registration");
+        let id = ctx
+            .actor_id
+            .ok_or_else(|| anyhow::anyhow!("actor_id not set in HandlerContext"))?;
         let theater_tx = ctx
             .theater_tx
             .clone()
-            .expect("theater_tx set before registration");
+            .ok_or_else(|| anyhow::anyhow!("theater_tx not set in HandlerContext"))?;
 
         // spawn: func(manifest: string, wasm-bytes: option<list<u8>>) -> result<string, string>
         // Spawns a child actor. If wasm-bytes is provided, uses those bytes instead of loading from manifest.package.
