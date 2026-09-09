@@ -16,7 +16,6 @@ use tokio::sync::{mpsc, Mutex};
 use tracing::{debug, info};
 
 use theater::actor::handle::ActorHandle;
-use theater::actor::store::ActorStore;
 use theater::config::actor_manifest::HandlerConfig;
 use theater::handler::{Handler, HandlerContext, SharedActorInstance};
 use theater::shutdown::ShutdownReceiver;
@@ -32,7 +31,7 @@ pub struct TimerHandlerConfig {
 }
 
 use theater::pack_bridge::{
-    parse_pact, AsyncCtx, HostLinkerBuilder, InterfaceImpl, LinkerError, TypeHash, Value,
+    pact_result_host_fn, parse_pact, plain_host_fn, InterfaceImpl, TypeHash, Value,
 };
 
 // ============================================================================
@@ -166,11 +165,11 @@ impl Handler for TimerHandler {
         })
     }
 
-    fn setup_host_functions_composite(
+    fn register_host_functions(
         &mut self,
-        builder: &mut HostLinkerBuilder<'_, ActorStore>,
+        imports: &mut theater::pack_bridge::HostImports,
         ctx: &mut HandlerContext,
-    ) -> Result<(), LinkerError> {
+    ) -> anyhow::Result<()> {
         info!("Setting up timer host functions");
 
         if ctx.is_satisfied("theater:simple/timer") {
@@ -185,14 +184,13 @@ impl Handler for TimerHandler {
         let state_interval = state.clone();
         let state_clear = state.clone();
 
-        builder
-            .interface("theater:simple/timer")?
-            // set-interval(name: string, interval-ms: u64) -> result<string, string>
-            .func_async_result(
-                "set-interval",
-                move |_ctx: AsyncCtx<ActorStore>, input: Value| {
-                    let state = state_interval.clone();
-                    async move {
+        // set-interval(name: string, interval-ms: u64) -> result<string, string>
+        imports.define(
+            "theater:simple/timer",
+            "set-interval",
+            pact_result_host_fn(move |input: Value| {
+                let state = state_interval.clone();
+                async move {
                         let (name, interval_ms) = parse_set_interval(&input)?;
 
                         // Get actor handle
@@ -259,14 +257,16 @@ impl Handler for TimerHandler {
                         info!("Timer '{}' started with {}ms interval", name, interval_ms);
                         Ok::<Value, Value>(Value::String(name))
                     }
-                },
-            )?
-            // clear-interval(name: string) -> result<_, string>
-            .func_async_result(
-                "clear-interval",
-                move |_ctx: AsyncCtx<ActorStore>, input: Value| {
-                    let state = state_clear.clone();
-                    async move {
+                }),
+        );
+
+        // clear-interval(name: string) -> result<_, string>
+        imports.define(
+            "theater:simple/timer",
+            "clear-interval",
+            pact_result_host_fn(move |input: Value| {
+                let state = state_clear.clone();
+                async move {
                         let name = parse_string(&input)?;
 
                         // Find and cancel the timer
@@ -283,25 +283,27 @@ impl Handler for TimerHandler {
                             Err(Value::String(format!("Timer '{}' not found", name)))
                         }
                     }
-                },
-            )?
-            // now() -> u64
-            //
-            // Registered with `func_async` (not `func_async_result`): the pact
-            // declares `now: func() -> u64`, so the host must encode a bare
-            // `Value::U64`. Using `func_async_result` would wrap the output in
-            // `Value::Result`, which the guest then fails to decode as `u64`
-            // — the actor side appears to hang on the call.
-            .func_async(
-                "now",
-                move |_ctx: AsyncCtx<ActorStore>, _input: Value| async move {
-                    let now = SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_millis() as u64;
-                    Value::U64(now)
-                },
-            )?;
+                }),
+        );
+
+        // now() -> u64
+        //
+        // Registered with `plain_host_fn` (not `pact_result_host_fn`): the pact
+        // declares `now: func() -> u64`, so the host must encode a bare
+        // `Value::U64`. Using `pact_result_host_fn` would wrap the output in
+        // `Value::Result`, which the guest then fails to decode as `u64`
+        // — the actor side appears to hang on the call.
+        imports.define(
+            "theater:simple/timer",
+            "now",
+            plain_host_fn(move |_input: Value| async move {
+                let now = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis() as u64;
+                Value::U64(now)
+            }),
+        );
 
         ctx.mark_satisfied("theater:simple/timer");
         info!("Timer host functions registered");

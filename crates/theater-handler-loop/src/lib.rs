@@ -40,12 +40,11 @@ use tracing::{debug, error, info};
 pub struct LoopHandlerConfig {}
 
 use theater::actor::handle::ActorHandle;
-use theater::actor::store::ActorStore;
 use theater::handler::{Handler, HandlerContext, SharedActorInstance};
 use theater::shutdown::ShutdownReceiver;
 
 use theater::pack_bridge::{
-    parse_pact, AsyncCtx, HostLinkerBuilder, InterfaceImpl, LinkerError, TypeHash, Value, ValueType,
+    pact_result_host_fn, parse_pact, InterfaceImpl, TypeHash, Value, ValueType,
 };
 
 // ============================================================================
@@ -227,11 +226,11 @@ impl Handler for LoopHandler {
         })
     }
 
-    fn setup_host_functions_composite(
+    fn register_host_functions(
         &mut self,
-        builder: &mut HostLinkerBuilder<'_, ActorStore>,
+        imports: &mut theater::pack_bridge::HostImports,
         ctx: &mut HandlerContext,
-    ) -> Result<(), LinkerError> {
+    ) -> anyhow::Result<()> {
         info!("Setting up Loop host functions");
 
         if ctx.is_satisfied("theater:simple/loop") {
@@ -258,15 +257,14 @@ impl Handler for LoopHandler {
 
         let state_for_stop = state.clone();
 
-        builder
-            .interface("theater:simple/loop")?
-            // ----------------------------------------------------------------
-            // start-loop(initial-state: list<u8>) -> result<_, string>
-            // ----------------------------------------------------------------
-            .func_async_result(
-                "start-loop",
-                move |_ctx: AsyncCtx<ActorStore>, input: Value| {
-                    let state = state.clone();
+        // ----------------------------------------------------------------
+        // start-loop(initial-state: list<u8>) -> result<_, string>
+        // ----------------------------------------------------------------
+        imports.define(
+            "theater:simple/loop",
+            "start-loop",
+            pact_result_host_fn(move |input: Value| {
+                let state = state.clone();
                     let actor_handle_arc = actor_handle_arc.clone();
                     let shutdown_receiver_arc = shutdown_receiver_arc.clone();
                     let loop_started_notify = loop_started_notify.clone();
@@ -414,26 +412,28 @@ impl Handler for LoopHandler {
 
                         Ok::<Value, Value>(Value::Tuple(vec![]))
                     }
-                },
-            )?
-            // ----------------------------------------------------------------
-            // stop-loop() -> result<_, string>
-            // ----------------------------------------------------------------
-            .func_async_result(
-                "stop-loop",
-                move |_ctx: AsyncCtx<ActorStore>, _input: Value| {
-                    let state = state_for_stop.clone();
-                    async move {
-                        if !state.is_running() {
-                            return Err(Value::String("Loop is not running".to_string()));
-                        }
+                }),
+        );
 
-                        state.stop();
-                        info!("Loop stop requested");
-                        Ok::<Value, Value>(Value::Tuple(vec![]))
+        // ----------------------------------------------------------------
+        // stop-loop() -> result<_, string>
+        // ----------------------------------------------------------------
+        imports.define(
+            "theater:simple/loop",
+            "stop-loop",
+            pact_result_host_fn(move |_input: Value| {
+                let state = state_for_stop.clone();
+                async move {
+                    if !state.is_running() {
+                        return Err(Value::String("Loop is not running".to_string()));
                     }
-                },
-            )?;
+
+                    state.stop();
+                    info!("Loop stop requested");
+                    Ok::<Value, Value>(Value::Tuple(vec![]))
+                }
+            }),
+        );
 
         ctx.mark_satisfied("theater:simple/loop");
         info!("Loop host functions set up successfully");
