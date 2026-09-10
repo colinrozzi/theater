@@ -7,4 +7,4 @@ description = "A Theater actor with message server capabilities"
 type = "message-server"
 
 [[handler]]
-type = "runtime"
+type = "self"

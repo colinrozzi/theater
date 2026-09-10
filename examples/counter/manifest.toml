@@ -3,7 +3,7 @@ version = "0.1.0"
 package = "target/wasm32-unknown-unknown/release/counter_actor.wasm"
 
 [[handler]]
-type = "runtime"
+type = "self"
 
 # Inter-actor messaging (register / send / handle-send).
 [[handler]]

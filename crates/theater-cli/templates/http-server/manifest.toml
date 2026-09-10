@@ -4,7 +4,7 @@ package = "./target/wasm32-unknown-unknown/release/{{project_name_snake}}.wasm"
 description = "A basic HTTP server built with Theater WebAssembly actors"
 
 [[handler]]
-type = "runtime"
+type = "self"
 
 [[handler]]
 type = "http-framework"

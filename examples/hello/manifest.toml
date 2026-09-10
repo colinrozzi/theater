@@ -4,4 +4,4 @@ package = "target/wasm32-unknown-unknown/release/hello_actor.wasm"
 
 # Every actor gets `theater:simple/self` (log / shutdown).
 [[handler]]
-type = "runtime"
+type = "self"
