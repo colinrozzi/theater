@@ -1,11 +1,12 @@
 //! Contract enforcement integration test.
 //!
-//! State lives inside the module now, so the runtime validates a call's own
-//! params and return against the actor's pact declarations (records, variants,
-//! nested types). This drives the `contract-test` actor through its typed
-//! actions and confirms:
+//! State lives inside the module now, and interface compatibility is guaranteed
+//! at load time by the runtime's InterfaceHashMismatch gate (the per-call
+//! `validate_value_in_type_space` return-type check was retired with the engine
+//! migration). This drives the `contract-test` actor through its typed actions
+//! and confirms:
 //! 1. rich typed values (records, variants, nested types) round-trip across the
-//!    boundary and the actor's returns pass the runtime's return-type validation;
+//!    boundary intact — the actor's typed returns decode to the expected shapes;
 //! 2. the actor's in-module state is inspectable via its `get-state` export and
 //!    reflects the mutations its actions make.
 //!
@@ -18,7 +19,9 @@ use theater::actor::store::ActorStore;
 use theater::chain::StateChain;
 use theater::id::TheaterId;
 use theater::messages::TheaterCommand;
-use theater::pack_bridge::{decode_value, AsyncRuntime, Ctx, PackInstance, Value};
+use theater::pack_bridge::{
+    decode_value, plain_host_fn, CachingPackRuntime, HostImports, PackInstance, Value, WasmEngine,
+};
 use tokio::sync::mpsc;
 use tokio::sync::RwLock as SyncRwLock;
 use tracing::info;
@@ -41,7 +44,7 @@ async fn create_instance() -> PackInstance {
     });
     let wasm_bytes = common::helpers::link_self_contained(member);
 
-    let runtime = AsyncRuntime::new();
+    let runtime = CachingPackRuntime::new();
     let actor_id = TheaterId::generate();
     let (theater_tx, _theater_rx) = mpsc::unbounded_channel::<TheaterCommand>();
     let (operation_tx, _operation_rx) = mpsc::channel(10);
@@ -52,36 +55,32 @@ async fn create_instance() -> PackInstance {
 
     let actor_store = ActorStore::new(actor_id, theater_tx.clone(), actor_handle, chain);
 
-    let mut instance = PackInstance::new(
-        "contract-test",
-        &wasm_bytes,
-        &runtime,
-        actor_store,
-        |builder| {
-            builder.interface("theater:simple/self")?.func_typed(
-                "log",
-                |_ctx: &mut Ctx<'_, ActorStore>, input: Value| {
-                    let msg = match input {
-                        Value::String(s) => s,
-                        _ => format!("{:?}", input),
-                    };
-                    info!("[ACTOR LOG] {}", msg);
-                    Value::Tuple(vec![])
-                },
-            )?;
-            Ok(())
-        },
-    )
-    .await
-    .expect("Failed to create PackInstance");
+    let mut imports = HostImports::new();
+    imports.define(
+        "theater:simple/self",
+        "log",
+        plain_host_fn(|input: Value| async move {
+            let msg = match input {
+                Value::String(s) => s,
+                _ => format!("{:?}", input),
+            };
+            info!("[ACTOR LOG] {}", msg);
+            Value::Tuple(vec![])
+        }),
+    );
 
-    // Cache types so validation is active
-    instance
-        .cache_function_types()
+    let wasm_bytes = Arc::new(wasm_bytes);
+    let (module, _cache_hit) = runtime
+        .compile_cached(&wasm_bytes)
         .await
-        .expect("Failed to cache function types");
+        .expect("Failed to compile WASM module");
+    let instance = runtime
+        .engine()
+        .instantiate(&module, imports)
+        .await
+        .expect("Failed to instantiate Pack module");
 
-    instance
+    PackInstance::new("contract-test", instance, actor_store, wasm_bytes)
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -117,8 +116,8 @@ async fn test_valid_typed_calls() {
         _ => panic!("Expected actor-state record, got: {:?}", state),
     }
 
-    // move-to(position) -> status. The runtime validates the return against the
-    // declared `result<status, string>`; a well-typed status variant passes.
+    // move-to(position) -> status. The typed return decodes to a well-formed
+    // status variant, proving the rich value round-trips across the boundary.
     let target = Value::Record {
         type_name: "position".into(),
         fields: vec![

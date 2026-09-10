@@ -5,11 +5,10 @@
 //! and checks the interceptor/chain-log path end to end.
 //!
 //! It:
-//!   1. links the `replay-test` actor member + the packr **bundled** allocator
-//!      (`packr::DEFAULT_ALLOCATOR_WASM`) into a self-contained composite via
-//!      `packr::link` (own memory, `__pack_alloc`, host imports only);
-//!   2. loads it through `PackInstance::new_with_interceptor` — exercising the
-//!      0.10.x self-contained loader (`assert_self_contained`);
+//!   1. reads the plain-built `replay-test` actor member (self-contained: own
+//!      memory + `__pack_alloc`, host imports only — no composition step);
+//!   2. instantiates it via the packr-core capture engine with the interceptor
+//!      installed on the `HostImports` registry (record/replay, both directions);
 //!   3. drives `handle-send`, whose handler logs STATIC string literals, and
 //!      asserts those strings survive marshalling into the host boundary intact
 //!      (the `.rodata`/static-data path — numeric fixtures hide data bugs);
@@ -21,15 +20,16 @@
 
 use std::sync::{Arc, Mutex};
 
-use packr::abi::ValueType;
-
 use theater::actor::handle::ActorHandle;
 use theater::actor::store::ActorStore;
 use theater::chain::{ChainEvent, StateChain};
 use theater::id::TheaterId;
 use theater::interceptor::{RecordingInterceptor, ReplayRecordingInterceptor};
 use theater::messages::TheaterCommand;
-use theater::pack_bridge::{AsyncRuntime, CallInterceptor, Ctx, PackInstance, Value};
+use theater::pack_bridge::{
+    pact_result_host_fn, plain_host_fn, CachingPackRuntime, CallInterceptor, HostImports,
+    PackInstance, Value, ValueType, WasmEngine,
+};
 
 use tokio::sync::mpsc;
 use tokio::sync::RwLock as SyncRwLock;
@@ -72,7 +72,7 @@ async fn drive_handle_send(
 ) -> DriveResult {
     let captured: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
 
-    let runtime = AsyncRuntime::new();
+    let runtime = CachingPackRuntime::new();
     let actor_id = TheaterId::generate();
     let (theater_tx, _theater_rx) = mpsc::unbounded_channel::<TheaterCommand>();
     let (op_tx, _op_rx) = mpsc::channel(10);
@@ -88,42 +88,46 @@ async fn drive_handle_send(
     let handle = ActorHandle::new(op_tx, info_tx, ctl_tx);
     let store = ActorStore::new(actor_id, theater_tx, handle, chain.clone());
 
-    let cap = captured.clone();
-    let mut instance = PackInstance::new_with_interceptor(
-        "replay-test-self-contained",
-        composite,
-        &runtime,
-        store,
-        Some(interceptor),
-        move |builder| {
-            let cap_log = cap.clone();
-            builder.interface("theater:simple/self")?.func_typed(
-                "log",
-                move |_ctx: &mut Ctx<'_, ActorStore>, input: Value| {
-                    if let Value::String(s) = &input {
-                        cap_log.lock().unwrap().push(s.clone());
-                    }
-                    Value::Tuple(vec![])
-                },
-            )?;
-            // The member also imports message-server-host.register as a residual
-            // host import. handle-send never calls it, but the import must resolve
-            // at instantiate. Stub it returning Ok(()).
-            builder
-                .interface("theater:simple/message-server-host")?
-                .func_typed(
-                    "register",
-                    move |_ctx: &mut Ctx<'_, ActorStore>, _input: Value| Value::Result {
-                        ok_type: ValueType::Tuple(vec![]),
-                        err_type: ValueType::String,
-                        value: Ok(Box::new(Value::Tuple(vec![]))),
-                    },
-                )?;
-            Ok(())
-        },
-    )
-    .await
-    .expect("self-contained composite must load via the 0.10.x self-contained loader");
+    // Register the host imports, capturing the log strings; install the
+    // record/replay interceptor on the import registry (both directions).
+    let mut imports = HostImports::new();
+    let cap_log = captured.clone();
+    imports.define(
+        "theater:simple/self",
+        "log",
+        plain_host_fn(move |input: Value| {
+            let cap_log = cap_log.clone();
+            async move {
+                if let Value::String(s) = &input {
+                    cap_log.lock().unwrap().push(s.clone());
+                }
+                Value::Tuple(vec![])
+            }
+        }),
+    );
+    // The member also imports message-server-host.register as a residual host
+    // import. handle-send never calls it, but the import must resolve at
+    // instantiate. Stub it returning the pact ok(()) result.
+    imports.define(
+        "theater:simple/message-server-host",
+        "register",
+        pact_result_host_fn(
+            |_input: Value| async move { Ok::<Value, Value>(Value::Tuple(vec![])) },
+        ),
+    );
+    imports.with_interceptor(interceptor);
+
+    let composite = Arc::new(composite.to_vec());
+    let (module, _cache_hit) = runtime
+        .compile_cached(&composite)
+        .await
+        .expect("Failed to compile self-contained composite");
+    let instance = runtime
+        .engine()
+        .instantiate(&module, imports)
+        .await
+        .expect("self-contained composite must load via the 0.10.x self-contained loader");
+    let mut instance = PackInstance::new("replay-test-self-contained", instance, store, composite);
 
     // `handle-send(params: tuple<string, list<u8>>)` — state lives in the module,
     // so nothing is threaded in or out; the handler logs static strings.

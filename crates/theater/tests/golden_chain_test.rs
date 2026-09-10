@@ -23,7 +23,9 @@ use theater::actor::store::ActorStore;
 use theater::chain::StateChain;
 use theater::id::TheaterId;
 use theater::messages::TheaterCommand;
-use theater::pack_bridge::{decode_value, AsyncRuntime, Ctx, PackInstance, Value};
+use theater::pack_bridge::{
+    decode_value, plain_host_fn, CachingPackRuntime, HostImports, PackInstance, Value, WasmEngine,
+};
 use tokio::sync::mpsc;
 use tokio::sync::RwLock as SyncRwLock;
 use tracing::info;
@@ -32,7 +34,7 @@ mod common;
 
 /// Build a fresh `state-test` `PackInstance` (own store + chain + host `log`).
 async fn fresh_state_test_instance(wasm_bytes: &[u8]) -> PackInstance {
-    let runtime = AsyncRuntime::new();
+    let runtime = CachingPackRuntime::new();
     let actor_id = TheaterId::generate();
     let (theater_tx, _theater_rx) = mpsc::unbounded_channel::<TheaterCommand>();
     let (operation_tx, _operation_rx) = mpsc::channel(10);
@@ -42,20 +44,29 @@ async fn fresh_state_test_instance(wasm_bytes: &[u8]) -> PackInstance {
     let actor_handle = ActorHandle::new(operation_tx, info_tx, control_tx);
     let actor_store = ActorStore::new(actor_id, theater_tx, actor_handle, chain);
 
-    PackInstance::new("state-test", wasm_bytes, &runtime, actor_store, |builder| {
-        builder.interface("theater:simple/self")?.func_typed(
-            "log",
-            |_ctx: &mut Ctx<'_, ActorStore>, input: Value| {
-                if let Value::String(s) = &input {
-                    info!("[ACTOR LOG] {}", s);
-                }
-                Value::Tuple(vec![])
-            },
-        )?;
-        Ok(())
-    })
-    .await
-    .expect("Failed to create PackInstance")
+    let mut imports = HostImports::new();
+    imports.define(
+        "theater:simple/self",
+        "log",
+        plain_host_fn(|input: Value| async move {
+            if let Value::String(s) = &input {
+                info!("[ACTOR LOG] {}", s);
+            }
+            Value::Tuple(vec![])
+        }),
+    );
+
+    let wasm_bytes = Arc::new(wasm_bytes.to_vec());
+    let (module, _cache_hit) = runtime
+        .compile_cached(&wasm_bytes)
+        .await
+        .expect("Failed to compile WASM module");
+    let instance = runtime
+        .engine()
+        .instantiate(&module, imports)
+        .await
+        .expect("Failed to instantiate Pack module");
+    PackInstance::new("state-test", instance, actor_store, wasm_bytes)
 }
 
 /// Extract the `count` field from the actor's `get-state` record.

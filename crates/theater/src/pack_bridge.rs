@@ -26,7 +26,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use packr_core::backend::{WasmEngine, WasmInstance};
+use packr_core::backend::WasmInstance;
 use packr_wasmtime::WasmtimeEngine;
 
 use crate::actor::store::ActorStore;
@@ -61,7 +61,9 @@ pub use packr_abi::{GraphValue, Pattern};
 pub use packr_core::abi::{ConversionError, FromValue, Value, ValueType};
 
 // The capture-based host-import surface + the record/replay interceptor trait.
-pub use packr_core::{host_fn, CallInterceptor, HostError, HostFn, HostImports};
+// `WasmEngine` is re-exported so callers of `CachingPackRuntime::engine()` can
+// invoke `.instantiate(..)` without naming packr-core directly.
+pub use packr_core::{host_fn, CallInterceptor, HostError, HostFn, HostImports, WasmEngine};
 
 // Content-addressed metadata read from the module's embedded CGRF section, plus
 // the interface-hash primitives.

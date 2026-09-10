@@ -11,7 +11,9 @@ use theater::actor::store::ActorStore;
 use theater::chain::StateChain;
 use theater::id::TheaterId;
 use theater::messages::TheaterCommand;
-use theater::pack_bridge::{AsyncRuntime, Ctx, PackInstance, Value};
+use theater::pack_bridge::{
+    plain_host_fn, CachingPackRuntime, HostImports, PackInstance, Value, WasmEngine,
+};
 use tokio::sync::mpsc;
 use tokio::sync::RwLock as SyncRwLock;
 use tracing::info;
@@ -46,8 +48,8 @@ async fn test_composite_instance_basic() {
 
     info!("Loaded WASM bytes: {} bytes", wasm_bytes.len());
 
-    // Create the Composite runtime
-    let runtime = AsyncRuntime::new();
+    // Create the Composite runtime (packr-core capture engine + compile cache).
+    let runtime = CachingPackRuntime::new();
 
     // Create actor store components
     let actor_id = TheaterId::generate();
@@ -60,38 +62,35 @@ async fn test_composite_instance_basic() {
 
     let actor_store = ActorStore::new(actor_id, theater_tx.clone(), actor_handle, chain);
 
-    // Create the PackInstance with host functions
-    let result = PackInstance::new(
-        "composite-test",
-        &wasm_bytes,
-        &runtime,
-        actor_store,
-        |builder| {
-            // Register the log host function
-            builder.interface("theater:simple/self")?.func_typed(
-                "log",
-                |_ctx: &mut Ctx<'_, ActorStore>, input: Value| {
-                    // Extract the message from the Value
-                    let msg = match input {
-                        Value::String(s) => s,
-                        _ => format!("{:?}", input),
-                    };
-                    info!("[ACTOR LOG] {}", msg);
-                    // Return unit (empty tuple)
-                    Value::Tuple(vec![])
-                },
-            )?;
-            Ok(())
-        },
-    )
-    .await;
+    // Register the log host function on the capture-based import registry.
+    let mut imports = HostImports::new();
+    imports.define(
+        "theater:simple/self",
+        "log",
+        plain_host_fn(|input: Value| async move {
+            // Extract the message from the Value
+            let msg = match input {
+                Value::String(s) => s,
+                _ => format!("{:?}", input),
+            };
+            info!("[ACTOR LOG] {}", msg);
+            // Return unit (empty tuple)
+            Value::Tuple(vec![])
+        }),
+    );
 
-    let mut instance = match result {
-        Ok(inst) => inst,
-        Err(e) => {
-            panic!("Failed to create PackInstance: {}", e);
-        }
-    };
+    // Compile (through the cache) + instantiate with the host imports.
+    let wasm_bytes = Arc::new(wasm_bytes);
+    let (module, _cache_hit) = runtime
+        .compile_cached(&wasm_bytes)
+        .await
+        .expect("Failed to compile WASM module");
+    let instance = runtime
+        .engine()
+        .instantiate(&module, imports)
+        .await
+        .expect("Failed to instantiate Pack module");
+    let mut instance = PackInstance::new("composite-test", instance, actor_store, wasm_bytes);
 
     info!("PackInstance created successfully");
 

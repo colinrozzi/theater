@@ -9,7 +9,9 @@ use theater::actor::store::ActorStore;
 use theater::chain::StateChain;
 use theater::id::TheaterId;
 use theater::messages::TheaterCommand;
-use theater::pack_bridge::{AsyncRuntime, Ctx, PackInstance, Value};
+use theater::pack_bridge::{
+    decode_value, plain_host_fn, CachingPackRuntime, HostImports, PackInstance, Value, WasmEngine,
+};
 use tokio::sync::mpsc;
 use tokio::sync::RwLock as SyncRwLock;
 use tracing::info;
@@ -31,7 +33,7 @@ async fn create_instance() -> PackInstance {
     });
     let wasm_bytes = common::helpers::link_self_contained(member);
 
-    let runtime = AsyncRuntime::new();
+    let runtime = CachingPackRuntime::new();
     let actor_id = TheaterId::generate();
     let (theater_tx, _) = mpsc::unbounded_channel::<TheaterCommand>();
     let (operation_tx, _) = mpsc::channel(10);
@@ -42,34 +44,32 @@ async fn create_instance() -> PackInstance {
 
     let actor_store = ActorStore::new(actor_id, theater_tx.clone(), actor_handle, chain);
 
-    let mut instance = PackInstance::new(
-        "pact-contract-test",
-        &wasm_bytes,
-        &runtime,
-        actor_store,
-        |builder| {
-            builder.interface("theater:simple/self")?.func_typed(
-                "log",
-                |_ctx: &mut Ctx<'_, ActorStore>, input: Value| {
-                    let msg = match input {
-                        Value::String(s) => s,
-                        _ => format!("{:?}", input),
-                    };
-                    info!("[ACTOR LOG] {}", msg);
-                    Value::Tuple(vec![])
-                },
-            )?;
-            Ok(())
-        },
-    )
-    .await
-    .expect("Failed to create PackInstance");
+    let mut imports = HostImports::new();
+    imports.define(
+        "theater:simple/self",
+        "log",
+        plain_host_fn(|input: Value| async move {
+            let msg = match input {
+                Value::String(s) => s,
+                _ => format!("{:?}", input),
+            };
+            info!("[ACTOR LOG] {}", msg);
+            Value::Tuple(vec![])
+        }),
+    );
 
-    instance
-        .cache_function_types()
+    let wasm_bytes = Arc::new(wasm_bytes);
+    let (module, _cache_hit) = runtime
+        .compile_cached(&wasm_bytes)
         .await
-        .expect("Failed to cache function types");
-    instance
+        .expect("Failed to compile WASM module");
+    let instance = runtime
+        .engine()
+        .instantiate(&module, imports)
+        .await
+        .expect("Failed to instantiate Pack module");
+
+    PackInstance::new("pact-contract-test", instance, actor_store, wasm_bytes)
 }
 
 /// Count the todo items in a `list` return value or an `actor-state` record.
@@ -121,7 +121,7 @@ async fn test_pact_file_todo_actor() {
         )
         .await
         .expect("add should succeed");
-    let added = packr::abi::decode(&bytes).expect("decode todo-item");
+    let added = decode_value(&bytes).expect("decode todo-item");
     match &added {
         Value::Record { type_name, .. } => assert_eq!(type_name, "todo-item"),
         _ => panic!("add should return a todo-item, got {:?}", added),
@@ -140,7 +140,7 @@ async fn test_pact_file_todo_actor() {
         .call_function_with_value("theater:todo/actions.list", Value::Tuple(vec![]))
         .await
         .expect("list should succeed");
-    let listed = packr::abi::decode(&bytes).expect("decode list");
+    let listed = decode_value(&bytes).expect("decode list");
     assert_eq!(todo_items(&listed).len(), 2, "two todos after two adds");
 
     // toggle(id=1), then confirm item 1 is done — both via list and get-state.
@@ -156,7 +156,7 @@ async fn test_pact_file_todo_actor() {
         .call_function_with_value("theater:todo/actions.list", Value::Tuple(vec![]))
         .await
         .expect("list should succeed after toggle");
-    let listed = packr::abi::decode(&bytes).expect("decode list");
+    let listed = decode_value(&bytes).expect("decode list");
     let items = todo_items(&listed);
     assert!(items.iter().any(item_done), "toggled item should be done");
 
