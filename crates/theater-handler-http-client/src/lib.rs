@@ -28,13 +28,12 @@ use std::sync::Arc;
 use tracing::{debug, error, info};
 
 use theater::actor::handle::ActorHandle;
-use theater::actor::store::ActorStore;
 use theater::config::actor_manifest::{HandlerConfig, HttpClientHandlerConfig};
 use theater::handler::{Handler, HandlerContext, SharedActorInstance};
 use theater::shutdown::ShutdownReceiver;
 
 use theater::pack_bridge::{
-    parse_pact, AsyncCtx, HostLinkerBuilder, InterfaceImpl, LinkerError, TypeHash, Value, ValueType,
+    pact_result_host_fn, parse_pact, InterfaceImpl, TypeHash, Value, ValueType,
 };
 
 // ============================================================================
@@ -132,11 +131,11 @@ impl Handler for HttpClientHandler {
         })
     }
 
-    fn setup_host_functions_composite(
+    fn register_host_functions(
         &mut self,
-        builder: &mut HostLinkerBuilder<'_, ActorStore>,
+        imports: &mut theater::pack_bridge::HostImports,
         ctx: &mut HandlerContext,
-    ) -> Result<(), LinkerError> {
+    ) -> anyhow::Result<()> {
         info!("Setting up HTTP client host functions");
 
         if ctx.is_satisfied("theater:simple/http-client") {
@@ -147,39 +146,35 @@ impl Handler for HttpClientHandler {
         let client = self.client.clone();
         let allowed_hosts = Arc::new(self.config.allowed_hosts.clone());
 
-        builder
-            .interface("theater:simple/http-client")?
-            // request(req: http-request) -> result<http-response, string>
-            .func_async_result(
-                "request",
-                move |_ctx: AsyncCtx<ActorStore>, input: Value| {
-                    let client = client.clone();
-                    let allowed = allowed_hosts.clone();
-                    async move {
-                        let parts = parse_http_request(&input)?;
+        // request(req: http-request) -> result<http-response, string>
+        imports.define(
+            "theater:simple/http-client",
+            "request",
+            pact_result_host_fn(move |input: Value| {
+                let client = client.clone();
+                let allowed = allowed_hosts.clone();
+                async move {
+                    let parts = parse_http_request(&input)?;
 
-                        // Permission check: the URL host must be allowlisted.
-                        let url = reqwest::Url::parse(&parts.url).map_err(|e| {
-                            Value::String(format!(
-                                "http-client: invalid url '{}': {}",
-                                parts.url, e
-                            ))
-                        })?;
-                        let host = url.host_str().ok_or_else(|| {
-                            Value::String(format!("http-client: url '{}' has no host", parts.url))
-                        })?;
-                        if !allowed.iter().any(|h| h == host) {
-                            return Err(Value::String(format!(
-                                "http-client: host '{}' not in allowed_hosts",
-                                host
-                            )));
-                        }
-
-                        debug!("http-client: {} {}", parts.method, parts.url);
-                        do_request(&client, parts).await
+                    // Permission check: the URL host must be allowlisted.
+                    let url = reqwest::Url::parse(&parts.url).map_err(|e| {
+                        Value::String(format!("http-client: invalid url '{}': {}", parts.url, e))
+                    })?;
+                    let host = url.host_str().ok_or_else(|| {
+                        Value::String(format!("http-client: url '{}' has no host", parts.url))
+                    })?;
+                    if !allowed.iter().any(|h| h == host) {
+                        return Err(Value::String(format!(
+                            "http-client: host '{}' not in allowed_hosts",
+                            host
+                        )));
                     }
-                },
-            )?;
+
+                    debug!("http-client: {} {}", parts.method, parts.url);
+                    do_request(&client, parts).await
+                }
+            }),
+        );
 
         ctx.mark_satisfied("theater:simple/http-client");
         Ok(())

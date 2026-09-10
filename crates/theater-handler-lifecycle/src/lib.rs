@@ -29,7 +29,6 @@ use std::sync::{Arc, Mutex};
 use tracing::{error, info};
 
 use theater::actor::handle::ActorHandle;
-use theater::actor::store::ActorStore;
 use theater::chain::ChainEvent;
 use theater::events::decode_chain_event_payload;
 use theater::handler::{Handler, HandlerContext, SharedActorInstance};
@@ -41,8 +40,7 @@ use tokio::sync::mpsc;
 use tokio::sync::mpsc::UnboundedSender;
 
 use theater::pack_bridge::{
-    parse_pact, AsyncCtx, HostLinkerBuilder, InterfaceImpl, LinkerError, Pattern, TypeHash, Value,
-    ValueType,
+    pact_result_host_fn, parse_pact, InterfaceImpl, Pattern, TypeHash, Value, ValueType,
 };
 
 /// Import side: `link`/`monitor` host functions the actor calls.
@@ -242,14 +240,18 @@ impl Handler for LifecycleHandler {
         })
     }
 
-    fn setup_host_functions_composite(
+    fn register_host_functions(
         &mut self,
-        builder: &mut HostLinkerBuilder<'_, ActorStore>,
+        imports: &mut theater::pack_bridge::HostImports,
         ctx: &mut HandlerContext,
-    ) -> Result<(), LinkerError> {
+    ) -> anyhow::Result<()> {
         if ctx.is_satisfied("theater:simple/lifecycle") {
             return Ok(());
         }
+
+        let id = ctx
+            .actor_id
+            .ok_or_else(|| anyhow::anyhow!("actor_id not set in HandlerContext"))?;
 
         let link = (
             self.theater_tx.clone(),
@@ -274,14 +276,15 @@ impl Handler for LifecycleHandler {
             self.subs.clone(),
         );
 
-        builder
-            .interface("theater:simple/lifecycle")?
-            // link(subject) -> result<_, string>
-            .func_async_result("link", move |ctx: AsyncCtx<ActorStore>, input: Value| {
+        // link(subject) -> result<_, string>
+        imports.define(
+            "theater:simple/lifecycle",
+            "link",
+            pact_result_host_fn(move |input: Value| {
                 let (theater_tx, event_tx, subs, self_id) = link.clone();
                 async move {
                     add_subscription(
-                        &ctx,
+                        id,
                         &input,
                         &theater_tx,
                         event_tx,
@@ -291,13 +294,17 @@ impl Handler for LifecycleHandler {
                         Target::StopSelf,
                     )
                 }
-            })?
-            // monitor(subject) -> result<_, string>
-            .func_async_result("monitor", move |ctx: AsyncCtx<ActorStore>, input: Value| {
+            }),
+        );
+        // monitor(subject) -> result<_, string>
+        imports.define(
+            "theater:simple/lifecycle",
+            "monitor",
+            pact_result_host_fn(move |input: Value| {
                 let (theater_tx, event_tx, subs, self_id) = monitor.clone();
                 async move {
                     add_subscription(
-                        &ctx,
+                        id,
                         &input,
                         &theater_tx,
                         event_tx,
@@ -307,30 +314,30 @@ impl Handler for LifecycleHandler {
                         Target::DeliverToWasm,
                     )
                 }
-            })?
-            // unlink(subject) -> result<_, string>
-            .func_async_result("unlink", move |_ctx: AsyncCtx<ActorStore>, input: Value| {
+            }),
+        );
+        // unlink(subject) -> result<_, string>
+        imports.define(
+            "theater:simple/lifecycle",
+            "unlink",
+            pact_result_host_fn(move |input: Value| {
                 let (theater_tx, event_tx, subs) = unlink.clone();
                 async move {
                     remove_subscription(&input, &theater_tx, event_tx, &subs, Target::StopSelf)
                 }
-            })?
-            // unmonitor(subject) -> result<_, string>
-            .func_async_result(
-                "unmonitor",
-                move |_ctx: AsyncCtx<ActorStore>, input: Value| {
-                    let (theater_tx, event_tx, subs) = unmonitor.clone();
-                    async move {
-                        remove_subscription(
-                            &input,
-                            &theater_tx,
-                            event_tx,
-                            &subs,
-                            Target::DeliverToWasm,
-                        )
-                    }
-                },
-            )?;
+            }),
+        );
+        // unmonitor(subject) -> result<_, string>
+        imports.define(
+            "theater:simple/lifecycle",
+            "unmonitor",
+            pact_result_host_fn(move |input: Value| {
+                let (theater_tx, event_tx, subs) = unmonitor.clone();
+                async move {
+                    remove_subscription(&input, &theater_tx, event_tx, &subs, Target::DeliverToWasm)
+                }
+            }),
+        );
 
         ctx.mark_satisfied("theater:simple/lifecycle");
         info!("lifecycle handler host functions registered");
@@ -375,7 +382,7 @@ impl Handler for LifecycleHandler {
 /// this handler to the subject's chain on the first subscription to it.
 #[allow(clippy::too_many_arguments)]
 fn add_subscription(
-    ctx: &AsyncCtx<ActorStore>,
+    id: TheaterId,
     input: &Value,
     theater_tx: &UnboundedSender<TheaterCommand>,
     event_tx: mpsc::Sender<(TheaterId, ChainEvent)>,
@@ -385,7 +392,7 @@ fn add_subscription(
     target: Target,
 ) -> Result<Value, Value> {
     let subject = parse_subject(input)?;
-    *self_id.lock().unwrap() = Some(ctx.data().id);
+    *self_id.lock().unwrap() = Some(id);
     let first = {
         let mut subs = subs.lock().unwrap();
         let entry = subs.entry(subject).or_default();

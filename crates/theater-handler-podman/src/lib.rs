@@ -16,7 +16,6 @@ use tokio::process::Command;
 use tracing::{debug, info};
 
 use theater::actor::handle::ActorHandle;
-use theater::actor::store::ActorStore;
 use theater::config::actor_manifest::HandlerConfig;
 use theater::handler::{Handler, HandlerContext, SharedActorInstance};
 use theater::shutdown::ShutdownReceiver;
@@ -28,7 +27,7 @@ use theater::shutdown::ShutdownReceiver;
 pub struct PodmanHandlerConfig {}
 
 use theater::pack_bridge::{
-    parse_pact, AsyncCtx, HostLinkerBuilder, InterfaceImpl, LinkerError, TypeHash, Value, ValueType,
+    pact_result_host_fn, parse_pact, InterfaceImpl, TypeHash, Value, ValueType,
 };
 
 // ============================================================================
@@ -112,11 +111,11 @@ impl Handler for PodmanHandler {
         })
     }
 
-    fn setup_host_functions_composite(
+    fn register_host_functions(
         &mut self,
-        builder: &mut HostLinkerBuilder<'_, ActorStore>,
+        imports: &mut theater::pack_bridge::HostImports,
         ctx: &mut HandlerContext,
-    ) -> Result<(), LinkerError> {
+    ) -> anyhow::Result<()> {
         info!("Setting up podman host functions");
 
         if ctx.is_satisfied("theater:simple/podman") {
@@ -124,57 +123,62 @@ impl Handler for PodmanHandler {
             return Ok(());
         }
 
-        builder
-            .interface("theater:simple/podman")?
-            // run(spec: container-spec) -> result<string, string>
-            .func_async_result(
-                "run",
-                move |_ctx: AsyncCtx<ActorStore>, input: Value| async move {
-                    let spec = parse_container_spec(&input)?;
-                    debug!("podman.run name={} image={}", spec.name, spec.image);
-                    run_container(spec)
-                        .await
-                        .map(Value::String)
-                        .map_err(Value::String)
-                },
-            )?
-            // stop(name: string) -> result<_, string>
-            .func_async_result(
-                "stop",
-                move |_ctx: AsyncCtx<ActorStore>, input: Value| async move {
-                    let name = parse_string(&input)?;
-                    debug!("podman.stop name={}", name);
-                    stop_container(&name)
-                        .await
-                        .map(|_| Value::Tuple(Vec::new()))
-                        .map_err(Value::String)
-                },
-            )?
-            // rm(name: string, force: bool) -> result<_, string>
-            .func_async_result(
-                "rm",
-                move |_ctx: AsyncCtx<ActorStore>, input: Value| async move {
-                    let (name, force) = parse_rm_args(&input)?;
-                    debug!("podman.rm name={} force={}", name, force);
-                    rm_container(&name, force)
-                        .await
-                        .map(|_| Value::Tuple(Vec::new()))
-                        .map_err(Value::String)
-                },
-            )?
-            // list() -> result<list<container-info>, string>
-            .func_async_result(
-                "list",
-                move |_ctx: AsyncCtx<ActorStore>, _input: Value| async move {
-                    list_containers()
-                        .await
-                        .map(|items| Value::List {
-                            elem_type: ValueType::Record("container-info".to_string()),
-                            items,
-                        })
-                        .map_err(Value::String)
-                },
-            )?;
+        // run(spec: container-spec) -> result<string, string>
+        imports.define(
+            "theater:simple/podman",
+            "run",
+            pact_result_host_fn(move |input: Value| async move {
+                let spec = parse_container_spec(&input)?;
+                debug!("podman.run name={} image={}", spec.name, spec.image);
+                run_container(spec)
+                    .await
+                    .map(Value::String)
+                    .map_err(Value::String)
+            }),
+        );
+
+        // stop(name: string) -> result<_, string>
+        imports.define(
+            "theater:simple/podman",
+            "stop",
+            pact_result_host_fn(move |input: Value| async move {
+                let name = parse_string(&input)?;
+                debug!("podman.stop name={}", name);
+                stop_container(&name)
+                    .await
+                    .map(|_| Value::Tuple(Vec::new()))
+                    .map_err(Value::String)
+            }),
+        );
+
+        // rm(name: string, force: bool) -> result<_, string>
+        imports.define(
+            "theater:simple/podman",
+            "rm",
+            pact_result_host_fn(move |input: Value| async move {
+                let (name, force) = parse_rm_args(&input)?;
+                debug!("podman.rm name={} force={}", name, force);
+                rm_container(&name, force)
+                    .await
+                    .map(|_| Value::Tuple(Vec::new()))
+                    .map_err(Value::String)
+            }),
+        );
+
+        // list() -> result<list<container-info>, string>
+        imports.define(
+            "theater:simple/podman",
+            "list",
+            pact_result_host_fn(move |_input: Value| async move {
+                list_containers()
+                    .await
+                    .map(|items| Value::List {
+                        elem_type: ValueType::Record("container-info".to_string()),
+                        items,
+                    })
+                    .map_err(Value::String)
+            }),
+        );
 
         ctx.mark_satisfied("theater:simple/podman");
         Ok(())

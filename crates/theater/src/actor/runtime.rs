@@ -16,9 +16,8 @@ use crate::handler::HandlerRegistry;
 use crate::id::TheaterId;
 use crate::interceptor::{RecordingInterceptor, ReplayRecordingInterceptor};
 use crate::messages::TheaterCommand;
-use crate::pack_bridge::{
-    CachingPackRuntime, CallInterceptor, HostLinkerBuilder, PackInstance, Value,
-};
+use crate::pack_bridge::{CachingPackRuntime, CallInterceptor, PackInstance, Value};
+use packr_core::WasmEngine;
 
 use crate::Result;
 use crate::ShutdownController;
@@ -300,59 +299,75 @@ impl ActorRuntime {
         // Create shutdown controller early so handlers can subscribe during setup
         let mut shutdown_controller = ShutdownController::new();
 
-        // Create handler context with shutdown controller access
+        // Create handler context with shutdown controller access. Host functions
+        // capture what they need from here (the theater command channel + the
+        // actor id) — the capture-based engine threads no store.
         let mut handler_ctx = HandlerContext::with_shutdown_controller(shutdown_controller.clone());
         handler_ctx.actor_id = Some(id);
-        let handlers_for_setup = &mut handlers;
+        handler_ctx.theater_tx = Some(theater_tx.clone());
 
-        let mut actor_instance = PackInstance::new_with_interceptor_cached(
-            name.clone(),
-            &wasm_bytes,
-            &pack_runtime,
-            actor_store,
-            interceptor,
-            |builder: &mut HostLinkerBuilder<'_, ActorStore>| {
-                // Set up host functions for each handler. The closure runs
-                // sync inside wasmtime's instantiation; per-handler timing
-                // here measures linker-wiring cost not compile cost.
-                for handler in handlers_for_setup.iter_mut() {
-                    debug!(
-                        "Setting up Composite host functions for handler '{}'",
-                        handler.name()
-                    );
-                    match handler.setup_host_functions_composite(builder, &mut handler_ctx) {
-                        Ok(()) => {
-                            debug!(
-                                "Handler '{}' Composite host functions set up successfully",
-                                handler.name()
-                            );
-                        }
-                        Err(e) => {
-                            error!(
-                                "Handler '{}' Composite host functions FAILED: {:?}",
-                                handler.name(),
-                                e
-                            );
-                            return Err(e);
-                        }
-                    }
-                }
-                Ok(())
-            },
-        )
-        .await
-        .map_err(|e| {
-            // `{:#}` prints the full anyhow chain (all contexts + root cause),
-            // so an instantiation failure shows e.g. "Failed to instantiate Pack
-            // module: unknown import GOT.mem::__data_end" instead of just the
-            // top wrapper — critical for diagnosing PIC/version-skew deploys.
-            let err = ActorRuntimeError::WasmInstantiationFailed {
-                id,
-                detail: format!("{:#}", e),
-            };
-            error!("{}", err);
-            err
-        })?;
+        // Build the actor's host-import registry by letting each handler register
+        // its host functions. Runs synchronously (no engine involvement yet);
+        // per-handler timing here measures registration cost not compile cost.
+        let mut imports = packr_core::HostImports::new();
+        for handler in handlers.iter_mut() {
+            debug!(
+                "Registering host functions for handler '{}'",
+                handler.name()
+            );
+            handler
+                .register_host_functions(&mut imports, &mut handler_ctx)
+                .map_err(|e| {
+                    let err = ActorRuntimeError::WasmInstantiationFailed {
+                        id,
+                        detail: format!(
+                            "Handler '{}' host-function registration failed: {:#}",
+                            handler.name(),
+                            e
+                        ),
+                    };
+                    error!("{}", err);
+                    err
+                })?;
+        }
+
+        // Install the record/replay interceptor for both directions (host imports
+        // and exports).
+        if let Some(rec) = interceptor {
+            imports.with_interceptor(rec);
+        }
+
+        // Compile (through the cache) + instantiate with the capture-based host
+        // imports. `{:#}` prints the full anyhow chain (all contexts + root
+        // cause), so an instantiation failure shows e.g. "failed to instantiate
+        // module: unknown import GOT.mem::__data_end" instead of just the top
+        // wrapper — critical for diagnosing PIC/version-skew deploys.
+        let wasm_bytes = Arc::new(wasm_bytes);
+        let (module, _cache_hit) = pack_runtime
+            .compile_cached(&wasm_bytes)
+            .await
+            .map_err(|e| {
+                let err = ActorRuntimeError::WasmInstantiationFailed {
+                    id,
+                    detail: format!("{:#}", e),
+                };
+                error!("{}", err);
+                err
+            })?;
+        let instance = pack_runtime
+            .engine()
+            .instantiate(&module, imports)
+            .await
+            .map_err(|e| {
+                let err = ActorRuntimeError::WasmInstantiationFailed {
+                    id,
+                    detail: format!("{:#}", e),
+                };
+                error!("{}", err);
+                err
+            })?;
+        let mut actor_instance =
+            PackInstance::new(name.clone(), instance, actor_store, wasm_bytes.clone());
 
         debug!("PackInstance created successfully");
         debug!(
@@ -471,15 +486,6 @@ impl ActorRuntime {
                 }
 
                 info!("All interface hashes verified for actor {}", id);
-
-                // Cache function type info for host-side validation.
-                // This is mandatory — we guarantee type safety to actors.
-                actor_instance.cache_function_types().await.map_err(|e| {
-                    ActorRuntimeError::FunctionTypeCacheFailed {
-                        id,
-                        detail: format!("{:?}", e),
-                    }
-                })?;
             }
             Err(e) => {
                 // Actor doesn't have __pack_types metadata - FATAL

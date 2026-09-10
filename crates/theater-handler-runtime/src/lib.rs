@@ -13,7 +13,6 @@
 
 use serde::{Deserialize, Serialize};
 use theater::actor::handle::ActorHandle;
-use theater::actor::store::ActorStore;
 use theater::config::permissions::RuntimePermissions;
 
 /// Configuration for the runtime CONTROL handler (theater:simple/runtime).
@@ -26,7 +25,7 @@ use theater::messages::TheaterCommand;
 use theater::shutdown::ShutdownReceiver;
 
 use theater::pack_bridge::{
-    parse_pact, AsyncCtx, HostLinkerBuilder, InterfaceImpl, LinkerError, TypeHash, Value, ValueType,
+    pact_result_host_fn, parse_pact, InterfaceImpl, TypeHash, Value, ValueType,
 };
 
 use anyhow::Result;
@@ -171,11 +170,11 @@ impl Handler for RuntimeHandler {
         vec![runtime_interface()]
     }
 
-    fn setup_host_functions_composite(
+    fn register_host_functions(
         &mut self,
-        builder: &mut HostLinkerBuilder<'_, ActorStore>,
+        imports: &mut theater::pack_bridge::HostImports,
         ctx: &mut HandlerContext,
-    ) -> Result<(), LinkerError> {
+    ) -> anyhow::Result<()> {
         info!("Setting up runtime (system) host functions (Pack)");
         if ctx.is_satisfied("theater:simple/runtime") {
             info!("theater:simple/runtime already satisfied by another handler, skipping");
@@ -184,34 +183,48 @@ impl Handler for RuntimeHandler {
 
         let event_tx = self.event_tx.clone();
         let permissions = self.permissions.clone();
+        let theater_tx = ctx
+            .theater_tx
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("theater_tx not set in HandlerContext"))?;
 
-        builder
-            .interface("theater:simple/runtime")?
-            // shutdown-runtime: func() -> result<_, runtime-error>   (mutate)
-            .func_async_result("shutdown-runtime", {
+        // shutdown-runtime: func() -> result<_, runtime-error>   (mutate)
+        imports.define(
+            "theater:simple/runtime",
+            "shutdown-runtime",
+            pact_result_host_fn({
                 let permissions = permissions.clone();
-                move |ctx: AsyncCtx<ActorStore>, _input: Value| {
+                let theater_tx = theater_tx.clone();
+                move |_input: Value| {
                     let permissions = permissions.clone();
+                    let theater_tx = theater_tx.clone();
                     async move {
                         require(&permissions, true)?;
-                        let tx = ctx.data().theater_tx.clone();
+                        let tx = theater_tx.clone();
                         if tx.send(TheaterCommand::ShutdownRuntime).is_err() {
                             return Err(Value::from(RuntimeError::RuntimeUnavailable));
                         }
                         Ok(Value::Tuple(vec![]))
                     }
                 }
-            })?
-            // subscribe-to-spawns: func() -> result<_, runtime-error>   (inspect)
-            .func_async_result("subscribe-to-spawns", {
+            }),
+        );
+
+        // subscribe-to-spawns: func() -> result<_, runtime-error>   (inspect)
+        imports.define(
+            "theater:simple/runtime",
+            "subscribe-to-spawns",
+            pact_result_host_fn({
                 let event_tx = event_tx.clone();
                 let permissions = permissions.clone();
-                move |ctx: AsyncCtx<ActorStore>, _input: Value| {
+                let theater_tx = theater_tx.clone();
+                move |_input: Value| {
                     let event_tx = event_tx.clone();
                     let permissions = permissions.clone();
+                    let theater_tx = theater_tx.clone();
                     async move {
                         require(&permissions, false)?;
-                        let tx = ctx.data().theater_tx.clone();
+                        let tx = theater_tx.clone();
                         if tx
                             .send(TheaterCommand::SubscribeToSpawns { event_tx })
                             .is_err()
@@ -221,17 +234,24 @@ impl Handler for RuntimeHandler {
                         Ok(Value::Tuple(vec![]))
                     }
                 }
-            })?
-            // unsubscribe-from-spawns: func() -> result<_, runtime-error>
-            .func_async_result("unsubscribe-from-spawns", {
+            }),
+        );
+
+        // unsubscribe-from-spawns: func() -> result<_, runtime-error>
+        imports.define(
+            "theater:simple/runtime",
+            "unsubscribe-from-spawns",
+            pact_result_host_fn({
                 let event_tx = event_tx.clone();
                 let permissions = permissions.clone();
-                move |ctx: AsyncCtx<ActorStore>, _input: Value| {
+                let theater_tx = theater_tx.clone();
+                move |_input: Value| {
                     let event_tx = event_tx.clone();
                     let permissions = permissions.clone();
+                    let theater_tx = theater_tx.clone();
                     async move {
                         require(&permissions, false)?;
-                        let tx = ctx.data().theater_tx.clone();
+                        let tx = theater_tx.clone();
                         if tx
                             .send(TheaterCommand::UnsubscribeFromSpawns { event_tx })
                             .is_err()
@@ -241,7 +261,8 @@ impl Handler for RuntimeHandler {
                         Ok(Value::Tuple(vec![]))
                     }
                 }
-            })?;
+            }),
+        );
 
         ctx.mark_satisfied("theater:simple/runtime");
         Ok(())

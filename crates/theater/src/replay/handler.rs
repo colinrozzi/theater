@@ -36,12 +36,11 @@ use tokio::sync::oneshot;
 use tracing::info;
 
 use crate::actor::handle::ActorHandle;
-use crate::actor::store::ActorStore;
 use crate::chain::ChainEvent;
 use crate::events::wasm::WasmEventData;
 use crate::events::ChainEventPayload;
 use crate::handler::{Handler, HandlerContext, SharedActorInstance};
-use crate::pack_bridge::{HostLinkerBuilder, InterfaceImpl, LinkerError, TypeHash};
+use crate::pack_bridge::{InterfaceImpl, TypeHash};
 use crate::shutdown::ShutdownReceiver;
 
 /// Shared state for tracking replay position across all stub functions.
@@ -95,7 +94,7 @@ impl ReplayState {
 
     /// Get the output for the current event.
     /// Assumes the event data contains a serialized HostFunctionCall.
-    pub fn current_output(&self) -> Option<packr::abi::Value> {
+    pub fn current_output(&self) -> Option<packr_core::abi::Value> {
         let event = self.current_event()?;
         let call = crate::events::decode_host_function_call(&event.data)?;
         Some(call.output)
@@ -222,7 +221,7 @@ impl Handler for ReplayHandler {
                             params,
                         }) => {
                             // Encode params Value back to CGRF bytes for the call
-                            let params_bytes = packr::abi::encode(&params).unwrap_or_default();
+                            let params_bytes = packr_core::abi::encode(&params).unwrap_or_default();
                             Some((idx, function_name, params_bytes))
                         }
                         _ => None,
@@ -375,11 +374,11 @@ impl Handler for ReplayHandler {
         })
     }
 
-    fn setup_host_functions_composite(
+    fn register_host_functions(
         &mut self,
-        _builder: &mut HostLinkerBuilder<'_, ActorStore>,
+        _imports: &mut packr_core::HostImports,
         _ctx: &mut HandlerContext,
-    ) -> Result<(), LinkerError> {
+    ) -> anyhow::Result<()> {
         // Host function interception is handled by ReplayRecordingInterceptor at the Pack level.
         // No stub functions needed here.
         Ok(())

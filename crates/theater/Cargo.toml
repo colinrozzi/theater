@@ -27,8 +27,16 @@ theater-store.workspace = true
 # WebAssembly runtime
 wasmtime = { version = "31.0", features = ["component-model", "async"] }
 
-# Pack runtime (Graph ABI-based WASM runtime)
+# Pack runtime (Graph ABI-based WASM runtime).
+# Engine axis: packr-core (backend-free traits + HostImports + metadata) +
+# packr-wasmtime (native backend) drive all wasm execution. `packr` (umbrella) is
+# retained ONLY as the `.pact` TEXT parser (parse_pact / PactInterface): packr-core
+# 0.24 ships the pact type-system AST + hash primitives but no source parser, so
+# pack_bridge's InterfaceImpl parses via the umbrella and hashes via packr-core.
+# Dropping it fully needs parse_pact surfaced in packr-core (pack-dev).
 packr.workspace = true
+packr-core.workspace = true
+packr-wasmtime.workspace = true
 packr-abi = { workspace = true, features = ["derive"] }
 async-trait = "0.1"
 sha2.workspace = true

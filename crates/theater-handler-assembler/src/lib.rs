@@ -9,13 +9,12 @@ use std::pin::Pin;
 use tracing::info;
 
 use theater::actor::handle::ActorHandle;
-use theater::actor::store::ActorStore;
 use theater::handler::{Handler, HandlerContext, SharedActorInstance};
 use theater::shutdown::ShutdownReceiver;
 
 // Pack integration
 use theater::pack_bridge::{
-    parse_pact, Ctx, HostLinkerBuilder, InterfaceImpl, LinkerError, TypeHash, Value, ValueType,
+    pact_result_host_fn, parse_pact, InterfaceImpl, TypeHash, Value, ValueType,
 };
 
 // ============================================================================
@@ -74,11 +73,11 @@ impl Handler for AssemblerHandler {
         })
     }
 
-    fn setup_host_functions_composite(
+    fn register_host_functions(
         &mut self,
-        builder: &mut HostLinkerBuilder<'_, ActorStore>,
+        imports: &mut theater::pack_bridge::HostImports,
         ctx: &mut HandlerContext,
-    ) -> Result<(), LinkerError> {
+    ) -> anyhow::Result<()> {
         info!("Setting up assembler host functions (Pack)");
 
         // Check if the interface is already satisfied by another handler
@@ -87,37 +86,36 @@ impl Handler for AssemblerHandler {
             return Ok(());
         }
 
-        builder
-            .interface("wisp:assembler/runtime")?
-            // wat-to-wasm: func(wat: string) -> result<list<u8>, string>
-            .func_typed_result(
-                "wat-to-wasm",
-                |_ctx: &mut Ctx<'_, ActorStore>, input: Value| {
-                    let wat = match input {
-                        Value::String(s) => s,
-                        _ => {
-                            return Err(Value::String("expected string argument".to_string()));
-                        }
-                    };
-
-                    info!("[ASSEMBLER] Converting {} bytes of WAT to WASM", wat.len());
-
-                    match wat::parse_str(&wat) {
-                        Ok(wasm_bytes) => {
-                            info!("[ASSEMBLER] Success: {} bytes of WASM", wasm_bytes.len());
-                            let bytes: Vec<Value> = wasm_bytes.into_iter().map(Value::U8).collect();
-                            Ok(Value::List {
-                                elem_type: ValueType::U8,
-                                items: bytes,
-                            })
-                        }
-                        Err(e) => {
-                            info!("[ASSEMBLER] Error: {}", e);
-                            Err(Value::String(e.to_string()))
-                        }
+        // wat-to-wasm: func(wat: string) -> result<list<u8>, string>
+        imports.define(
+            "wisp:assembler/runtime",
+            "wat-to-wasm",
+            pact_result_host_fn(move |input: Value| async move {
+                let wat = match input {
+                    Value::String(s) => s,
+                    _ => {
+                        return Err(Value::String("expected string argument".to_string()));
                     }
-                },
-            )?;
+                };
+
+                info!("[ASSEMBLER] Converting {} bytes of WAT to WASM", wat.len());
+
+                match wat::parse_str(&wat) {
+                    Ok(wasm_bytes) => {
+                        info!("[ASSEMBLER] Success: {} bytes of WASM", wasm_bytes.len());
+                        let bytes: Vec<Value> = wasm_bytes.into_iter().map(Value::U8).collect();
+                        Ok(Value::List {
+                            elem_type: ValueType::U8,
+                            items: bytes,
+                        })
+                    }
+                    Err(e) => {
+                        info!("[ASSEMBLER] Error: {}", e);
+                        Err(Value::String(e.to_string()))
+                    }
+                }
+            }),
+        );
 
         ctx.mark_satisfied("wisp:assembler/runtime");
         Ok(())

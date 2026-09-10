@@ -9,7 +9,6 @@ use tracing::info;
 
 use serde::{Deserialize, Serialize};
 use theater::actor::handle::ActorHandle;
-use theater::actor::store::ActorStore;
 use theater::config::permissions::RuntimePermissions;
 use theater::handler::{Handler, HandlerContext, SharedActorInstance};
 use theater::messages::TheaterCommand;
@@ -21,7 +20,7 @@ pub struct SelfHostConfig {}
 
 // Pack integration
 use theater::pack_bridge::{
-    parse_pact, AsyncCtx, Ctx, HostLinkerBuilder, InterfaceImpl, LinkerError, TypeHash, Value,
+    pact_result_host_fn, parse_pact, plain_host_fn, InterfaceImpl, TypeHash, Value,
 };
 
 // ============================================================================
@@ -105,11 +104,11 @@ impl Handler for SelfHandler {
         })
     }
 
-    fn setup_host_functions_composite(
+    fn register_host_functions(
         &mut self,
-        builder: &mut HostLinkerBuilder<'_, ActorStore>,
+        imports: &mut theater::pack_bridge::HostImports,
         ctx: &mut HandlerContext,
-    ) -> Result<(), LinkerError> {
+    ) -> anyhow::Result<()> {
         info!("Setting up runtime host functions (Pack)");
 
         // Check if the interface is already satisfied by another handler
@@ -120,92 +119,94 @@ impl Handler for SelfHandler {
 
         let theater_tx = self.theater_tx.clone();
         let show_logs = self.show_logs;
+        let id = ctx
+            .actor_id
+            .ok_or_else(|| anyhow::anyhow!("actor_id not set in HandlerContext"))?;
 
-        builder
-            .interface("theater:simple/self")?
-            // Log function: log(msg: string)
-            // Actor logs are printed directly to stdout (configurable via show_logs).
-            .func_typed("log", move |ctx: &mut Ctx<'_, ActorStore>, input: Value| {
+        // Log function: log(msg: string)
+        // Actor logs are printed directly to stdout (configurable via show_logs).
+        imports.define(
+            "theater:simple/self",
+            "log",
+            plain_host_fn(move |input: Value| async move {
                 if show_logs {
-                    let msg = match &input {
-                        Value::String(s) => s.as_str(),
-                        _ => return Value::Tuple(vec![]),
-                    };
-                    let store = ctx.data();
-                    let id = &store.id;
-                    // Print to stdout with short actor ID prefix
-                    let short_id = &id.to_string()[..8.min(id.to_string().len())];
-                    println!("[{}] {}", short_id, msg);
+                    if let Value::String(msg) = &input {
+                        // Print to stdout with short actor ID prefix
+                        let short_id = &id.to_string()[..8.min(id.to_string().len())];
+                        println!("[{}] {}", short_id, msg);
+                    }
                 }
                 Value::Tuple(vec![])
-            })?
-            // Self function: self() -> string
-            // Returns this actor's own id as a string.
-            .func_typed(
-                "self",
-                move |ctx: &mut Ctx<'_, ActorStore>, _input: Value| {
-                    Value::String(ctx.data().id.to_string())
-                },
-            )?
-            // Shutdown function: shutdown(data: option<list<u8>>) -> result<(), string>
-            .func_async_result(
-                "shutdown",
-                move |ctx: AsyncCtx<ActorStore>, input: Value| {
-                    let theater_tx = theater_tx.clone();
+            }),
+        );
 
-                    async move {
-                        // Parse input: option<list<u8>>
-                        let data: Option<Vec<u8>> = match input {
-                            Value::Option {
-                                value: Some(inner), ..
-                            } => match *inner {
-                                Value::List { items, .. } => {
-                                    let result: Result<Vec<u8>, _> = items
-                                        .into_iter()
-                                        .map(|v| match v {
-                                            Value::U8(b) => Ok(b),
-                                            _ => Err("expected u8"),
-                                        })
-                                        .collect();
-                                    result.ok()
-                                }
-                                _ => None,
-                            },
-                            Value::Option { value: None, .. } => None,
-                            _ => None,
-                        };
+        // Self function: self() -> string
+        // Returns this actor's own id as a string.
+        imports.define(
+            "theater:simple/self",
+            "self",
+            plain_host_fn(move |_input: Value| async move { Value::String(id.to_string()) }),
+        );
 
-                        let store = ctx.data();
-                        let actor_id = store.id;
+        // Shutdown function: shutdown(data: option<list<u8>>) -> result<(), string>
+        imports.define(
+            "theater:simple/self",
+            "shutdown",
+            pact_result_host_fn(move |input: Value| {
+                let theater_tx = theater_tx.clone();
 
-                        info!("[ACTOR] [{}] Shutdown requested: {:?}", actor_id, data);
-
-                        // Spawn the shutdown command send as a fire-and-forget task.
-                        // This prevents a deadlock where:
-                        // 1. shutdown() awaits send(), yielding to tokio
-                        // 2. Theater receives ShuttingDown, calls stop_actor
-                        // 3. stop_actor sends Shutdown to handler's control loop
-                        // 4. Control loop tries to join operation_handle
-                        // 5. But operation_handle is blocked waiting for shutdown() to return
-                        //
-                        // By spawning, shutdown() returns immediately, allowing the
-                        // operation to complete before the theater processes ShuttingDown.
-                        tokio::spawn(async move {
-                            if let Err(e) =
-                                theater_tx.send(TheaterCommand::ShuttingDown { actor_id, data })
-                            {
-                                tracing::error!(
-                                    "[ACTOR] [{}] Failed to send ShuttingDown: {}",
-                                    actor_id,
-                                    e
-                                );
+                async move {
+                    // Parse input: option<list<u8>>
+                    let data: Option<Vec<u8>> = match input {
+                        Value::Option {
+                            value: Some(inner), ..
+                        } => match *inner {
+                            Value::List { items, .. } => {
+                                let result: Result<Vec<u8>, _> = items
+                                    .into_iter()
+                                    .map(|v| match v {
+                                        Value::U8(b) => Ok(b),
+                                        _ => Err("expected u8"),
+                                    })
+                                    .collect();
+                                result.ok()
                             }
-                        });
+                            _ => None,
+                        },
+                        Value::Option { value: None, .. } => None,
+                        _ => None,
+                    };
 
-                        Ok::<Value, Value>(Value::Tuple(vec![]))
-                    }
-                },
-            )?;
+                    let actor_id = id;
+
+                    info!("[ACTOR] [{}] Shutdown requested: {:?}", actor_id, data);
+
+                    // Spawn the shutdown command send as a fire-and-forget task.
+                    // This prevents a deadlock where:
+                    // 1. shutdown() awaits send(), yielding to tokio
+                    // 2. Theater receives ShuttingDown, calls stop_actor
+                    // 3. stop_actor sends Shutdown to handler's control loop
+                    // 4. Control loop tries to join operation_handle
+                    // 5. But operation_handle is blocked waiting for shutdown() to return
+                    //
+                    // By spawning, shutdown() returns immediately, allowing the
+                    // operation to complete before the theater processes ShuttingDown.
+                    tokio::spawn(async move {
+                        if let Err(e) =
+                            theater_tx.send(TheaterCommand::ShuttingDown { actor_id, data })
+                        {
+                            tracing::error!(
+                                "[ACTOR] [{}] Failed to send ShuttingDown: {}",
+                                actor_id,
+                                e
+                            );
+                        }
+                    });
+
+                    Ok::<Value, Value>(Value::Tuple(vec![]))
+                }
+            }),
+        );
 
         ctx.mark_satisfied("theater:simple/self");
         Ok(())
@@ -249,9 +250,7 @@ impl Handler for SelfHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use theater::pack_bridge::{
-        decode_metadata_with_hashes, encode_metadata_with_hashes, Arena, Function, Param, Type,
-    };
+    use theater::pack_bridge::{compute_interface_hashes, Arena, Function, Param, Type};
     use tokio::sync::mpsc;
 
     #[test]
@@ -335,22 +334,14 @@ mod tests {
         let exports_section = Arena::new("exports");
         package.add_child(exports_section);
 
-        // Encode metadata with hashes
-        let encoded =
-            encode_metadata_with_hashes(&package).expect("should encode metadata with hashes");
+        // Compute the actor-side import interface hashes directly from the arena
+        // (same primitives the runtime read side uses).
+        let import_hashes = compute_interface_hashes(&package, "imports");
 
-        // Decode and get import hashes
-        let decoded =
-            decode_metadata_with_hashes(&encoded).expect("should decode metadata with hashes");
+        // The import hashes should include theater:simple/self
+        assert!(!import_hashes.is_empty(), "should have import hashes");
 
-        // The decoded import hashes should include theater:simple/self
-        assert!(
-            !decoded.import_hashes.is_empty(),
-            "should have import hashes"
-        );
-
-        let actor_runtime_hash = decoded
-            .import_hashes
+        let actor_runtime_hash = import_hashes
             .iter()
             .find(|h| h.name == "theater:simple/self")
             .expect("should have theater:simple/self import hash");
@@ -393,12 +384,9 @@ mod tests {
         package.add_child(imports_section);
         package.add_child(Arena::new("exports"));
 
-        // Encode and decode
-        let encoded = encode_metadata_with_hashes(&package).expect("encode");
-        let decoded = decode_metadata_with_hashes(&encoded).expect("decode");
+        let import_hashes = compute_interface_hashes(&package, "imports");
 
-        let actor_hash = decoded
-            .import_hashes
+        let actor_hash = import_hashes
             .iter()
             .find(|h| h.name == "theater:simple/self")
             .expect("should have import hash");
