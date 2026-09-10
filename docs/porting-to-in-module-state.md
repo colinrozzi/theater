@@ -119,6 +119,79 @@ finish; it's ~90 lines and shows every piece below.
 - **One `#[derive(State)]` per module.** Compose all your actor state into one
   type.
 
+## Store-backed / externally-persisted actors
+
+Some actors keep their real state in the content-addressed **store** (or another
+durable), loading it on `init` and writing it back on mutate — the store, not
+chain-replay, is their working source of truth (e.g. inbox mailboxes: hundreds of
+messages, multi-MB raw blobs). **This shape is fully supported, and it does *not*
+require rebuilding state by replaying every mutation.** Keep your load/save path.
+
+Why it's consistent with "state = a replayable projection of the chain": **store
+reads and writes are host calls, and every host call — with its result — is
+recorded in the chain.** So:
+
+```rust
+#[export(name = "theater:simple/actor.init")]
+fn init(config: Value) -> Value {
+    // this store read is a host call → its result is recorded in the chain
+    let blob = store_get_by_label(&mailbox_label(&addr));
+    MailboxState::set(MailboxState::from_blob(blob));   // hydrate the in-module cell
+    ok_unit()
+}
+
+#[export(name = "theater:simple/mailbox.put-message")]
+fn put_message(msg: Value) -> Value {
+    MailboxState::with_mut(|s| s.append(&msg));         // mutate the cell
+    store_put_by_label(&mailbox_label(&addr), MailboxState::with(|s| s.to_blob())); // persist (host call)
+    ok_unit()
+}
+```
+
+- **Cold start** (fresh instance): `init` reads the *current* store — live truth,
+  exactly as today.
+- **Replay** (reconstruct a recorded run): `init`'s store read short-circuits to
+  the *recorded* blob, so the cell hydrates identically. Deterministic, and cheap
+  — one recorded blob, not a replay of every `put-message`.
+
+So the migration is **mechanical**: move the threaded state struct into the cell,
+and keep your existing `load_state`/`save_state` as the cell's hydrate/persist
+path. Nothing about your persistence model changes — only *where the working copy
+lives* (the module cell vs. a runtime-threaded arg).
+
+**`get-state` caveat for large state:** `#[derive(State)]`'s `get-state`
+serializes the *whole* cell via `GraphValue`. If your state is large (a multi-MB
+mailbox), you may not want `get-state` to dump it — either use
+`theater_guest::StateCell<T>` directly (no derive, no `get-state`; the store is
+already your inspectable truth) or expose a hand-written lightweight `get-state`
+summary.
+
+## Composed actors (entry-over-core): the migration stops at the theater boundary
+
+In-module state governs **only** the theater runtime ↔ actor boundary — the
+exports the *runtime* calls. If your actor is a packr **composite** (an entry
+module that drives inner modules via `#[import_from]`, all linked into one wasm),
+**only the entry's theater-facing exports migrate.** The inner modules' interfaces
+are guest↔guest packr calls the theater runtime never sees; `WasmResult.state` is
+a theater-chain concept and doesn't reach them.
+
+So for an entry-over-core stack (e.g. mesh-system over the node):
+- Migrate the **entry's** theater-facing exports to the cell (drop the state
+  param/return, add `get-state`).
+- Inner core modules **keep their existing interface** — even a state-threaded
+  one — **untouched.** The entry's cell can hold the inner state bytes and thread
+  them into the inner calls exactly as before.
+- **Replay stays consistent:** the runtime replays the *entry's* chain (its theater
+  I/O + recorded host-call results); re-running the entry's exports deterministically
+  re-drives the inner modules and rebuilds their state. An inner state machine
+  that's already a deterministic fold of its inputs is, by construction, a chain
+  projection — so a full inner migration would be *coherent* but is **not required**
+  and is far larger. Take the contained path.
+
+Nuance: if the entry's state includes non-serializable host resources (a socket
+handle), hold those in a `StateCell<T>` (or split — `#[derive(State)]` for the
+serializable part, `StateCell` for the handle).
+
 ## References
 - Worked example: `test-actors/state-test/src/lib.rs`
 - Design + runtime mechanism: `docs/in-module-state.md`
