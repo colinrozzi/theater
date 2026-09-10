@@ -1,6 +1,11 @@
 // Theater Message Server Client Interface
 //
-// Handlers actors must implement to receive messages.
+// Handlers actors must implement to receive messages. In-module state: the
+// runtime no longer threads actor state through these callbacks — each takes
+// only its own arguments and returns only its own result (state lives in the
+// actor's module; see docs/in-module-state.md). Where a callback previously
+// returned only new state, the ok branch collapses to unit; where it returned
+// state + a real payload, only the payload remains.
 
 interface message-server-client {
     @package: string = "theater:simple"
@@ -8,19 +13,19 @@ interface message-server-client {
     use types.{channel-accept}
 
     exports {
-        // Handle one-way message
-        handle-send: func(state: option<list<u8>>, params: tuple<list<u8>>) -> result<tuple<option<list<u8>>>, string>
+        // Handle a one-way message.
+        handle-send: func(message: list<u8>) -> result<_, string>
 
-        // Handle request-response
-        handle-request: func(state: option<list<u8>>, params: tuple<string, list<u8>>) -> result<tuple<option<list<u8>>, tuple<option<list<u8>>>>, string>
+        // Handle a request; ok = the optional response bytes.
+        handle-request: func(request-id: string, message: list<u8>) -> result<option<list<u8>>, string>
 
-        // Handle channel open request
-        handle-channel-open: func(state: option<list<u8>>, params: tuple<string, list<u8>>) -> result<tuple<option<list<u8>>, tuple<channel-accept>>, string>
+        // Handle a channel-open request; ok = the accept/reject decision.
+        handle-channel-open: func(channel-id: string, message: list<u8>) -> result<channel-accept, string>
 
-        // Handle message on channel
-        handle-channel-message: func(state: option<list<u8>>, params: tuple<string, list<u8>>) -> result<tuple<option<list<u8>>>, string>
+        // Handle a message on an open channel.
+        handle-channel-message: func(channel-id: string, message: list<u8>) -> result<_, string>
 
-        // Handle channel close
-        handle-channel-close: func(state: option<list<u8>>, params: tuple<string>) -> result<tuple<option<list<u8>>>, string>
+        // Handle a channel close.
+        handle-channel-close: func(channel-id: string) -> result<_, string>
     }
 }
