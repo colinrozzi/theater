@@ -137,9 +137,9 @@ present. One rough edge for the fleet: an actor that derives packr's `GraphValue
 crate directly rather than packr-guest's re-export. Actor recipe:
 
 ```toml
-packr-guest = { version = "0.23", features = ["derive"] }
-packr-abi   = { version = "0.23", default-features = false }
-theater-guest = "0.1"
+packr-guest = { version = "0.24", features = ["derive"] }
+packr-abi   = { version = "0.24", default-features = false }
+theater-guest = "0.1"   # until published: git rev of this repo's crates/theater-guest
 ```
 
 *(Flag to pack-dev: ideally guest `GraphValue` would target packr-guest's
