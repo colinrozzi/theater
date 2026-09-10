@@ -79,7 +79,7 @@ finish; it's ~90 lines and shows every piece below.
      `get-state`. (Note: such state is *not* reconstructable by replay — see
      caveats.)
 
-3. **Declare the exports in `pact_types!`**, including the auto-generated one so
+3. **Declare the exports in `pack_types!`**, including the auto-generated one so
    `has_export` finds it:
    ```
    exports {
