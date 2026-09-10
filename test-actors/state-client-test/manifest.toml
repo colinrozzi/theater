@@ -1,0 +1,9 @@
+name = "state-client-test"
+version = "0.1.0"
+package = "target/wasm32-unknown-unknown/release/state_client_test_actor.wasm"
+
+[[handler]]
+type = "self"
+
+[[handler]]
+type = "message-server"
