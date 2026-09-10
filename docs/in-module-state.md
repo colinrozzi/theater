@@ -1,7 +1,12 @@
 # In-module actor state — Design
 
-**Status:** proposal (design agreed; not yet implemented)
-**Date:** 2026-09-01
+**Status:** IMPLEMENTED — landed in the runtime (state-threading dropped; state is
+now an in-module `#[derive(State)]` cell + optional `get-state` export). The
+canonical migrated example is `test-actors/state-test`. Fleet actors still on the
+old state-threading model must be reworked to this before they can run on the
+current runtime (see the engine-axis / fleet-rework handoff).
+**Date:** 2026-09-01 (design) · implemented 2026-09
+
 
 ## Summary
 
