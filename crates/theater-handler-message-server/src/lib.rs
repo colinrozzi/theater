@@ -541,7 +541,7 @@ impl MessageServerHandler {
     ) -> Result<(), MessageServerError> {
         match msg {
             ActorMessage::Send(ActorSend { data }) => {
-                // handle-send(state, params: tuple<list<u8>>)
+                // handle-send(message: list<u8>) — no-state; positional args
                 let params = Value::Tuple(vec![bytes_to_value(data)]);
                 actor_handle
                     .call_function(
@@ -551,7 +551,7 @@ impl MessageServerHandler {
                     .await?;
             }
             ActorMessage::Request(ActorRequest { response_tx, data }) => {
-                // handle-request(state, params: tuple<string, list<u8>>)
+                // handle-request(request-id: string, message: list<u8>) — no-state
                 let request_id = Uuid::new_v4().to_string();
                 let params = Value::Tuple(vec![Value::String(request_id), bytes_to_value(data)]);
                 match actor_handle
@@ -562,9 +562,9 @@ impl MessageServerHandler {
                     .await
                 {
                     Ok(result) => {
-                        // Result is result<tuple<option<list<u8>>, tuple<option<list<u8>>>>, string>
-                        // Extract the optional response
-                        if let Some(response_data) = parse_option_bytes_from_tuple(&result) {
+                        // Return is result<option<list<u8>>, string> (no-state).
+                        // Extract the optional response.
+                        if let Some(response_data) = parse_request_response(&result) {
                             let _ = response_tx.send(response_data);
                         } else {
                             tracing::warn!("Failed to parse handle-request response: {:?}", result);
@@ -584,7 +584,7 @@ impl MessageServerHandler {
                 response_tx,
                 initial_msg,
             }) => {
-                // handle-channel-open(state, params: tuple<string, list<u8>>)
+                // handle-channel-open(channel-id: string, message: list<u8>) — no-state
                 let params = Value::Tuple(vec![
                     Value::String(channel_id.to_string()),
                     bytes_to_value(initial_msg),
@@ -595,13 +595,13 @@ impl MessageServerHandler {
                         params,
                     )
                     .await?;
-                // Result is result<tuple<actor-state, tuple<channel-accept>>, string>
-                // (state-threaded); parse_channel_accept unwraps that shape.
+                // Return is result<channel-accept, string> (no-state); the ok
+                // payload is the channel-accept record directly.
                 let accepted = parse_channel_accept(&result);
                 let _ = response_tx.send(Ok(accepted));
             }
             ActorMessage::ChannelMessage(ActorChannelMessage { channel_id, msg }) => {
-                // handle-channel-message(state, params: tuple<channel-id, list<u8>>)
+                // handle-channel-message(channel-id: string, message: list<u8>) — no-state
                 let params = Value::Tuple(vec![
                     Value::String(channel_id.to_string()),
                     bytes_to_value(msg),
@@ -614,7 +614,7 @@ impl MessageServerHandler {
                     .await?;
             }
             ActorMessage::ChannelClose(ActorChannelClose { channel_id }) => {
-                // handle-channel-close(state, params: tuple<channel-id>)
+                // handle-channel-close(channel-id: string) — no-state
                 let params = Value::Tuple(vec![Value::String(channel_id.to_string())]);
                 actor_handle
                     .call_function(
@@ -1208,44 +1208,23 @@ fn bytes_to_value(data: Vec<u8>) -> Value {
     }
 }
 
-/// Parse an option<list<u8>> from a handle-request result.
-/// The actual return type is:
-///   result<tuple<option<list<u8>>, tuple<option<list<u8>>>>, string>
-/// We need to:
-/// 1. Unwrap the Result (if Ok)
-/// 2. Get element 1 of the outer tuple (the response tuple)
-/// 3. Get element 0 of that tuple (the option<list<u8>>)
-fn parse_option_bytes_from_tuple(value: &Value) -> Option<Vec<u8>> {
-    // First, unwrap the Result if present
-    let inner_tuple = match value {
+/// Parse the optional response bytes from a `handle-request` return.
+///
+/// In-module state (see message-server-client.pact): the callback no longer
+/// threads actor state, so the return is `result<option<list<u8>>, string>` —
+/// the decoded Value is `Result(Ok(<option<list<u8>>>))`, i.e. the ok payload is
+/// the response option directly (no state slot, no response-tuple wrapper). An
+/// `Err` (or any unexpected shape) yields `None`.
+fn parse_request_response(value: &Value) -> Option<Vec<u8>> {
+    let ok = match value {
         Value::Result {
             value: Ok(inner), ..
         } => inner.as_ref(),
         Value::Result { value: Err(_), .. } => return None,
-        // Fallback for simple tuple (backward compat)
-        Value::Tuple(_) => value,
-        _ => return None,
+        // Some internal paths hand back a bare value rather than a Result.
+        other => other,
     };
-
-    // Now we have tuple<option<list<u8>>, tuple<option<list<u8>>>>
-    // Element 0 is the new state, element 1 is the response tuple
-    let response_tuple = match inner_tuple {
-        Value::Tuple(items) if items.len() >= 2 => &items[1],
-        // Fallback for old format: tuple<option<list<u8>>>
-        Value::Tuple(items) if !items.is_empty() => {
-            return parse_option_bytes(&items[0]);
-        }
-        _ => return None,
-    };
-
-    // response_tuple is tuple<option<list<u8>>>
-    // Get element 0 which is the option<list<u8>>
-    let response_option = match response_tuple {
-        Value::Tuple(items) if !items.is_empty() => &items[0],
-        _ => return None,
-    };
-
-    parse_option_bytes(response_option)
+    parse_option_bytes(ok)
 }
 
 /// Parse an option<list<u8>> Value into Option<Vec<u8>>
@@ -1271,41 +1250,25 @@ fn parse_option_bytes(value: &Value) -> Option<Vec<u8>> {
 
 /// Parse a channel-accept record from `handle-channel-open`'s return Value.
 ///
-/// State-threaded actors (the normal case — see `handle-channel-open` in
-/// message-server-client.pact) return
-///   `result<tuple<actor-state, tuple<channel-accept>>, string>`
-/// so the decoded Value is `Result(Ok(Tuple([state, Tuple([channel-accept])])))`:
-/// element 0 is the new state, element 1 is the `tuple<channel-accept>`. This
-/// mirrors `parse_option_bytes_from_tuple` for `handle-request`.
-///
-/// A missing/rejected/errored accept (or any unexpected shape) is treated as
-/// "not accepted" — the safe default is to not open the channel.
+/// In-module state (see message-server-client.pact): the callback no longer
+/// threads actor state, so the return is `result<channel-accept, string>` — the
+/// decoded Value is `Result(Ok(<channel-accept>))`, i.e. the ok payload is the
+/// channel-accept record directly (no state slot, no wrapping tuple). An `Err`
+/// (rejected/errored open) or any unexpected shape is treated as "not accepted"
+/// — the safe default is to not open the channel.
 ///
 /// channel-accept is `record { accepted: bool, message: option<list<u8>> }`,
 /// encoded as a Tuple (or Record) in Pack's Graph ABI.
 fn parse_channel_accept(value: &Value) -> bool {
-    // Unwrap the result<...> wrapper (an Err = rejected open).
-    let inner = match value {
+    // Unwrap the result<...> wrapper (an Err = rejected open); the ok payload is
+    // the channel-accept record directly.
+    let accept_value = match value {
         Value::Result {
             value: Ok(inner), ..
         } => inner.as_ref(),
         Value::Result { value: Err(_), .. } => return false,
-        // Backward-compat: some paths hand back a bare tuple, not a Result.
-        Value::Tuple(_) => value,
-        _ => return false,
-    };
-
-    // Locate the channel-accept record:
-    //   state-threaded: tuple<actor-state, tuple<channel-accept>> -> element 1
-    //                   is `tuple<channel-accept>`; unwrap it to the record.
-    //   legacy/bare:    tuple<channel-accept> -> element 0 is the record.
-    let accept_value = match inner {
-        Value::Tuple(items) if items.len() >= 2 => match &items[1] {
-            Value::Tuple(inner) if !inner.is_empty() => &inner[0],
-            other => other,
-        },
-        Value::Tuple(items) if !items.is_empty() => &items[0],
-        _ => return false,
+        // Some internal paths hand back a bare value rather than a Result.
+        other => other,
     };
 
     // channel-accept as Tuple: [accepted: bool, message: option<list<u8>>]

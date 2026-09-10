@@ -56,7 +56,14 @@ finish; it's ~90 lines and shows every piece below.
 ## Step by step
 
 1. **Depend on `theater-guest`** (it re-exports `packr-guest`) and
-   `use theater_guest::State;`.
+   `use theater_guest::State;`. Fleet guest baseline is **packr 0.24**; until
+   `theater-guest` is published to crates.io, depend on it by git rev of this
+   repo's `crates/theater-guest`:
+   ```toml
+   packr-guest   = { version = "0.24", features = ["derive"] }
+   packr-abi     = { version = "0.24", default-features = false }  # GraphValue codegen refs packr_abi directly
+   theater-guest = { git = "https://github.com/colinrozzi/theater", rev = "<merge-commit>" }
+   ```
 
 2. **Define your state type** and derive the trio:
    ```rust

@@ -351,7 +351,8 @@ pub trait Handler: Send + Sync + 'static {
     /// ```ignore
     /// use theater::pack_bridge::{parse_pact, InterfaceImpl, TypeHash};
     ///
-    /// const MY_PACT: &str = include_str!("../../../pact/my-interface.pact");
+    /// // a handler owns its interface: keep the .pact in the handler crate
+    /// const MY_PACT: &str = include_str!("../my-interface.pact");
     ///
     /// fn my_interface() -> InterfaceImpl {
     ///     let pact = parse_pact(MY_PACT).expect("embedded pact should be valid");
@@ -380,7 +381,8 @@ pub trait Handler: Send + Sync + 'static {
     /// ```ignore
     /// use theater::pack_bridge::{parse_pact, InterfaceImpl};
     ///
-    /// const MY_PACT: &str = include_str!("../../../pact/my-interface.pact");
+    /// // a handler owns its interface: keep the .pact in the handler crate
+    /// const MY_PACT: &str = include_str!("../my-interface.pact");
     ///
     /// fn interfaces(&self) -> Vec<InterfaceImpl> {
     ///     let pact = parse_pact(MY_PACT).expect("embedded pact should be valid");
