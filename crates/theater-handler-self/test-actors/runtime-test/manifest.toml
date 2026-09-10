@@ -4,4 +4,4 @@ package = "/Users/colinrozzi/work/theater/crates/theater-handler-runtime/test-ac
 description = "Test actor for the Theater runtime handler"
 
 [[handler]]
-type = "runtime"
+type = "self"

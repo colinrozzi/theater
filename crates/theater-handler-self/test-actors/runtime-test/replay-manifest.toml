@@ -4,7 +4,7 @@ package = "/Users/colinrozzi/work/theater/crates/theater-handler-runtime/test-ac
 description = "Runtime handler replay test"
 
 [[handler]]
-type = "runtime"
+type = "self"
 
 [[handler]]
 type = "replay"

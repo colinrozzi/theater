@@ -3,4 +3,4 @@ version = "0.1.0"
 package = "target/wasm32-unknown-unknown/release/shutdown_test_actor.wasm"
 
 [[handler]]
-type = "runtime"
+type = "self"

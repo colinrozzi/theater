@@ -4,4 +4,4 @@ package = "/Users/colinrozzi/work/theater/test-actors/composite-test/target/wasm
 description = "Test actor for Composite runtime"
 
 [[handler]]
-type = "runtime"
+type = "self"

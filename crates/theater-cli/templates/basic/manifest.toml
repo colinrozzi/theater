@@ -4,4 +4,4 @@ package = "./target/wasm32-unknown-unknown/release/{{project_name_snake}}.wasm"
 description = "A basic Theater actor"
 
 [[handler]]
-type = "runtime"
+type = "self"

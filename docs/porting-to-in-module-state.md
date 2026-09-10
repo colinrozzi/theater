@@ -106,7 +106,17 @@ finish; it's ~90 lines and shows every piece below.
    - read: `let x = ActorState::with(|s| s.field);`
    - mutate: `ActorState::with_mut(|s| { s.field = …; });`
 
-6. **Rebuild + recompose** with `packr-guest 0.24`, fold in the wit→pact and
+6. **Update the manifest** for the `runtime`→`self` rename. The rename changed
+   the handler-registry key, not just the imported interface — the `self` handler
+   crate registers under `name() = "self"`, so every actor's manifest must declare:
+   ```toml
+   [[handler]]
+   type = "self"    # was "runtime"
+   ```
+   (`type = "runtime"` now wires the runtime-wide *control* interface, not per-actor
+   `log`/`shutdown`, so leaving it stale mis-wires or fails the actor.)
+
+7. **Rebuild + recompose** with `packr-guest 0.24`, fold in the wit→pact and
    runtime→self changes, and run your scenario suite. On the new runtime a state
    mismatch fails **at spawn** (`MissingInterfaceMetadata` / signature mismatch),
    not at test time — so if it spawns and your calls round-trip, you're on the new
