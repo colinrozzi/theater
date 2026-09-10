@@ -96,18 +96,20 @@ fn store_get_raw(store_id: String, content_ref: String) -> Value;
 
 /// Retrieve content bytes by content-ref (the hash returned from store/store-at-label).
 fn store_get(store_id: String, content_ref: String) -> Result<Vec<u8>, String> {
+    // packr-abi 0.24: a result<T,E> import decodes as Value::Result { value: Ok/Err(Box<Value>) },
+    // NOT Value::Variant{tag}.
     match store_get_raw(store_id, content_ref) {
         // Ok(list<u8>)
-        Value::Variant { tag: 0, payload, .. } => match payload.into_iter().next() {
-            Some(Value::List { items, .. }) => Ok(items
+        Value::Result { value: Ok(inner), .. } => match *inner {
+            Value::List { items, .. } => Ok(items
                 .into_iter()
                 .filter_map(|v| if let Value::U8(b) = v { Some(b) } else { None })
                 .collect()),
             _ => Err(String::from("unexpected ok payload shape")),
         },
         // Err(string)
-        Value::Variant { tag: 1, payload, .. } => match payload.into_iter().next() {
-            Some(Value::String(e)) => Err(e),
+        Value::Result { value: Err(inner), .. } => match *inner {
+            Value::String(e) => Err(e),
             _ => Err(String::from("unknown error")),
         },
         _ => Err(String::from("unexpected result format")),
@@ -124,16 +126,19 @@ fn list_actors_raw() -> Value;
 
 /// Count the actors in view from a `result<list<actor-info>, supervisor-error>`.
 fn list_actors_count() -> Result<usize, String> {
+    // packr-abi 0.24: result<list<actor-info>, supervisor-error> decodes as
+    // Value::Result { value: Ok/Err(Box<Value>) }; the Err payload is the
+    // supervisor-error enum (Value::Variant { case_name }).
     match list_actors_raw() {
         // Ok(list<actor-info>)
-        Value::Variant { tag: 0, payload, .. } => match payload.into_iter().next() {
-            Some(Value::List { items, .. }) => Ok(items.len()),
+        Value::Result { value: Ok(inner), .. } => match *inner {
+            Value::List { items, .. } => Ok(items.len()),
             _ => Err(String::from("unexpected ok payload shape")),
         },
         // Err(supervisor-error)
-        Value::Variant { tag: 1, payload, .. } => {
-            let case = match payload.into_iter().next() {
-                Some(Value::Variant { case_name, .. }) => case_name,
+        Value::Result { value: Err(inner), .. } => {
+            let case = match *inner {
+                Value::Variant { case_name, .. } => case_name,
                 _ => String::from("unknown"),
             };
             Err(alloc::format!("supervisor-error: {}", case))

@@ -122,6 +122,41 @@ finish; it's ~90 lines and shows every piece below.
    not at test time — so if it spawns and your calls round-trip, you're on the new
    model.
 
+## Also on the wave: host-interface & permission changes
+
+These are separate from in-module state but land in the **same one-commit rework**,
+and — like the stale pacts — each one **builds green and passes an on-paper
+interface-hash check, then fails only on a live spawn/call.** The client-interface
+pilot flushed all of these out; do them at the same time.
+
+- **Host interfaces whose signatures changed — declare the new typedefs
+  *exactly*.** The interface hash covers referenced typedefs (case names + order),
+  so a lagging local copy hashes wrong → `MissingInterfaceMetadata` at spawn.
+  Known changes:
+  - **`supervisor.spawn`** (and siblings) now return `result<string,
+    supervisor-error>` — a **structured** error, not `string`. An actor importing
+    supervisor must declare `supervisor-error` **and** the `spawn-failure` it
+    references in `pact_types!` byte-identically.
+  - Read the canonical signature from the **handler crate's `.pact`**
+    (`crates/theater-handler-<name>/<name>.pact`) — that is what the runtime
+    hashes (there is no top-level `pact/` mirror for host interfaces anymore).
+
+- **Control capabilities now default-deny — grant them in the manifest.** The
+  `supervisor` and `runtime` (control) interfaces are `Disallow` by default. An
+  actor that calls e.g. `supervisor.spawn` must grant the cap, or it spawns fine
+  and then fails **at call time** with `supervisor-error: permission-denied`:
+  ```toml
+  [permission_policy.supervisor]
+  type = "inherit"
+  ```
+  (This bites every supervisor/runtime-using actor — mesh, sentinel, ….)
+
+- **`result<T, E>` imports decode as `Value::Result`, not `Value::Variant`.**
+  Under packr-abi 0.24 a raw-`Value` import of a `result<T, E>` fn returns
+  `Value::Result { value: Ok(Box<Value>) | Err(Box<Value>), .. }`. Decoding it as
+  `Value::Variant { tag: 0/1 }` (the old shape) compiles but silently mis-decodes
+  at runtime. Match `Value::Result { value: Ok(inner), .. }` / `Err(inner)`.
+
 ## Caveats (the replay contract)
 
 - **State must be a deterministic function of the chain.** `init(config)` + the
