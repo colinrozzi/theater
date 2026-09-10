@@ -44,7 +44,11 @@ fn start_runtime(router: MessageRouter) -> mpsc::UnboundedSender<TheaterCommand>
     let (theater_tx, theater_rx) = mpsc::unbounded_channel::<TheaterCommand>();
     let tx_for_runtime = theater_tx.clone();
     let mut registry = HandlerRegistry::new();
-    registry.register(SelfHandler::new(SelfHostConfig {}, theater_tx.clone(), None));
+    registry.register(SelfHandler::new(
+        SelfHostConfig {},
+        theater_tx.clone(),
+        None,
+    ));
     registry.register(MessageServerHandler::new(None, router));
     tokio::spawn(async move {
         let mut runtime = theater::theater_runtime::TheaterRuntime::new(
@@ -125,7 +129,10 @@ async fn message_server_client_request_roundtrips_through_handler() {
         .expect("handle channel")
         .expect("handle present");
     handle
-        .call_function("theater:simple/actor.init".to_string(), Value::Tuple(vec![]))
+        .call_function(
+            "theater:simple/actor.init".to_string(),
+            Value::Tuple(vec![]),
+        )
         .await
         .expect("init call");
 
