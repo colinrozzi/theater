@@ -3,6 +3,6 @@ name = "multi-handler-test"
 package = "./target/wasm32-unknown-unknown/release/multi_handler_test_actor.wasm"
 
 [handlers]
-runtime = {}
+self = {}
 store = {}
-supervisor = {}
+runtime = {}

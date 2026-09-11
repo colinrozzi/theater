@@ -4,7 +4,15 @@ package = "./target/wasm32-unknown-unknown/release/{{project_name_snake}}.wasm"
 description = "A Theater supervisor actor"
 
 [[handler]]
-type = "supervisor"
-
-[[handler]]
 type = "self"
+
+# Actor management (spawn / stop / inspect any actor by id). This is the
+# runtime control plane; it is capability-gated and default-denies, so grant the
+# `runtime` capability in this actor's permission policy.
+[[handler]]
+type = "runtime"
+
+# Monitor child actors: their lifecycle events are delivered to
+# handle-lifecycle-event.
+[[handler]]
+type = "lifecycle"

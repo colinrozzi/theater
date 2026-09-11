@@ -1,9 +1,9 @@
 //! Multi-handler test actor for Pack runtime integration.
 //!
 //! This actor tests multiple Theater handlers:
-//! - runtime: log function
+//! - self: log function
 //! - store: content storage operations
-//! - supervisor: child actor management
+//! - runtime: actor management (list-actors)
 
 #![no_std]
 
@@ -17,8 +17,8 @@ use packr_guest::{export, import, pack_types, Value, ValueType};
 // Set up allocator and panic handler
 packr_guest::setup_guest!();
 
-// Embed interface metadata for hash verification. The supervisor types below
-// mirror theater:simple/supervisor exactly (field/case names + order) so the
+// Embed interface metadata for hash verification. The runtime types below
+// mirror theater:simple/runtime exactly (field/case names + order) so the
 // host's interface subset hash matches — get this wrong and the actor compiles
 // but fails to instantiate.
 pack_types! {
@@ -43,13 +43,12 @@ pack_types! {
         internal(string),
     }
 
-    variant supervisor-error {
-        actor-not-found(string),
-        out-of-view(string),
+    variant runtime-error {
         permission-denied(string),
+        runtime-unavailable,
+        actor-not-found(string),
         invalid-argument(string),
         spawn-failed(spawn-failure),
-        runtime-unavailable,
         internal(string),
     }
 
@@ -64,8 +63,8 @@ pack_types! {
             store-at-label: func(store-id: string, label: string, content: list<u8>) -> result<string, string>,
             get-by-label: func(store-id: string, label: string) -> result<option<string>, string>,
         }
-        theater:simple/supervisor {
-            list-actors: func() -> result<list<actor-info>, supervisor-error>,
+        theater:simple/runtime {
+            list-actors: func() -> result<list<actor-info>, runtime-error>,
         }
     }
     exports {
@@ -117,31 +116,31 @@ fn store_get(store_id: String, content_ref: String) -> Result<Vec<u8>, String> {
 }
 
 // ============================================================================
-// Supervisor handler imports
+// Runtime (control) handler imports
 // ============================================================================
 
-// Complex return type (result<list<actor-info>, supervisor-error>) - handle raw Value.
-#[import(module = "theater:simple/supervisor", name = "list-actors")]
+// Complex return type (result<list<actor-info>, runtime-error>) - handle raw Value.
+#[import(module = "theater:simple/runtime", name = "list-actors")]
 fn list_actors_raw() -> Value;
 
-/// Count the actors in view from a `result<list<actor-info>, supervisor-error>`.
+/// Count the actors from a `result<list<actor-info>, runtime-error>`.
 fn list_actors_count() -> Result<usize, String> {
-    // packr-abi 0.24: result<list<actor-info>, supervisor-error> decodes as
+    // packr-abi 0.24: result<list<actor-info>, runtime-error> decodes as
     // Value::Result { value: Ok/Err(Box<Value>) }; the Err payload is the
-    // supervisor-error enum (Value::Variant { case_name }).
+    // runtime-error enum (Value::Variant { case_name }).
     match list_actors_raw() {
         // Ok(list<actor-info>)
         Value::Result { value: Ok(inner), .. } => match *inner {
             Value::List { items, .. } => Ok(items.len()),
             _ => Err(String::from("unexpected ok payload shape")),
         },
-        // Err(supervisor-error)
+        // Err(runtime-error)
         Value::Result { value: Err(inner), .. } => {
             let case = match *inner {
                 Value::Variant { case_name, .. } => case_name,
                 _ => String::from("unknown"),
             };
-            Err(alloc::format!("supervisor-error: {}", case))
+            Err(alloc::format!("runtime-error: {}", case))
         }
         _ => Err(String::from("unexpected result format")),
     }
@@ -167,14 +166,14 @@ fn init(_config: Value) -> Value {
         }
     }
 
-    // Test 3: Supervisor handler
-    log(String::from("TEST 3: Supervisor handler..."));
+    // Test 3: Runtime (control) handler
+    log(String::from("TEST 3: Runtime handler..."));
     match list_actors_count() {
         Ok(n) => log(alloc::format!(
-            "TEST 3: Supervisor handler - PASSED (found {} actors in view)",
+            "TEST 3: Runtime handler - PASSED (found {} actors)",
             n
         )),
-        Err(e) => log(alloc::format!("TEST 3: Supervisor handler - FAILED: {}", e)),
+        Err(e) => log(alloc::format!("TEST 3: Runtime handler - FAILED: {}", e)),
     }
 
     log(String::from("=== Multi-handler test actor completed ==="));
