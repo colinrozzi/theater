@@ -136,7 +136,14 @@ pilot flushed all of these out; do them at the same time.
   - **`supervisor.spawn`** (and siblings) now return `result<string,
     supervisor-error>` — a **structured** error, not `string`. An actor importing
     supervisor must declare `supervisor-error` **and** the `spawn-failure` it
-    references in `pact_types!` byte-identically.
+    references in `pack_types!` byte-identically.
+  - **Renamed/removed supervisor ops.** Pre-0.24 op names no longer exist — most
+    commonly `stop-child: func(child-id: string) -> result<_, string>` is now
+    **`stop-actor: func(id: actor-id) -> result<_, supervisor-error>`** (and
+    `kill-actor` likewise; `actor-id` is a `string` alias). A stale op name builds
+    green and then fails at **setup** with `unknown import
+    theater:simple/supervisor::<op>`. Mirror the *whole* supervisor import block
+    from the canonical pact, not just `spawn`.
   - Read the canonical signature from the **handler crate's `.pact`**
     (`crates/theater-handler-<name>/<name>.pact`) — that is what the runtime
     hashes (there is no top-level `pact/` mirror for host interfaces anymore).
