@@ -3017,6 +3017,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "theater-handler-filesystem"
+version = "0.3.0"
+dependencies = [
+ "anyhow",
+ "theater",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "theater-handler-http-client"
 version = "0.3.0"
 dependencies = [
@@ -3188,6 +3199,7 @@ name = "theater-stage"
 version = "0.1.0"
 dependencies = [
  "theater",
+ "theater-handler-filesystem",
  "theater-handler-http-client",
  "theater-handler-lifecycle",
  "theater-handler-loop",

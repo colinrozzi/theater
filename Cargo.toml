@@ -14,6 +14,7 @@ members = [
     "crates/theater-handler-self",
     "crates/theater-handler-lifecycle",
     "crates/theater-handler-store",
+    "crates/theater-handler-filesystem",
     "crates/theater-handler-tcp",
     "crates/theater-handler-terminal",
     "crates/theater-handler-timer",
@@ -66,6 +67,7 @@ theater-handler-runtime = { version = "0.3.0", path = "crates/theater-handler-ru
 theater-handler-self = { version = "0.3.14", path = "crates/theater-handler-self" }
 theater-handler-lifecycle = { version = "0.3.14", path = "crates/theater-handler-lifecycle" }
 theater-handler-store = { version = "0.3.12", path = "crates/theater-handler-store" }
+theater-handler-filesystem = { version = "0.3.0", path = "crates/theater-handler-filesystem" }
 theater-handler-tcp = { version = "0.3.21", path = "crates/theater-handler-tcp" }
 theater-handler-terminal = { version = "0.3.11", path = "crates/theater-handler-terminal" }
 theater-handler-timer = { version = "0.3.13", path = "crates/theater-handler-timer" }
