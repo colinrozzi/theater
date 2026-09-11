@@ -23,12 +23,13 @@
 
 use std::sync::Arc;
 
-use theater::config::actor_manifest::HttpClientHandlerConfig;
+use theater::config::actor_manifest::{FileSystemHandlerConfig, HttpClientHandlerConfig};
 use theater::handler::HandlerRegistry;
 use theater::messages::TheaterCommand;
 use theater::utils::ResourceCache;
 use tokio::sync::mpsc::UnboundedSender;
 
+use theater_handler_filesystem::FileSystemHandler;
 use theater_handler_http_client::HttpClientHandler;
 use theater_handler_lifecycle::LifecycleHandler;
 use theater_handler_loop::LoopHandler;
@@ -83,6 +84,19 @@ pub fn standard_handlers(
 
     // Store — content-addressed storage.
     registry.register(StoreHandler::new(StoreHandlerConfig::default(), None));
+
+    // FileSystem — sandboxed, permission-gated filesystem access. Registered as a
+    // template with no configured root (a fresh per-actor temp sandbox) and no
+    // permissions (default-deny); the runtime threads the manifest config +
+    // effective permissions in at spawn time.
+    registry.register(FileSystemHandler::new(
+        FileSystemHandlerConfig {
+            path: None,
+            new_dir: None,
+            allowed_commands: None,
+        },
+        None,
+    ));
 
     // Runtime (control) — spawn/inspect/drive any actor + shutdown +
     // subscribe-to-spawns; capability-gated. Wired to the shared fetch cache so
