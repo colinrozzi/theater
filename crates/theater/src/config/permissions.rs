@@ -371,11 +371,12 @@ impl PartialOrd for MessageServerPermissions {
 /// does NOT require this. An empty `runtime = {}` grants nothing (safe default).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct RuntimePermissions {
-    /// Read-only control: list-actors, get-actor-chain, get-actor-state/manifest,
-    /// subscribe-to-actor.
+    /// Read-only control: list-actors, get-actor-status/state/manifest,
+    /// subscribe-to-spawns.
     #[serde(default)]
     pub inspect: bool,
-    /// Mutating control: spawn / resume / stop / kill / restart any actor.
+    /// Mutating control: spawn / spawn-and-wait / stop / kill any actor, and
+    /// shut the runtime down.
     #[serde(default)]
     pub mutate: bool,
 }
@@ -384,50 +385,6 @@ impl PartialOrd for RuntimePermissions {
         // parent (self) must grant everything the child (other) requests; the child
         // exceeds the parent if it wants a capability the parent lacks.
         if (other.inspect && !self.inspect) || (other.mutate && !self.mutate) {
-            return None;
-        }
-        Some(if self == other {
-            Ordering::Equal
-        } else {
-            Ordering::Greater
-        })
-    }
-}
-
-/// The set of actors a supervisor-capable actor may see and act on.
-/// Ordered least-to-most privilege: `Subtree` < `All`, so a child may not
-/// widen its scope past its parent.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Default)]
-#[serde(rename_all = "kebab-case")]
-pub enum ViewScope {
-    /// The caller's own subtree — its descendants. Least privilege; the default.
-    #[default]
-    Subtree,
-    /// Every actor in the runtime.
-    All,
-}
-
-/// Capability to drive the supervisor (actor-management) interface, scoped to a
-/// view. `inspect` gates the read/observe ops (list-actors, get-actor-*,
-/// subscribe-to-actor); `mutate` gates the lifecycle ops (spawn, stop, kill);
-/// `scope` sets which actors are in view, enforced per-op by the handler.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
-pub struct SupervisorPermissions {
-    #[serde(default)]
-    pub scope: ViewScope,
-    #[serde(default)]
-    pub inspect: bool,
-    #[serde(default)]
-    pub mutate: bool,
-}
-impl PartialOrd for SupervisorPermissions {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        // parent (self) must grant everything the child (other) requests: the
-        // child cannot widen scope beyond the parent, nor add a capability.
-        if other.scope > self.scope
-            || (other.inspect && !self.inspect)
-            || (other.mutate && !self.mutate)
-        {
             return None;
         }
         Some(if self == other {
@@ -457,7 +414,6 @@ pub struct HandlerPermission {
     pub http_client: Option<HttpClientPermissions>,
     pub http_framework: Option<HttpFrameworkPermissions>,
     pub runtime: Option<RuntimePermissions>,
-    pub supervisor: Option<SupervisorPermissions>,
     pub store: Option<StorePermissions>,
     pub timing: Option<TimingPermissions>,
     pub process: Option<ProcessPermissions>,
@@ -490,11 +446,6 @@ impl HandlerPermission {
                 max_request_size: None,
             }),
             runtime: Some(RuntimePermissions {
-                inspect: true,
-                mutate: true,
-            }),
-            supervisor: Some(SupervisorPermissions {
-                scope: ViewScope::All,
                 inspect: true,
                 mutate: true,
             }),
@@ -548,10 +499,6 @@ impl HandlerPermission {
                 &policy.http_framework,
             ),
             runtime: apply_inheritance_policy(&parent_permissions.runtime, &policy.runtime),
-            supervisor: apply_inheritance_policy(
-                &parent_permissions.supervisor,
-                &policy.supervisor,
-            ),
             store: apply_inheritance_policy(&parent_permissions.store, &policy.store),
             timing: apply_inheritance_policy(&parent_permissions.timing, &policy.timing),
             process: apply_inheritance_policy(&parent_permissions.process, &policy.process),
@@ -574,7 +521,6 @@ impl PartialOrd for HandlerPermission {
             option_subset(&self.http_client, &other.http_client, |p, c| p >= c),
             option_subset(&self.http_framework, &other.http_framework, |p, c| p >= c),
             option_subset(&self.runtime, &other.runtime, |p, c| p >= c),
-            option_subset(&self.supervisor, &other.supervisor, |p, c| p >= c),
             option_subset(&self.store, &other.store, |p, c| p >= c),
             option_subset(&self.timing, &other.timing, |p, c| p >= c),
             option_subset(&self.process, &other.process, |p, c| p >= c),
@@ -590,7 +536,6 @@ impl PartialOrd for HandlerPermission {
             self.http_client != other.http_client,
             self.http_framework != other.http_framework,
             self.runtime != other.runtime,
-            self.supervisor != other.supervisor,
             self.store != other.store,
             self.timing != other.timing,
             self.process != other.process,
@@ -726,18 +671,6 @@ impl RestrictWith<RuntimePermissions> for RuntimePermissions {
     fn restrict_with(&self, restriction: &RuntimePermissions) -> Self {
         // Intersect: a restricted grant keeps a capability only if BOTH allow it.
         RuntimePermissions {
-            inspect: self.inspect && restriction.inspect,
-            mutate: self.mutate && restriction.mutate,
-        }
-    }
-}
-
-impl RestrictWith<SupervisorPermissions> for SupervisorPermissions {
-    fn restrict_with(&self, restriction: &SupervisorPermissions) -> Self {
-        // Intersect: the narrower scope wins, and each capability must be
-        // granted by both.
-        SupervisorPermissions {
-            scope: self.scope.min(restriction.scope),
             inspect: self.inspect && restriction.inspect,
             mutate: self.mutate && restriction.mutate,
         }

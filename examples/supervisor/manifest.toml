@@ -5,6 +5,11 @@ package = "target/wasm32-unknown-unknown/release/supervisor_actor.wasm"
 [[handler]]
 type = "self"
 
-# Spawn + supervise child actors.
+# Spawn child actors (control plane). Requires the `runtime` capability to be
+# granted (it default-denies); grant it in this actor's permission policy.
 [[handler]]
-type = "supervisor"
+type = "runtime"
+
+# Monitor children so their terminal events reach handle-lifecycle-event.
+[[handler]]
+type = "lifecycle"

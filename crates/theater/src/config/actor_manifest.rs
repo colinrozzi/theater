@@ -24,7 +24,7 @@ pub struct ManifestConfig {
     pub initial_state: Option<String>,
     /// Operator's assertion that `package` is a content-addressed URL
     /// whose bytes will not change for the lifetime of the theater
-    /// process. When `true`, the supervisor's wasm fetch goes through
+    /// process. When `true`, the runtime handler's wasm fetch goes through
     /// the runtime's [`crate::utils::ResourceCache`] — the first spawn
     /// pays the round-trip, subsequent spawns hit the cache.
     ///
@@ -129,7 +129,7 @@ impl HandlerConfig {
     }
 
     /// Build a handler config carrying only its `type` (no fields) — for the unit
-    /// configs (`self`, `supervisor`, `message-server`, …).
+    /// configs (`self`, `runtime`, `message-server`, …).
     pub fn unit(type_name: &str) -> Self {
         let mut raw = toml::Table::new();
         raw.insert(

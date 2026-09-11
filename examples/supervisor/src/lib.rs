@@ -1,15 +1,16 @@
 //! `supervisor` — spawn a child actor and learn when it dies.
 //!
 //! On init this actor spawns a child from a manifest (here the sibling `hello`
-//! example) via `theater:simple/supervisor.spawn`. The supervisor auto-monitors
-//! every actor it spawns, so when the child terminates the runtime invokes this
-//! actor's `handle-lifecycle-event` with the child's terminal event — no manual
-//! subscription needed. That's the whole supervision model in one actor. State
-//! lives inside the module now (`docs/in-module-state.md`); this actor holds
-//! none.
+//! example) via `theater:simple/runtime.spawn`, then `theater:simple/lifecycle.monitor`s
+//! it. When the child terminates the lifecycle handler invokes this actor's
+//! `handle-lifecycle-event` with the child's terminal event. That's the whole
+//! supervision model in one actor now that actor-management is a runtime
+//! primitive (there is no separate supervisor interface, and spawn no longer
+//! auto-monitors — you attach a monitor explicitly). State lives inside the
+//! module now (`docs/in-module-state.md`); this actor holds none.
 //!
-//! The `actor-info` / `spawn-failure` / `supervisor-error` types below mirror
-//! `theater:simple/supervisor` exactly so the interface subset-hash matches the
+//! The `spawn-failure` / `runtime-error` types below mirror
+//! `theater:simple/runtime` exactly so the interface subset-hash matches the
 //! host; get them wrong and the actor compiles but fails to instantiate.
 
 #![no_std]
@@ -24,12 +25,6 @@ use packr_guest::{export, import, pack_types, Value, ValueType};
 packr_guest::setup_guest!();
 
 pack_types! {
-    record actor-info {
-        id: string,
-        name: string,
-        parent-id: option<string>,
-    }
-
     variant spawn-failure {
         bad-manifest(string),
         wasm-fetch(string),
@@ -45,13 +40,12 @@ pack_types! {
         internal(string),
     }
 
-    variant supervisor-error {
-        actor-not-found(string),
-        out-of-view(string),
+    variant runtime-error {
         permission-denied(string),
+        runtime-unavailable,
+        actor-not-found(string),
         invalid-argument(string),
         spawn-failed(spawn-failure),
-        runtime-unavailable,
         internal(string),
     }
 
@@ -59,25 +53,31 @@ pack_types! {
         theater:simple/self {
             log: func(msg: string),
         }
-        theater:simple/supervisor {
-            spawn: func(manifest: string, init-state: option<value>, wasm-bytes: option<list<u8>>) -> result<string, supervisor-error>,
+        theater:simple/runtime {
+            spawn: func(manifest: string, init-state: option<value>, wasm-bytes: option<list<u8>>) -> result<string, runtime-error>,
+        }
+        theater:simple/lifecycle {
+            monitor: func(subject: string) -> result<_, string>,
         }
     }
     exports {
         theater:simple/actor.init: func(config: value) -> result<_, string>,
-        theater:simple/supervisor-handlers.handle-lifecycle-event: func(id: string, event-type: string, data: list<u8>) -> result<_, string>,
+        theater:simple/lifecycle-handlers.handle-lifecycle-event: func(subject: string, event-type: string, data: list<u8>) -> result<_, string>,
     }
 }
 
 #[import(module = "theater:simple/self", name = "log")]
 fn log(msg: String);
 
-#[import(module = "theater:simple/supervisor", name = "spawn")]
-fn supervisor_spawn(
+#[import(module = "theater:simple/runtime", name = "spawn")]
+fn runtime_spawn(
     manifest: String,
     init_state: Option<Value>,
     wasm_bytes: Option<Vec<u8>>,
 ) -> Value;
+
+#[import(module = "theater:simple/lifecycle", name = "monitor")]
+fn lifecycle_monitor(subject: String) -> Result<(), String>;
 
 /// `result<_, string>::ok(())` — no state to return.
 fn ok_unit() -> Value {
@@ -94,9 +94,16 @@ fn init(_config: Value) -> Value {
     // Spawn the sibling `hello` example as our child. (Run this from the
     // `examples/` dir, with hello built, for the path to resolve.) `None` for
     // init-state and wasm-bytes — the packr-guest macro marshals Rust `Option`.
-    match supervisor_spawn(String::from("hello/manifest.toml"), None, None) {
+    match runtime_spawn(String::from("hello/manifest.toml"), None, None) {
         Value::Variant { tag: 0, payload, .. } => match payload.into_iter().next() {
-            Some(Value::String(id)) => log(format!("supervisor: spawned child {}", id)),
+            Some(Value::String(id)) => {
+                log(format!("supervisor: spawned child {}", id));
+                // Attach a monitor so the child's terminal event is delivered
+                // to our handle-lifecycle-event (spawn no longer auto-monitors).
+                if let Err(e) = lifecycle_monitor(id) {
+                    log(format!("supervisor: monitor failed: {}", e));
+                }
+            }
             _ => log(String::from("supervisor: spawned child (id unavailable)")),
         },
         _ => log(String::from("supervisor: spawn failed")),
@@ -104,9 +111,9 @@ fn init(_config: Value) -> Value {
     ok_unit()
 }
 
-/// The runtime calls this when a watched child terminates. The params are
-/// (child-id, event-type, terminal-payload-bytes); we just log the death.
-#[export(name = "theater:simple/supervisor-handlers.handle-lifecycle-event")]
+/// The lifecycle handler calls this when a monitored child terminates. The
+/// params are (child-id, event-type, terminal-payload-bytes); we just log it.
+#[export(name = "theater:simple/lifecycle-handlers.handle-lifecycle-event")]
 fn handle_lifecycle_event(input: Value) -> Value {
     let id = match &input {
         Value::Tuple(items) if !items.is_empty() => match &items[0] {

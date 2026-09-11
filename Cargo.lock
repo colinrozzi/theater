@@ -3095,6 +3095,7 @@ version = "0.3.0"
 dependencies = [
  "anyhow",
  "serde",
+ "serde_json",
  "theater",
  "thiserror 2.0.18",
  "tokio",
@@ -3126,19 +3127,6 @@ dependencies = [
  "theater",
  "theater-store",
  "thiserror 2.0.18",
- "tracing",
-]
-
-[[package]]
-name = "theater-handler-supervisor"
-version = "0.3.20"
-dependencies = [
- "anyhow",
- "serde",
- "serde_json",
- "theater",
- "thiserror 2.0.18",
- "tokio",
  "tracing",
 ]
 
@@ -3209,7 +3197,6 @@ dependencies = [
  "theater-handler-runtime",
  "theater-handler-self",
  "theater-handler-store",
- "theater-handler-supervisor",
  "theater-handler-tcp",
  "theater-handler-terminal",
  "theater-handler-timer",
@@ -3244,9 +3231,9 @@ dependencies = [
  "theater-handler-loop",
  "theater-handler-message-server",
  "theater-handler-rpc",
+ "theater-handler-runtime",
  "theater-handler-self",
  "theater-handler-store",
- "theater-handler-supervisor",
  "theater-handler-tcp",
  "theater-handler-terminal",
  "theater-handler-timer",

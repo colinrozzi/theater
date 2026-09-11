@@ -2,7 +2,8 @@ package component:{{project_name}};
 
 world default {
     import theater:simple/self;
-    import theater:simple/supervisor;
+    import theater:simple/runtime;
+    import theater:simple/lifecycle;
     export theater:simple/actor;
-    export theater:simple/supervisor-handlers;
+    export theater:simple/lifecycle-handlers;
 }

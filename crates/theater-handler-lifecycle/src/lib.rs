@@ -275,6 +275,17 @@ impl Handler for LifecycleHandler {
             self.event_tx.clone(),
             self.subs.clone(),
         );
+        let subscribe = (
+            self.theater_tx.clone(),
+            self.event_tx.clone(),
+            self.subs.clone(),
+            self.self_id.clone(),
+        );
+        let unsubscribe = (
+            self.theater_tx.clone(),
+            self.event_tx.clone(),
+            self.subs.clone(),
+        );
 
         // link(subject) -> result<_, string>
         imports.define(
@@ -333,6 +344,39 @@ impl Handler for LifecycleHandler {
             "unmonitor",
             pact_result_host_fn(move |input: Value| {
                 let (theater_tx, event_tx, subs) = unmonitor.clone();
+                async move {
+                    remove_subscription(&input, &theater_tx, event_tx, &subs, Target::DeliverToWasm)
+                }
+            }),
+        );
+        // subscribe-to-actor(id) -> result<_, string>
+        // A monitor by another name (moved from the former supervisor interface):
+        // deliver the subject's lifecycle events to `handle-lifecycle-event`.
+        imports.define(
+            "theater:simple/lifecycle",
+            "subscribe-to-actor",
+            pact_result_host_fn(move |input: Value| {
+                let (theater_tx, event_tx, subs, self_id) = subscribe.clone();
+                async move {
+                    add_subscription(
+                        id,
+                        &input,
+                        &theater_tx,
+                        event_tx,
+                        &subs,
+                        &self_id,
+                        vec![any_lifecycle_event()],
+                        Target::DeliverToWasm,
+                    )
+                }
+            }),
+        );
+        // unsubscribe-from-actor(id) -> result<_, string>
+        imports.define(
+            "theater:simple/lifecycle",
+            "unsubscribe-from-actor",
+            pact_result_host_fn(move |input: Value| {
+                let (theater_tx, event_tx, subs) = unsubscribe.clone();
                 async move {
                     remove_subscription(&input, &theater_tx, event_tx, &subs, Target::DeliverToWasm)
                 }

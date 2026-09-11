@@ -15,8 +15,8 @@ use theater::actor::types::{ActorControl, ActorInfo, ActorOperation};
 use theater::handler::{Handler, SharedActorInstance};
 use theater::messages::TheaterCommand;
 use theater::shutdown::{ShutdownController, ShutdownType};
+use theater_handler_runtime::RuntimeHostConfig;
 use theater_handler_self::SelfHostConfig;
-use theater_handler_supervisor::SupervisorHostConfig;
 
 /// Timeout for handler shutdown tests
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
@@ -235,17 +235,17 @@ async fn test_message_server_handler_shutdown_without_register() {
 }
 
 // ============================================================================
-// Supervisor Handler Tests
+// Runtime (control-plane) Handler Tests
 // ============================================================================
 
 #[tokio::test]
-async fn test_supervisor_handler_shutdown() {
-    use theater_handler_supervisor::SupervisorHandler;
+async fn test_runtime_control_handler_shutdown() {
+    use theater_handler_runtime::RuntimeHandler;
 
-    let config = SupervisorHostConfig {};
-    let handler = SupervisorHandler::new(config, None);
+    let config = RuntimeHostConfig {};
+    let handler = RuntimeHandler::new(config, None);
 
-    verify_handler_shutdown(handler, "Supervisor")
+    verify_handler_shutdown(handler, "Runtime (control)")
         .await
-        .expect("Supervisor handler should shutdown cleanly");
+        .expect("Runtime (control) handler should shutdown cleanly");
 }

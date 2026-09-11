@@ -6,7 +6,7 @@
 //! It's the stage the actors perform on.
 //!
 //! [`standard_handlers`] builds a [`HandlerRegistry`] with the standard battery of
-//! handlers (self, lifecycle, store, supervisor, runtime, message-server, rpc,
+//! handlers (self, lifecycle, store, runtime, message-server, rpc,
 //! tcp, terminal, timer, loop, podman, http-client). It is the *single* answer to
 //! "what is a standard Theater node," reused by the CLI, the integration tests,
 //! and any embedder — instead of each hand-rolling the same registration.
@@ -38,7 +38,6 @@ use theater_handler_rpc::RpcHandler;
 use theater_handler_runtime::{RuntimeHandler, RuntimeHostConfig};
 use theater_handler_self::{SelfHandler, SelfHostConfig};
 use theater_handler_store::{StoreHandler, StoreHandlerConfig};
-use theater_handler_supervisor::{SupervisorHandler, SupervisorHostConfig};
 use theater_handler_tcp::{TcpHandler, TcpHandlerConfig};
 use theater_handler_terminal::{TerminalHandler, TerminalHandlerConfig};
 use theater_handler_timer::{TimerHandler, TimerHandlerConfig};
@@ -48,7 +47,7 @@ pub struct StandardHandlers {
     /// Stream each actor's `log` host calls to the process's tracing output.
     pub show_actor_logs: bool,
     /// Shared fetch cache for `static_package` child spawns. Handed to the
-    /// supervisor handler so repeat spawns of the same wasm hit the cache.
+    /// runtime handler so repeat spawns of the same wasm hit the cache.
     pub resource_cache: Arc<ResourceCache>,
 }
 
@@ -85,14 +84,13 @@ pub fn standard_handlers(
     // Store — content-addressed storage.
     registry.register(StoreHandler::new(StoreHandlerConfig::default(), None));
 
-    // Supervisor — spawn/manage child actors; wired to the shared fetch cache.
+    // Runtime (control) — spawn/inspect/drive any actor + shutdown +
+    // subscribe-to-spawns; capability-gated. Wired to the shared fetch cache so
+    // repeat spawns of the same static_package wasm hit the cache.
     registry.register(
-        SupervisorHandler::new(SupervisorHostConfig {}, None)
+        RuntimeHandler::new(RuntimeHostConfig {}, None)
             .with_resource_cache(opts.resource_cache.clone()),
     );
-
-    // Runtime (system) — shutdown-runtime + subscribe-to-spawns; capability-gated.
-    registry.register(RuntimeHandler::new(RuntimeHostConfig {}, None));
 
     // Message-server — inter-actor messaging.
     registry.register(MessageServerHandler::new(None, MessageRouter::new()));

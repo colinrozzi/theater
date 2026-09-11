@@ -20,9 +20,9 @@ use theater::utils::ResourceCache;
 use theater_handler_loop::LoopHandler;
 use theater_handler_message_server::{MessageRouter, MessageServerHandler};
 use theater_handler_rpc::RpcHandler;
+use theater_handler_runtime::{RuntimeHandler, RuntimeHostConfig};
 use theater_handler_self::{SelfHandler, SelfHostConfig};
 use theater_handler_store::{StoreHandler, StoreHandlerConfig};
-use theater_handler_supervisor::{SupervisorHandler, SupervisorHostConfig};
 use theater_handler_tcp::{TcpHandler, TcpHandlerConfig};
 use theater_handler_timer::{TimerHandler, TimerHandlerConfig};
 use tokio::sync::{mpsc, oneshot};
@@ -327,11 +327,11 @@ async fn test_multiple_actor_shutdown_timing() {
     let _ = tokio::time::timeout(Duration::from_secs(2), runtime_handle).await;
 }
 
-/// Test shutdown timing with supervisor handler registered.
-/// The supervisor handler has more complex shutdown handling including
-/// cloned instances that need to properly respond to shutdown signals.
+/// Test shutdown timing with the runtime (control) handler registered.
+/// The runtime handler runs a background spawn-notification loop that must
+/// respond promptly to shutdown signals.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn test_actor_shutdown_with_supervisor_handler() {
+async fn test_actor_shutdown_with_runtime_handler() {
     // Initialize tracing for test output
     let _ = tracing_subscriber::fmt()
         .with_env_filter("info,theater=debug")
@@ -364,14 +364,14 @@ async fn test_actor_shutdown_with_supervisor_handler() {
     let (theater_tx, theater_rx) = mpsc::unbounded_channel::<TheaterCommand>();
     let theater_tx_clone = theater_tx.clone();
 
-    // Create handler registry with runtime AND supervisor handlers
+    // Create handler registry with self AND runtime (control) handlers
     let mut handler_registry = HandlerRegistry::new();
-    let runtime_config = SelfHostConfig {};
-    handler_registry.register(SelfHandler::new(runtime_config, theater_tx.clone(), None));
+    let self_config = SelfHostConfig {};
+    handler_registry.register(SelfHandler::new(self_config, theater_tx.clone(), None));
 
-    // Add supervisor handler - this was identified as potentially problematic
-    let supervisor_config = SupervisorHostConfig {};
-    handler_registry.register(SupervisorHandler::new(supervisor_config, None));
+    // Add runtime (control) handler - its background loop must shut down promptly
+    let runtime_config = RuntimeHostConfig {};
+    handler_registry.register(RuntimeHandler::new(runtime_config, None));
 
     // Create and start the theater runtime
     let runtime_handle = tokio::spawn(async move {
@@ -390,9 +390,9 @@ async fn test_actor_shutdown_with_supervisor_handler() {
 
     tokio::time::sleep(Duration::from_millis(50)).await;
 
-    // Create manifest with both runtime and supervisor handlers
+    // Create manifest with both self and runtime (control) handlers
     let manifest = ManifestConfig {
-        name: "shutdown-test-supervisor".to_string(),
+        name: "shutdown-test-runtime".to_string(),
         version: "0.1.0".to_string(),
         package: wasm_path.to_string(),
         description: None,
@@ -400,19 +400,16 @@ async fn test_actor_shutdown_with_supervisor_handler() {
         initial_state: None,
         static_package: false,
         permission_policy: HandlerPermissionPolicy::default(),
-        handlers: vec![
-            HandlerConfig::unit("self"),
-            HandlerConfig::unit("supervisor"),
-        ],
+        handlers: vec![HandlerConfig::unit("self"), HandlerConfig::unit("runtime")],
     };
 
     // Spawn the actor
-    info!("=== Spawning actor with supervisor handler ===");
+    info!("=== Spawning actor with runtime handler ===");
     let (spawn_tx, spawn_rx) = oneshot::channel();
     theater_tx
         .send(TheaterCommand::SetupActor {
             wasm_bytes: wasm_bytes.clone(),
-            name: Some("shutdown-test-supervisor".to_string()),
+            name: Some("shutdown-test-runtime".to_string()),
             manifest: Some(manifest),
             init_state: default_init_state(),
             response_tx: spawn_tx,
@@ -432,7 +429,7 @@ async fn test_actor_shutdown_with_supervisor_handler() {
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     // Now stop the actor and measure how long it takes
-    info!("=== Stopping actor with supervisor handler ===");
+    info!("=== Stopping actor with runtime handler ===");
     let (stop_tx, stop_rx) = oneshot::channel();
     let stop_start = Instant::now();
 
@@ -451,19 +448,18 @@ async fn test_actor_shutdown_with_supervisor_handler() {
     let shutdown_duration = stop_start.elapsed();
 
     info!(
-        "Actor with supervisor shutdown completed in {:?} (result: {:?})",
+        "Actor with runtime handler shutdown completed in {:?} (result: {:?})",
         shutdown_duration, stop_result
     );
 
     assert!(
         shutdown_duration < MAX_SHUTDOWN_TIME,
-        "Actor shutdown with supervisor handler took {:?}, exceeds {:?}. \
-         This confirms the supervisor handler shutdown bug.",
+        "Actor shutdown with runtime handler took {:?}, exceeds {:?}.",
         shutdown_duration,
         MAX_SHUTDOWN_TIME
     );
 
-    info!("=== Supervisor handler shutdown test PASSED ===");
+    info!("=== Runtime handler shutdown test PASSED ===");
 
     drop(theater_tx);
     let _ = tokio::time::timeout(Duration::from_secs(2), runtime_handle).await;
@@ -518,8 +514,8 @@ async fn test_actor_shutdown_with_all_handlers() {
     // Store handler
     handler_registry.register(StoreHandler::new(StoreHandlerConfig::default(), None));
 
-    // Supervisor handler
-    handler_registry.register(SupervisorHandler::new(SupervisorHostConfig {}, None));
+    // Runtime (control) handler
+    handler_registry.register(RuntimeHandler::new(RuntimeHostConfig {}, None));
 
     // Message server handler
     let message_router = MessageRouter::new();
