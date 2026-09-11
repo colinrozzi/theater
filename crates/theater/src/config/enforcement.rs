@@ -114,9 +114,6 @@ pub fn validate_manifest_permissions(
             "self" | "runtime" if effective_permissions.runtime.is_none() => {
                 return Err(deny("runtime"));
             }
-            "supervisor" if effective_permissions.supervisor.is_none() => {
-                return Err(deny("supervisor"));
-            }
             "store" if effective_permissions.store.is_none() => {
                 return Err(deny("store"));
             }

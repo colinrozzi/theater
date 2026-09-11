@@ -1,12 +1,13 @@
-//! Verifies the migrated supervisor test-actors against the reshaped
-//! `theater:simple/supervisor` interface.
+//! Verifies the migrated actor-management test-actors against the runtime
+//! control interface `theater:simple/runtime` (which absorbed the former
+//! supervisor ops).
 //!
-//! Both actors declare `actor-info` + `supervisor-error` in their `pack_types!`
-//! metadata and import the new view-scoped ops (`list-actors` / `spawn` /
+//! Both actors declare `actor-info` + `runtime-error` in their `pack_types!`
+//! metadata and import the actor-management ops (`list-actors` / `spawn` /
 //! `stop-actor`). The host enforces an interface *subset hash* at setup, so if
 //! those type declarations don't mirror the pact exactly, the actor compiles but
 //! fails to instantiate ("Interface hash mismatch"). Spawning each actor under a
-//! real `TheaterRuntime` with the supervisor handler registered therefore proves
+//! real `TheaterRuntime` with the runtime handler registered therefore proves
 //! the migration is correct end-to-end: a successful spawn means setup +
 //! interface-hash verification + `init` all passed.
 
@@ -21,9 +22,9 @@ use theater::pack_bridge::{Value, ValueType};
 use theater::utils::ResourceCache;
 use theater_handler_lifecycle::LifecycleHandler;
 use theater_handler_message_server::{MessageRouter, MessageServerHandler};
+use theater_handler_runtime::{RuntimeHandler, RuntimeHostConfig};
 use theater_handler_self::{SelfHandler, SelfHostConfig};
 use theater_handler_store::{StoreHandler, StoreHandlerConfig};
-use theater_handler_supervisor::{SupervisorHandler, SupervisorHostConfig};
 use tokio::sync::{mpsc, oneshot};
 
 const SPAWN_TIMEOUT: Duration = Duration::from_secs(10);
@@ -41,14 +42,15 @@ fn full_registry(theater_tx: mpsc::UnboundedSender<TheaterCommand>) -> HandlerRe
     ));
     registry.register(LifecycleHandler::new(theater_tx));
     registry.register(StoreHandler::new(StoreHandlerConfig::default(), None));
-    registry.register(SupervisorHandler::new(SupervisorHostConfig {}, None));
+    registry.register(RuntimeHandler::new(RuntimeHostConfig {}, None));
     registry.register(MessageServerHandler::new(None, MessageRouter::new()));
     registry
 }
 
-/// A manifest that grants the supervisor capability. `supervisor: Inherit` takes
-/// the parent's grant, and a top-level spawn's parent is `HandlerPermission::root()`
-/// (scope: all, inspect + mutate) — so the actor gets full supervisor access.
+/// A manifest that grants the runtime (control) capability. `runtime: Inherit`
+/// takes the parent's grant, and a top-level spawn's parent is
+/// `HandlerPermission::root()` (inspect + mutate) — so the actor gets full
+/// runtime-control access.
 fn granted_manifest(name: &str, wasm_path: &str, handlers: Vec<HandlerConfig>) -> ManifestConfig {
     ManifestConfig {
         name: name.to_string(),
@@ -59,7 +61,7 @@ fn granted_manifest(name: &str, wasm_path: &str, handlers: Vec<HandlerConfig>) -
         initial_state: None,
         static_package: false,
         permission_policy: HandlerPermissionPolicy {
-            supervisor: HandlerInheritance::Inherit,
+            runtime: HandlerInheritance::Inherit,
             ..Default::default()
         },
         handlers,
@@ -129,9 +131,9 @@ fn wasm_path(actor_dir: &str, wasm_name: &str) -> String {
     )
 }
 
-/// multi-handler-test imports `theater:simple/supervisor.list-actors` and calls
-/// it from `init`. A successful spawn proves the `actor-info`/`supervisor-error`
-/// declarations hash-match the host's supervisor interface.
+/// multi-handler-test imports `theater:simple/runtime.list-actors` and calls
+/// it from `init`. A successful spawn proves the `actor-info`/`runtime-error`
+/// declarations hash-match the host's runtime interface.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn multi_handler_actor_instantiates_against_reshaped_supervisor() {
     let _ = tracing_subscriber::fmt()
@@ -150,7 +152,7 @@ async fn multi_handler_actor_instantiates_against_reshaped_supervisor() {
         vec![
             HandlerConfig::unit("self"),
             HandlerConfig::new("store", StoreHandlerConfig::default()),
-            HandlerConfig::unit("supervisor"),
+            HandlerConfig::unit("runtime"),
         ],
     );
 
@@ -162,10 +164,9 @@ async fn multi_handler_actor_instantiates_against_reshaped_supervisor() {
     );
 }
 
-/// supervisor-replay-test imports `spawn` / `list-actors` / `stop-actor` and
-/// exports `handle-lifecycle-event` (the single death callback that replaced the
-/// error/exit/external-stop trio). A successful spawn proves all four reshaped
-/// signatures hash-match the host.
+/// supervisor-replay-test imports `runtime.{spawn, list-actors, stop-actor}` and
+/// exports `lifecycle-handlers.handle-lifecycle-event`. A successful spawn proves
+/// all four reshaped signatures hash-match the host.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn supervisor_replay_actor_instantiates_against_reshaped_supervisor() {
     let _ = tracing_subscriber::fmt()
@@ -186,7 +187,7 @@ async fn supervisor_replay_actor_instantiates_against_reshaped_supervisor() {
         &path,
         vec![
             HandlerConfig::unit("self"),
-            HandlerConfig::unit("supervisor"),
+            HandlerConfig::unit("runtime"),
             HandlerConfig::unit("message-server"),
         ],
     );

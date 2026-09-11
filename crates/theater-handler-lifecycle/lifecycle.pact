@@ -29,5 +29,14 @@ interface lifecycle {
 
         // Remove the caller's monitor of `subject`.
         unmonitor: func(subject: string) -> result<_, string>
+
+        // Subscribe to an actor's lifecycle events, delivered to the caller's
+        // `handle-lifecycle-event` export. A monitor by another name (moved here
+        // from the former supervisor interface). Opt-in and idempotent.
+        subscribe-to-actor: func(id: string) -> result<_, string>
+
+        // Stop receiving events from an actor. Idempotent; subscriptions are
+        // also auto-released when the actor exits.
+        unsubscribe-from-actor: func(id: string) -> result<_, string>
     }
 }

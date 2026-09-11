@@ -25,9 +25,9 @@ use theater::utils::ResourceCache;
 
 // Import Theater-specific handlers
 use theater_handler_message_server::MessageServerHandler;
+use theater_handler_runtime::{RuntimeHandler, RuntimeHostConfig};
 use theater_handler_self::{SelfHandler, SelfHostConfig};
 use theater_handler_store::{StoreHandler, StoreHandlerConfig};
-use theater_handler_supervisor::{SupervisorHandler, SupervisorHostConfig};
 
 /// Creates a HandlerRegistry with Theater-specific handlers.
 fn create_handler_registry(
@@ -37,20 +37,20 @@ fn create_handler_registry(
 
     info!("Registering Theater-specific handlers...");
 
-    // Runtime handler - provides actor runtime information and control
-    info!("  - Registering runtime handler");
-    let runtime_config = SelfHostConfig {};
-    registry.register(SelfHandler::new(runtime_config, theater_tx, None));
+    // Self handler - provides the per-actor handle (log, self, shutdown)
+    info!("  - Registering self handler");
+    let self_config = SelfHostConfig {};
+    registry.register(SelfHandler::new(self_config, theater_tx, None));
 
     // Store handler - provides key-value storage for actors
     info!("  - Registering store handler");
     let store_config = StoreHandlerConfig::default();
     registry.register(StoreHandler::new(store_config, None));
 
-    // Supervisor handler - allows actors to spawn and manage child actors
-    info!("  - Registering supervisor handler");
-    let supervisor_config = SupervisorHostConfig {};
-    registry.register(SupervisorHandler::new(supervisor_config, None));
+    // Runtime (control) handler - spawn/inspect/drive any actor, capability-gated
+    info!("  - Registering runtime (control) handler");
+    let runtime_config = RuntimeHostConfig {};
+    registry.register(RuntimeHandler::new(runtime_config, None));
 
     // Message server handler - provides inter-actor messaging
     info!("  - Registering message-server handler");
@@ -76,9 +76,9 @@ async fn main() -> Result<()> {
     info!("==================================");
     info!("");
     info!("This example demonstrates a Theater runtime with Theater-specific handlers:");
-    info!("  - runtime         - Runtime functions (log, get-state, shutdown)");
+    info!("  - self            - Per-actor handle (log, self, shutdown)");
     info!("  - store           - Content-addressed storage");
-    info!("  - supervisor      - Actor supervision");
+    info!("  - runtime         - Actor spawn/inspect/drive (control plane)");
     info!("  - message-server  - Inter-actor messaging");
     info!("");
     info!("The old WASI handlers (environment, filesystem, http, timing, random,");
