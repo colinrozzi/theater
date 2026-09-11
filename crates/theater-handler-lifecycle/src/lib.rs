@@ -6,8 +6,8 @@
 //!
 //! - [`link`] / `unlink` — **fate-sharing**: when the subject terminates, the
 //!   linking actor is stopped (cause `PeerKilled`).
-//! - [`monitor`] / `unmonitor` — **watching**: the subject's matching events are
-//!   delivered to the actor's `handle-lifecycle-event` export.
+//! - [`monitor`] / `unmonitor` — **watching**: the subject's whole chain is
+//!   delivered to the actor's `handle-actor-event` export.
 //!
 //! Both are the *same* mechanism: `link`/`monitor` subscribe this actor's
 //! handler to the subject's chain (via `SubscribeToActor`) and record a
@@ -17,10 +17,11 @@
 //! export. The runtime is not in this path; fate and watching both flow chain →
 //! handler → (stop | wasm).
 //!
-//! Default filters are fixed (link → any termination, monitor → any lifecycle
-//! event); [`monitor-filtered`](Handler) lets a caller supply its own
-//! `packr_abi::Pattern` (crossing the wasm↔host boundary as a serialized
-//! `value`) to narrow the delivered stream — otherwise identical to `monitor`.
+//! `link` keys on any termination; a bare `monitor` watches the **whole chain**
+//! (a match-all `Pattern`, so every chain event of the subject is delivered).
+//! [`monitor-filtered`](Handler) lets a caller supply its own `packr_abi::Pattern`
+//! (crossing the wasm↔host boundary as a serialized `value`) to narrow the
+//! delivered stream — otherwise identical to `monitor`.
 
 use std::collections::HashMap;
 use std::future::Future;
@@ -36,7 +37,7 @@ use theater::handler::{Handler, HandlerContext, SharedActorInstance};
 use theater::id::TheaterId;
 use theater::messages::TheaterCommand;
 use theater::shutdown::ShutdownReceiver;
-use theater::subscription::{any_lifecycle_event, any_termination, Target};
+use theater::subscription::{any_termination, Target};
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::UnboundedSender;
 
@@ -46,7 +47,7 @@ use theater::pack_bridge::{
 
 /// Import side: `link`/`monitor` host functions the actor calls.
 const LIFECYCLE_PACT: &str = include_str!("../lifecycle.pact");
-/// Export side: the `handle-lifecycle-event` callback the actor implements. The
+/// Export side: the `handle-actor-event` callback the actor implements. The
 /// canonical contract source; exports are matched by name (`has_export`), so
 /// this is consumed by the test + downstream actors rather than the handler.
 #[allow(dead_code)]
@@ -76,10 +77,6 @@ fn lifecycle_handlers_interface() -> InterfaceImpl {
         .expect("embedded lifecycle-handlers.pact should be valid");
     InterfaceImpl::from_pact(&pact)
 }
-
-/// The set of chain event-types that count as lifecycle events. Non-lifecycle
-/// chain events (wasm/host-function) are cheaply skipped before any decode.
-const LIFECYCLE_EVENT_TYPES: &[&str] = &["spawned", "paused", "resumed", "terminated"];
 
 /// Handler providing `theater:simple/lifecycle` (link / monitor) to actors.
 ///
@@ -185,10 +182,7 @@ impl Handler for LifecycleHandler {
                 let mut guard = actor_instance.write().await;
                 match guard.as_mut() {
                     Some(inst) => inst
-                        .has_export(
-                            "theater:simple/lifecycle-handlers",
-                            "handle-lifecycle-event",
-                        )
+                        .has_export("theater:simple/lifecycle-handlers", "handle-actor-event")
                         .await
                         .unwrap_or(false),
                     None => false,
@@ -198,10 +192,9 @@ impl Handler for LifecycleHandler {
             loop {
                 tokio::select! {
                     Some((subject_id, event)) = event_rx.recv() => {
-                        // Cheap event-type pre-filter (v1 filters are lifecycle-only).
-                        if !LIFECYCLE_EVENT_TYPES.contains(&event.event_type.as_str()) {
-                            continue;
-                        }
+                        // The Pattern does all filtering now — a bare `monitor`
+                        // watches the whole chain (match-all), `monitor-filtered`
+                        // narrows it. Every delivered event is decoded and matched.
                         let value = match decode_chain_event_payload(&event.data) {
                             Some(payload) => Value::from(payload),
                             None => continue,
@@ -243,13 +236,13 @@ impl Handler for LifecycleHandler {
                                         ]);
                                         if let Err(e) = actor_handle
                                             .call_function(
-                                                "theater:simple/lifecycle-handlers.handle-lifecycle-event"
+                                                "theater:simple/lifecycle-handlers.handle-actor-event"
                                                     .to_string(),
                                                 params,
                                             )
                                             .await
                                         {
-                                            error!("handle-lifecycle-event delivery failed: {}", e);
+                                            error!("handle-actor-event delivery failed: {}", e);
                                         }
                                     }
                                 }
@@ -306,17 +299,6 @@ impl Handler for LifecycleHandler {
             self.event_tx.clone(),
             self.subs.clone(),
         );
-        let subscribe = (
-            self.theater_tx.clone(),
-            self.event_tx.clone(),
-            self.subs.clone(),
-            self.self_id.clone(),
-        );
-        let unsubscribe = (
-            self.theater_tx.clone(),
-            self.event_tx.clone(),
-            self.subs.clone(),
-        );
 
         // link(subject) -> result<_, string>
         imports.define(
@@ -339,6 +321,8 @@ impl Handler for LifecycleHandler {
             }),
         );
         // monitor(subject) -> result<_, string>
+        // A bare monitor watches the WHOLE chain: a match-all `Pattern::any()`
+        // filter, so every chain event of the subject is delivered.
         imports.define(
             "theater:simple/lifecycle",
             "monitor",
@@ -352,7 +336,7 @@ impl Handler for LifecycleHandler {
                         event_tx,
                         &subs,
                         &self_id,
-                        vec![any_lifecycle_event()],
+                        vec![Pattern::any()],
                         Target::DeliverToWasm,
                     )
                 }
@@ -360,7 +344,7 @@ impl Handler for LifecycleHandler {
         );
         // monitor-filtered(subject, filter) -> result<_, string>
         // Like `monitor`, but the caller supplies the match filter (a serialized
-        // `packr_abi::Pattern`) instead of the fixed `any_lifecycle_event()`.
+        // `packr_abi::Pattern`) instead of the whole-chain `Pattern::any()`.
         imports.define(
             "theater:simple/lifecycle",
             "monitor-filtered",
@@ -403,40 +387,6 @@ impl Handler for LifecycleHandler {
                 }
             }),
         );
-        // subscribe-to-actor(id) -> result<_, string>
-        // A monitor by another name (moved from the former supervisor interface):
-        // deliver the subject's lifecycle events to `handle-lifecycle-event`.
-        imports.define(
-            "theater:simple/lifecycle",
-            "subscribe-to-actor",
-            pact_result_host_fn(move |input: Value| {
-                let (theater_tx, event_tx, subs, self_id) = subscribe.clone();
-                async move {
-                    add_subscription(
-                        id,
-                        &input,
-                        &theater_tx,
-                        event_tx,
-                        &subs,
-                        &self_id,
-                        vec![any_lifecycle_event()],
-                        Target::DeliverToWasm,
-                    )
-                }
-            }),
-        );
-        // unsubscribe-from-actor(id) -> result<_, string>
-        imports.define(
-            "theater:simple/lifecycle",
-            "unsubscribe-from-actor",
-            pact_result_host_fn(move |input: Value| {
-                let (theater_tx, event_tx, subs) = unsubscribe.clone();
-                async move {
-                    remove_subscription(&input, &theater_tx, event_tx, &subs, Target::DeliverToWasm)
-                }
-            }),
-        );
-
         ctx.mark_satisfied("theater:simple/lifecycle");
         info!("lifecycle handler host functions registered");
         Ok(())
@@ -543,6 +493,7 @@ fn remove_subscription(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use theater::subscription::any_lifecycle_event;
 
     #[test]
     fn handler_name_and_interface_hashes_are_stable() {
