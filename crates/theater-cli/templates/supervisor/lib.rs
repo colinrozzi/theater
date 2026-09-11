@@ -22,7 +22,7 @@ impl Guest for Component {
         // Actor management is now a runtime primitive: spawn/stop/inspect any
         // actor by id via `theater:simple/runtime`, and attach a monitor via
         // `theater:simple/lifecycle` so a child's terminal event is delivered to
-        // `handle-lifecycle-event` below. (There is no separate supervisor
+        // `handle-actor-event` below. (There is no separate supervisor
         // interface anymore, and spawn no longer auto-monitors — attach the
         // monitor explicitly after spawning.)
 
@@ -41,11 +41,12 @@ impl Guest for Component {
 }
 
 impl LifecycleHandlers for Component {
-    // The single death/lifecycle callback (it replaced the old
-    // error/exit/external-stop trio). Fires for every actor this one monitors.
-    // `subject` is the monitored actor's id; `data` is the pack-encoded
-    // lifecycle event payload (decode for the cause + final state).
-    fn handle_lifecycle_event(
+    // The single chain-event callback (it replaced the old
+    // error/exit/external-stop trio). Fires for every event of every actor this
+    // one monitors — a bare monitor watches the whole chain. `subject` is the
+    // monitored actor's id; `data` is the pack-encoded chain event payload
+    // (decode for the cause + final state).
+    fn handle_actor_event(
         subject: String,
         event_type: String,
         _data: Vec<u8>,

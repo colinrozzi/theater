@@ -10,7 +10,7 @@ ad-hoc "supervision tree + handler-driven cascade" model.
 > live actors. Every relationship (link / monitor) lives in the `lifecycle`
 > handler, which subscribes to the subject's chain, matches events host-side, and
 > acts per `Target` — `StopSelf` issues `PeerTerminated` (fate), `DeliverToWasm`
-> calls the actor's `handle-lifecycle-event` (watch). The death cascade is
+> calls the actor's `handle-actor-event` (watch). The death cascade is
 > **emergent**: each death emits its terminal chain event, linked peers' handlers
 > match it and stop themselves, and their deaths ripple the same way — one hop per
 > death, no central walk. **Supervision is the supervisor handler's job**: it
@@ -226,12 +226,12 @@ A new low-level handler is the *actor-facing* API; the runtime is the engine.
   - `link(subject, filter)` — write a `stop-self` subscription.
   - `monitor(subject, filter)` — write a `deliver-to-wasm` subscription.
   - `unlink(subject)` / `unmonitor(subject)`.
-- **Export (for `deliver-to-wasm`):** `handle-lifecycle-event(subject, event)`.
+- **Export (for `deliver-to-wasm`):** `handle-actor-event(subject, event)`.
 - **Permission-gated** like every other capability (see §6).
 
 Everything else recasts as a *consumer* of this substrate:
 
-- `subscribe-to-actor` = `monitor(subject, filter = all)`.
+- `subscribe-to-actor` = a bare `monitor(subject)` (now full-chain, `filter = all`).
 - The `handle-actor-error` / `handle-actor-exit` / `handle-actor-external-stop`
   callback trio → filtered monitors on the terminal event → **the
   lifecycle-callback-consolidation** collapses into this automatically.
@@ -245,7 +245,7 @@ Everything else recasts as a *consumer* of this substrate:
 | Layer | Owns |
 |---|---|
 | **Runtime core** | subscriptions on each `ActorProcess` (`subscribers`, single source of truth, lazy prune); host-side filtering; dispatch; the one action `stop-self`; the single death/chain-event stream. |
-| **`lifecycle` handler** | actor-facing capability (`link`/`monitor` + filter), `handle-lifecycle-event` delivery. |
+| **`lifecycle` handler** | actor-facing capability (`link`/`monitor` + filter), `handle-actor-event` delivery. |
 | **`supervisor` handler** | policy only — restart strategy/ordering, view-scope — as a consumer of the above. |
 
 ## 7. Open questions / decisions to make

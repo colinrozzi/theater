@@ -9,7 +9,7 @@ interface runtime-handlers {
     exports {
         // A new actor was spawned anywhere in the runtime. `parent-id` is its
         // spawning supervisor (`none` for a root actor). The observer typically
-        // reacts by calling supervisor.subscribe-to-actor(id) to follow it.
+        // reacts by calling lifecycle.monitor(id) to follow it.
         handle-actor-spawn: func(id: string, name: string, parent-id: option<string>) -> result<_, string>
     }
 }

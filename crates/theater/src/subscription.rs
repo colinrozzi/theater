@@ -18,7 +18,7 @@ pub enum Target {
     /// handler enacts it by issuing `PeerTerminated`; it never enters wasm.
     StopSelf,
     /// The matching event is delivered to the subscriber's wasm via the
-    /// `lifecycle` handler's `handle-lifecycle-event` export (a **monitor**).
+    /// `lifecycle` handler's `handle-actor-event` export (a **monitor**).
     DeliverToWasm,
 }
 

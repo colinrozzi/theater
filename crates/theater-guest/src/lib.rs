@@ -46,6 +46,8 @@ pub use packr_guest;
 /// plus a `theater:simple/actor.get-state` export. See its docs for the shape.
 pub use theater_guest_macros::State;
 
+pub mod filters;
+
 use core::cell::UnsafeCell;
 
 /// A module-global slot holding an actor's state inside the wasm module.
