@@ -8,7 +8,7 @@
 //! none — it only acts on init.
 //!
 //! (Its sibling primitive is `monitor`, which instead *delivers* the subject's
-//! lifecycle events to `handle-lifecycle-event` without sharing fate.)
+//! chain events to `handle-actor-event` without sharing fate.)
 
 #![no_std]
 extern crate alloc;

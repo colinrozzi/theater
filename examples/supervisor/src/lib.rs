@@ -3,7 +3,7 @@
 //! On init this actor spawns a child from a manifest (here the sibling `hello`
 //! example) via `theater:simple/runtime.spawn`, then `theater:simple/lifecycle.monitor`s
 //! it. When the child terminates the lifecycle handler invokes this actor's
-//! `handle-lifecycle-event` with the child's terminal event. That's the whole
+//! `handle-actor-event` with the child's terminal event. That's the whole
 //! supervision model in one actor now that actor-management is a runtime
 //! primitive (there is no separate supervisor interface, and spawn no longer
 //! auto-monitors — you attach a monitor explicitly). State lives inside the
@@ -62,7 +62,7 @@ pack_types! {
     }
     exports {
         theater:simple/actor.init: func(config: value) -> result<_, string>,
-        theater:simple/lifecycle-handlers.handle-lifecycle-event: func(subject: string, event-type: string, data: list<u8>) -> result<_, string>,
+        theater:simple/lifecycle-handlers.handle-actor-event: func(subject: string, event-type: string, data: list<u8>) -> result<_, string>,
     }
 }
 
@@ -99,7 +99,7 @@ fn init(_config: Value) -> Value {
             Some(Value::String(id)) => {
                 log(format!("supervisor: spawned child {}", id));
                 // Attach a monitor so the child's terminal event is delivered
-                // to our handle-lifecycle-event (spawn no longer auto-monitors).
+                // to our handle-actor-event (spawn no longer auto-monitors).
                 if let Err(e) = lifecycle_monitor(id) {
                     log(format!("supervisor: monitor failed: {}", e));
                 }
@@ -113,8 +113,8 @@ fn init(_config: Value) -> Value {
 
 /// The lifecycle handler calls this when a monitored child terminates. The
 /// params are (child-id, event-type, terminal-payload-bytes); we just log it.
-#[export(name = "theater:simple/lifecycle-handlers.handle-lifecycle-event")]
-fn handle_lifecycle_event(input: Value) -> Value {
+#[export(name = "theater:simple/lifecycle-handlers.handle-actor-event")]
+fn handle_actor_event(input: Value) -> Value {
     let id = match &input {
         Value::Tuple(items) if !items.is_empty() => match &items[0] {
             Value::String(s) => s.clone(),

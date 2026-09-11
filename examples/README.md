@@ -8,7 +8,7 @@ the runtime. They target the current `packr-guest` (0.23) and the current
 |---|---|---|
 | [`hello`](hello) | The minimal actor: `init` + `self.log` | `self` |
 | [`counter`](counter) | State + inter-actor messaging (`register` / `handle-send`) | `self`, `message-server` |
-| [`supervisor`](supervisor) | Spawning a child and learning of its death via `handle-lifecycle-event` (auto-monitor) | `self`, `supervisor` |
+| [`supervisor`](supervisor) | Spawning a child and learning of its death via `handle-actor-event` (auto-monitor) | `self`, `supervisor` |
 | [`link`](link) | Fate-sharing between actors (`lifecycle.link` — subject dies ⇒ this actor stops) | `self`, `lifecycle` |
 | [`store`](store) | Content-addressed storage: put / get / label | `self`, `store` |
 

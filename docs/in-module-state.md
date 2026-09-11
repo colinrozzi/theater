@@ -76,8 +76,8 @@ serializability, not even that it be exposed at all.
   its state in linear memory. `get-actor-state` becomes: *if the actor exports
   `theater:simple/.../get-state`, call it and return the serialized value; else
   return "opaque".* This is exactly the **optional-export-gated-by-`has_export`**
-  pattern the supervisor/lifecycle handlers already use (`handle-lifecycle-event`,
-  `handle-actor-event`). No new mechanism.
+  pattern the runtime/lifecycle handlers already use (`handle-actor-event`,
+  `handle-actor-spawn`). No new mechanism.
 - **Historical / time-travel inspection** ("what was the state at event 400?")
   becomes: replay the chain to event 400, then call `get-state` on the replayed
   instance — recovering exactly what the in-chain snapshot would have given you.

@@ -165,7 +165,7 @@ async fn multi_handler_actor_instantiates_against_reshaped_supervisor() {
 }
 
 /// supervisor-replay-test imports `runtime.{spawn, list-actors, stop-actor}` and
-/// exports `lifecycle-handlers.handle-lifecycle-event`. A successful spawn proves
+/// exports `lifecycle-handlers.handle-actor-event`. A successful spawn proves
 /// all four reshaped signatures hash-match the host.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn supervisor_replay_actor_instantiates_against_reshaped_supervisor() {
@@ -356,7 +356,7 @@ async fn spawn_with_init(
 }
 
 /// Read the monitor-test actor's `received` state field (its record of the last
-/// lifecycle event delivered to `handle-lifecycle-event`).
+/// event delivered to `handle-actor-event`).
 async fn monitor_received(
     theater_tx: &mpsc::UnboundedSender<TheaterCommand>,
     actor: theater::id::TheaterId,
@@ -445,7 +445,7 @@ async fn link_peer_killed_stops_the_linking_actor() {
 
 /// End-to-end proof of `monitor` (DeliverToWasm): a monitor actor watches a
 /// subject, the subject terminates, and the terminal event is delivered to the
-/// monitor's `handle-lifecycle-event` export — event goes chain → lifecycle
+/// monitor's `handle-actor-event` export — event goes chain → lifecycle
 /// handler (host-side filter) → wasm, with the runtime not in the path.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn monitor_delivers_lifecycle_events_to_wasm() {
@@ -475,7 +475,7 @@ async fn monitor_delivers_lifecycle_events_to_wasm() {
     tokio::time::sleep(Duration::from_millis(150)).await;
 
     // Stop the subject -> it terminates -> the terminal event is delivered to
-    // the monitor's handle-lifecycle-event.
+    // the monitor's handle-actor-event.
     stop_actor(&theater_tx, subject).await;
 
     let deadline = std::time::Instant::now() + Duration::from_secs(10);
