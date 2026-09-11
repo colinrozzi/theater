@@ -17,9 +17,10 @@
 //! export. The runtime is not in this path; fate and watching both flow chain →
 //! handler → (stop | wasm).
 //!
-//! v1 filters are fixed (link → any termination, monitor → any lifecycle
-//! event); custom `packr_abi::Pattern` filters follow once patterns cross the
-//! wasm↔host boundary as a pact type.
+//! Default filters are fixed (link → any termination, monitor → any lifecycle
+//! event); [`monitor-filtered`](Handler) lets a caller supply its own
+//! `packr_abi::Pattern` (crossing the wasm↔host boundary as a serialized
+//! `value`) to narrow the delivered stream — otherwise identical to `monitor`.
 
 use std::collections::HashMap;
 use std::future::Future;
@@ -126,6 +127,30 @@ fn parse_subject(input: &Value) -> Result<TheaterId, Value> {
             .map_err(|_| Value::String(format!("invalid subject actor id: {s}"))),
         _ => Err(Value::String("expected subject actor id (string)".into())),
     }
+}
+
+/// Split a `monitor-filtered(subject: string, filter: value)` call into its
+/// subject (kept as a `Value::String` for [`add_subscription`] to re-parse, same
+/// as `monitor`) and a decoded [`Pattern`]. `filter` is a serialized
+/// `packr_abi::Pattern`, decoded via its `TryFrom<Value>`; a malformed pattern
+/// becomes a clean `Err(String)` rather than a host trap.
+fn parse_monitor_filtered(input: Value) -> Result<(Value, Pattern), Value> {
+    let mut args = match input {
+        Value::Tuple(args) if args.len() == 2 => args,
+        _ => {
+            return Err(Value::String(
+                "expected (subject: string, filter: value)".into(),
+            ))
+        }
+    };
+    let filter_value = args.remove(1);
+    let subject = args.remove(0);
+    if !matches!(subject, Value::String(_)) {
+        return Err(Value::String("expected subject actor id (string)".into()));
+    }
+    let filter = Pattern::try_from(filter_value)
+        .map_err(|e| Value::String(format!("invalid filter pattern: {e}")))?;
+    Ok((subject, filter))
 }
 
 impl Handler for LifecycleHandler {
@@ -265,6 +290,12 @@ impl Handler for LifecycleHandler {
             self.subs.clone(),
             self.self_id.clone(),
         );
+        let monitor_filtered = (
+            self.theater_tx.clone(),
+            self.event_tx.clone(),
+            self.subs.clone(),
+            self.self_id.clone(),
+        );
         let unlink = (
             self.theater_tx.clone(),
             self.event_tx.clone(),
@@ -322,6 +353,29 @@ impl Handler for LifecycleHandler {
                         &subs,
                         &self_id,
                         vec![any_lifecycle_event()],
+                        Target::DeliverToWasm,
+                    )
+                }
+            }),
+        );
+        // monitor-filtered(subject, filter) -> result<_, string>
+        // Like `monitor`, but the caller supplies the match filter (a serialized
+        // `packr_abi::Pattern`) instead of the fixed `any_lifecycle_event()`.
+        imports.define(
+            "theater:simple/lifecycle",
+            "monitor-filtered",
+            pact_result_host_fn(move |input: Value| {
+                let (theater_tx, event_tx, subs, self_id) = monitor_filtered.clone();
+                async move {
+                    let (subject, filter) = parse_monitor_filtered(input)?;
+                    add_subscription(
+                        id,
+                        &subject,
+                        &theater_tx,
+                        event_tx,
+                        &subs,
+                        &self_id,
+                        vec![filter],
                         Target::DeliverToWasm,
                     )
                 }
@@ -496,6 +550,38 @@ mod tests {
         let handler = LifecycleHandler::new(tx);
         assert_eq!(handler.name(), "lifecycle");
         assert_eq!(lifecycle_interface().hash(), lifecycle_interface().hash());
+    }
+
+    #[test]
+    fn monitor_filtered_decodes_subject_and_pattern() {
+        // A valid serialized Pattern (`any_lifecycle_event`) round-trips back to
+        // the same Pattern, and the subject is preserved as a string Value.
+        let pattern = any_lifecycle_event();
+        let input = Value::Tuple(vec![
+            Value::String("actor-123".into()),
+            Value::from(pattern.clone()),
+        ]);
+        let (subject, decoded) = parse_monitor_filtered(input).expect("valid filtered monitor");
+        assert_eq!(subject, Value::String("actor-123".into()));
+        assert_eq!(Value::from(decoded), Value::from(pattern));
+    }
+
+    #[test]
+    fn monitor_filtered_rejects_bad_arity_subject_and_filter() {
+        // Wrong tuple arity.
+        assert!(parse_monitor_filtered(Value::Tuple(vec![Value::String("a".into())])).is_err());
+        // Non-string subject.
+        assert!(parse_monitor_filtered(Value::Tuple(vec![
+            Value::U32(1),
+            Value::from(any_termination()),
+        ]))
+        .is_err());
+        // Filter value that is not a Pattern.
+        assert!(parse_monitor_filtered(Value::Tuple(vec![
+            Value::String("a".into()),
+            Value::U8(7),
+        ]))
+        .is_err());
     }
 
     #[test]

@@ -9,8 +9,9 @@
 //   - monitor: watching. Matching subject events are delivered to the caller's
 //              `handle-lifecycle-event` export (a DeliverToWasm subscription).
 //
-// v1 filters are fixed: link keys on any termination, monitor on any lifecycle
-// event. Custom structural (packr_abi::Pattern) filters are a forward addition.
+// Default filters are fixed: link keys on any termination, monitor on any
+// lifecycle event. `monitor-filtered` lets the caller supply its own structural
+// (packr_abi::Pattern) filter to narrow the delivered stream.
 
 interface lifecycle {
     @package: string = "theater:simple"
@@ -26,6 +27,17 @@ interface lifecycle {
         // Monitor `subject`: its lifecycle events are delivered to the caller's
         // `handle-lifecycle-event` export.
         monitor: func(subject: string) -> result<_, string>
+
+        // Monitor `subject` with a caller-supplied filter, so a supervisor can
+        // narrow the stream (e.g. terminations-only, or Failed-only) instead of
+        // receiving every lifecycle event — cutting monitor amplification under
+        // high spawn/death churn. `filter` is a serialized `packr_abi::Pattern`
+        // (its `From`/`TryFrom<Value>`) matched host-side against the subject's
+        // decoded ChainEventPayload. Delivery is otherwise identical to
+        // `monitor`: Target::DeliverToWasm, the same `handle-lifecycle-event`
+        // callback, still within the lifecycle-event scope (the handler's
+        // LIFECYCLE_EVENT_TYPES pre-filter is unchanged).
+        monitor-filtered: func(subject: string, filter: value) -> result<_, string>
 
         // Remove the caller's monitor of `subject`.
         unmonitor: func(subject: string) -> result<_, string>
