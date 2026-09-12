@@ -746,8 +746,13 @@ impl ActorRuntime {
 
                     info!("All loops have exited");
 
-                    if let Err(e) = response_tx.send(Ok(())) {
-                        error!("Failed to send shutdown confirmation: {:?}", e);
+                    if response_tx.send(Ok(())).is_err() {
+                        // A dropped receiver is the NORMAL teardown case — whoever
+                        // requested the stop has moved on and isn't awaiting the
+                        // confirmation. (A oneshot `send` returns `Err(the unsent
+                        // value)` when the receiver is gone, which is why this used
+                        // to log the confusing "Failed ...: Ok(())" at error level.)
+                        debug!("shutdown confirmation receiver already gone (caller not awaiting)");
                     }
 
                     debug!("Shutdown confirmation sent, exiting control loop");
