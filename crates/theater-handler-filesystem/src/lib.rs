@@ -187,7 +187,13 @@ fn gate(
 }
 
 /// When `allowed_paths` is set, require the resolved path to fall within one of
-/// the listed subtrees (each interpreted relative to the sandbox root).
+/// the listed subtrees. Each entry is interpreted **relative to the sandbox
+/// root** — the sandbox root is already the outer boundary, so an allowlist just
+/// narrows within it. A leading `/` is tolerated (the entry is still matched
+/// root-relative), so a bare `"/"` means "the sandbox root" = allow anywhere in
+/// the sandbox. This is what makes the common `theater spawn` grant
+/// (`allowed_paths = ["/"]`, i.e. "all paths") resolve to "all of my sandbox"
+/// instead of matching nothing.
 fn check_allowed(
     root: &Path,
     perms: &FileSystemPermissions,
@@ -196,7 +202,16 @@ fn check_allowed(
 ) -> Result<(), FsError> {
     if let Some(allowed) = &perms.allowed_paths {
         let ok = allowed.iter().any(|a| {
-            resolve_in_sandbox(root, a)
+            // Interpret the entry root-relative; a leading '/' (or a bare '/')
+            // collapses to the root itself rather than being rejected as an
+            // absolute escape by `resolve_in_sandbox`.
+            let rel = a.trim_start_matches('/');
+            let allowed_prefix = if rel.is_empty() {
+                Some(root.to_path_buf())
+            } else {
+                resolve_in_sandbox(root, rel).ok()
+            };
+            allowed_prefix
                 .map(|abs| candidate.starts_with(&abs))
                 .unwrap_or(false)
         });
@@ -798,6 +813,27 @@ mod tests {
             check_allowed(root, &perms, &outside, "private/f.txt"),
             Err(FsError::PermissionDenied(_))
         ));
+    }
+
+    #[test]
+    fn test_allowed_paths_root_slash_permits_whole_sandbox() {
+        // The `theater spawn` root grant is allowed_paths = ["/"] ("all paths").
+        // A bare "/" must resolve to the sandbox root and permit any in-sandbox
+        // path, not match nothing. (Regression: absolute "/" was rejected by
+        // resolve_in_sandbox, wedging every fs op for a top-level actor.)
+        let root = Path::new("/sandbox");
+        let perms = FileSystemPermissions {
+            read: true,
+            write: true,
+            execute: false,
+            allowed_commands: None,
+            new_dir: None,
+            allowed_paths: Some(vec!["/".to_string()]),
+        };
+        let a = resolve_in_sandbox(root, "crasher.jsonl").unwrap();
+        assert!(check_allowed(root, &perms, &a, "crasher.jsonl").is_ok());
+        let b = resolve_in_sandbox(root, "sub/dir/f.txt").unwrap();
+        assert!(check_allowed(root, &perms, &b, "sub/dir/f.txt").is_ok());
     }
 
     #[test]
