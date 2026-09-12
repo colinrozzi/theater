@@ -830,10 +830,10 @@ mod tests {
             new_dir: None,
             allowed_paths: Some(vec!["/".to_string()]),
         };
-        for p in ["crasher.jsonl", "sub/dir/f.txt"] {
-            let c = resolve_in_sandbox(root, p).unwrap();
-            assert!(check_allowed(root, &perms, &c, p).is_ok(), "should allow {p}");
-        }
+        let a = resolve_in_sandbox(root, "crasher.jsonl").unwrap();
+        assert!(check_allowed(root, &perms, &a, "crasher.jsonl").is_ok());
+        let b = resolve_in_sandbox(root, "sub/dir/f.txt").unwrap();
+        assert!(check_allowed(root, &perms, &b, "sub/dir/f.txt").is_ok());
     }
 
     #[test]
