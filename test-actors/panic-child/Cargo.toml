@@ -1,0 +1,22 @@
+[package]
+name = "panic-child-actor"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# Must be 0.24.1: that release fixed the guest panic handler so a steady-state
+# panic in a post-init callback TRAPS (before it, `loop {}` spun silently and no
+# `Failed` termination was ever reported). This actor exists to lock that path,
+# so it pins the exact version whose trap it depends on.
+packr-guest = { version = "0.24.1", features = ["derive"] }
+packr-abi = { version = "0.24", default-features = false }
+theater-guest = { path = "../../crates/theater-guest" }
+
+[profile.release]
+opt-level = "s"
+lto = true
