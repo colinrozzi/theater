@@ -1,0 +1,6 @@
+name = "panic-child"
+version = "0.1.0"
+package = "target/wasm32-unknown-unknown/release/panic_child_actor.wasm"
+
+[[handler]]
+type = "self"
