@@ -27,6 +27,17 @@ pub enum UnifiedStream {
 }
 
 impl UnifiedStream {
+    /// Whether this stream is encrypted (TLS), either client- or server-side.
+    ///
+    /// This is the ground truth of a connection's encryption — read directly
+    /// from the live stream variant, never a cached flag that could drift.
+    pub fn is_tls(&self) -> bool {
+        match self {
+            UnifiedStream::Plain(_) => false,
+            UnifiedStream::ClientTls(_) | UnifiedStream::ServerTls(_) => true,
+        }
+    }
+
     /// Split the stream into read and write halves.
     ///
     /// This consumes the stream and returns separate read and write halves
@@ -131,6 +142,19 @@ pub enum UnifiedWriteHalf {
     ClientTls(tokio::io::WriteHalf<ClientTlsStream<TcpStream>>),
     /// TLS server write half
     ServerTls(tokio::io::WriteHalf<ServerTlsStream<TcpStream>>),
+}
+
+impl UnifiedWriteHalf {
+    /// Whether this write half belongs to an encrypted (TLS) connection.
+    ///
+    /// Lets a connection report its encryption even after the read half has
+    /// been taken by an active-mode read loop (`StreamState::WriteOnly`).
+    pub fn is_tls(&self) -> bool {
+        match self {
+            UnifiedWriteHalf::Plain(_) => false,
+            UnifiedWriteHalf::ClientTls(_) | UnifiedWriteHalf::ServerTls(_) => true,
+        }
+    }
 }
 
 impl AsyncWrite for UnifiedWriteHalf {
