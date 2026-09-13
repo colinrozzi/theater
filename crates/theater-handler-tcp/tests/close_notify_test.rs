@@ -107,6 +107,9 @@ async fn server_shutdown_sends_close_notify() {
                     LocalState::Full(mut s) => {
                         let _ = AsyncWriteExt::shutdown(&mut *s).await;
                     }
+                    LocalState::WriteOnly(mut w) => {
+                        let _ = AsyncWriteExt::shutdown(&mut w).await;
+                    }
                     LocalState::Closed => {}
                 }
             }
@@ -220,6 +223,9 @@ async fn post_response_close_pattern_sends_close_notify() {
                 match taken {
                     LocalState::Full(mut s) => {
                         let _ = AsyncWriteExt::shutdown(&mut *s).await;
+                    }
+                    LocalState::WriteOnly(mut w) => {
+                        let _ = AsyncWriteExt::shutdown(&mut w).await;
                     }
                     LocalState::Closed => {}
                 }
