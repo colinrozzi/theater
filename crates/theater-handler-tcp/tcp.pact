@@ -55,6 +55,14 @@ interface tcp {
         // Get the peer address of a connection (works in pending or active state)
         peer-address: func(connection-id: string) -> result<string, string>
 
+        // Positively report whether a connection is encrypted (TLS), client-
+        // or server-side. Reads the live stream state (ground truth), so a
+        // security-sensitive actor can HARD-require encryption before sending
+        // sensitive bytes instead of inferring it from an upgrade-to-tls-server
+        // result. Works in pending or active state; Err if the connection is
+        // unknown, not owned, or already closed.
+        is-tls: func(connection-id: string) -> result<bool, string>
+
         // Send data on connection, returns bytes written
         // Fails if connection is pending or not owned by this actor
         send: func(connection-id: string, data: list<u8>) -> result<u64, string>

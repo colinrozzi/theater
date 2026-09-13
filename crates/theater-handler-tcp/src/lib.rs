@@ -210,6 +210,21 @@ enum StreamState {
     Closed,
 }
 
+impl StreamState {
+    /// Whether the underlying stream is encrypted (TLS).
+    ///
+    /// Returns `None` only when the stream is `Closed` (torn down or taken) —
+    /// there is no stream left to report on. `Full` and `WriteOnly` both carry
+    /// the live variant, so encryption is answerable in either data mode.
+    fn is_tls(&self) -> Option<bool> {
+        match self {
+            StreamState::Full(s) => Some(s.is_tls()),
+            StreamState::WriteOnly(w) => Some(w.is_tls()),
+            StreamState::Closed => None,
+        }
+    }
+}
+
 /// A tracked TCP connection with ownership and state.
 ///
 /// `stream` is wrapped in `Arc<Mutex<...>>` so the outer connections map
@@ -872,6 +887,9 @@ impl Handler for TcpHandler {
         let st_peer = state.clone();
         let aid_peer = actor_id_for_closures;
 
+        let st_istls = state.clone();
+        let aid_istls = actor_id_for_closures;
+
         let st_send = state.clone();
         let aid_send = actor_id_for_closures;
 
@@ -1433,6 +1451,54 @@ impl Handler for TcpHandler {
                     }
 
                     Ok::<Value, Value>(Value::String(entry.peer_addr.to_string()))
+                }
+            }),
+        );
+        // ----------------------------------------------------------------
+        // is-tls(connection-id: string) -> result<bool, string>
+        // Positively report whether a connection is encrypted. Reads the live
+        // stream variant (ground truth), so a STARTTLS-style actor can HARD-
+        // require encryption before sending sensitive bytes instead of
+        // inferring it from an upgrade-to-tls-server result. Works in pending
+        // or active state; Err only if the connection is unknown, not owned,
+        // or already closed.
+        // ----------------------------------------------------------------
+        imports.define(
+            "theater:simple/tcp",
+            "is-tls",
+            pact_result_host_fn(move |input: Value| {
+                let st = st_istls.clone();
+                let actor_id = aid_istls;
+                async move {
+                    let _ph = PhaseLog::new("tcp.is_tls");
+                    let conn_id_str = parse_string(&input)?;
+                    let conn_id = string_to_id(&conn_id_str)?;
+
+                    // Lock the outer map only long enough to validate metadata
+                    // and clone the per-connection stream Arc — then read the
+                    // stream variant without holding the outer lock (same lock
+                    // ordering as send/receive).
+                    let stream_arc = {
+                        let connections = st.connections.lock().await;
+                        let entry = connections.get(&conn_id).ok_or_else(|| {
+                            Value::String(format!("Connection not found: {}", conn_id_str))
+                        })?;
+
+                        if entry.owner != actor_id {
+                            return Err(Value::String(format!(
+                                "Connection {} not owned by this actor",
+                                conn_id_str
+                            )));
+                        }
+
+                        entry.stream.clone()
+                    };
+
+                    let is_tls = stream_arc.lock().await.is_tls().ok_or_else(|| {
+                        Value::String(format!("Connection {} is closed", conn_id_str))
+                    })?;
+
+                    Ok::<Value, Value>(Value::Bool(is_tls))
                 }
             }),
         );
@@ -2497,6 +2563,69 @@ mod tests {
 
         cancel.cancel();
         let _ = b_tls.shutdown().await;
+    }
+
+    /// `is-tls` reads the live stream variant as ground truth: a plain
+    /// connection reports `false`, a TLS connection (either handshake side)
+    /// reports `true`, the answer survives the read half being taken for
+    /// active mode (`WriteOnly`), and a torn-down stream reports `None`.
+    #[tokio::test]
+    async fn is_tls_reports_ground_truth_stream_encryption() {
+        // --- plain: Full and WriteOnly both report false ---
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let client = TcpStream::connect(addr).await.unwrap();
+        let (server, _) = listener.accept().await.unwrap();
+
+        let plain = StreamState::Full(Box::new(UnifiedStream::Plain(server)));
+        assert_eq!(plain.is_tls(), Some(false), "plain Full must report false");
+
+        let (_r, w) = UnifiedStream::Plain(client).into_split();
+        let plain_wo = StreamState::WriteOnly(w);
+        assert_eq!(
+            plain_wo.is_tls(),
+            Some(false),
+            "plain WriteOnly must report false"
+        );
+
+        // --- tls: both handshake sides report true, in Full and WriteOnly ---
+        let (acceptor, connector) = test_tls_pair();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server_name = rustls::pki_types::ServerName::try_from("localhost").unwrap();
+
+        let (server_tls_stream, client_tls_stream) = tokio::join!(
+            async {
+                let (tcp, _) = listener.accept().await.unwrap();
+                acceptor.accept(tcp).await.unwrap()
+            },
+            async {
+                let tcp = TcpStream::connect(addr).await.unwrap();
+                connector.connect(server_name, tcp).await.unwrap()
+            }
+        );
+
+        let server_tls = StreamState::Full(Box::new(UnifiedStream::ServerTls(server_tls_stream)));
+        assert_eq!(
+            server_tls.is_tls(),
+            Some(true),
+            "server-side TLS Full must report true"
+        );
+
+        let (_r, w) = UnifiedStream::ClientTls(client_tls_stream).into_split();
+        let client_tls_wo = StreamState::WriteOnly(w);
+        assert_eq!(
+            client_tls_wo.is_tls(),
+            Some(true),
+            "client-side TLS WriteOnly must report true"
+        );
+
+        // --- closed: no stream left to report on ---
+        assert_eq!(
+            StreamState::Closed.is_tls(),
+            None,
+            "closed stream must report None"
+        );
     }
 
     #[test]
