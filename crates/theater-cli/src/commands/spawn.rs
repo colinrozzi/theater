@@ -323,41 +323,31 @@ async fn run(args: &SpawnArgs, ctx: &CommandContext, call_init: bool) -> Result<
                 }
             }
 
-            // Ctrl+C
-            _ = tokio::signal::ctrl_c() => {
-                debug!("Received Ctrl+C, stopping actor {}", actor_id);
-                eprintln!("\nStopping actor...");
-
-                let (stop_tx, stop_rx) = tokio::sync::oneshot::channel();
-                let _ = theater_tx.send(TheaterCommand::StopActor {
-                    actor_id,
-                    response_tx: stop_tx,
-                });
-
-                // Wait briefly for graceful shutdown
-                match tokio::time::timeout(
-                    tokio::time::Duration::from_secs(5),
-                    stop_rx,
-                ).await {
-                    Ok(Ok(Ok(()))) => debug!("Actor stopped gracefully"),
-                    _ => debug!("Actor stop timed out or failed"),
-                }
-                break;
-            }
-
-            // Shutdown token
+            // Shutdown requested. SIGINT (Ctrl-C) and SIGTERM (systemd
+            // stop/restart) are caught by the global signal handler in main.rs,
+            // which cancels this token — a single signal source, so no race
+            // with a second listener here. We drain the WHOLE runtime, not just
+            // the root actor: ShutdownRuntime signals graceful teardown
+            // (wait_for_shutdown -> TCP close_notify, listener release) to every
+            // live actor and exits once the flat set drains (bounded by the
+            // runtime's own deadline); we await runtime_handle below.
             _ = ctx.shutdown_token.cancelled() => {
-                debug!("Shutdown token cancelled");
+                debug!("Shutdown requested; draining runtime");
+                let _ = theater_tx.send(TheaterCommand::ShutdownRuntime);
                 break;
             }
         }
     }
 
-    // Drop the theater_tx to signal the runtime to stop
+    // Drop our sender so the runtime's command channel closes once every actor
+    // task (which also holds a sender) has finished — the last drop ends the
+    // runtime loop if it hasn't already exited via ShutdownRuntime.
     drop(theater_tx);
 
-    // Wait for runtime to finish (with timeout)
-    let _ = tokio::time::timeout(tokio::time::Duration::from_secs(5), runtime_handle).await;
+    // Wait for the runtime to finish. This must exceed the runtime's own drain
+    // deadline (10s) so a full graceful drain isn't cut short; the global
+    // shutdown grace in main.rs is longer still, so it won't preempt this.
+    let _ = tokio::time::timeout(tokio::time::Duration::from_secs(12), runtime_handle).await;
 
     Ok(())
 }
