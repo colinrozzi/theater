@@ -180,11 +180,11 @@ impl Handler for RpcHandler {
                         Value::Tuple(items) if items.len() >= 3 => {
                             let actor_id = match &items[0] {
                                 Value::String(s) => s.clone(),
-                                _ => return Ok::<Value, Value>(make_error("Invalid actor-id: expected string")),
+                                _ => return Err::<Value, Value>(Value::String(String::from("Invalid actor-id: expected string"))),
                             };
                             let function = match &items[1] {
                                 Value::String(s) => s.clone(),
-                                _ => return Ok::<Value, Value>(make_error("Invalid function: expected string")),
+                                _ => return Err::<Value, Value>(Value::String(String::from("Invalid function: expected string"))),
                             };
                             let params = items[2].clone();
                             let options = if items.len() > 3 {
@@ -194,7 +194,7 @@ impl Handler for RpcHandler {
                             };
                             (actor_id, function, params, options)
                         }
-                        _ => return Ok::<Value, Value>(make_error("Invalid input: expected tuple of (actor-id, function, params, options)")),
+                        _ => return Err::<Value, Value>(Value::String(String::from("Invalid input: expected tuple of (actor-id, function, params, options)"))),
                     };
 
                     debug!("RPC call: actor={}, function={}", actor_id_str, function);
@@ -202,7 +202,7 @@ impl Handler for RpcHandler {
                     // Parse actor ID
                     let target_id = match actor_id_str.parse::<TheaterId>() {
                         Ok(id) => id,
-                        Err(e) => return Ok::<Value, Value>(make_error(&format!("Invalid actor ID: {}", e))),
+                        Err(e) => return Err::<Value, Value>(Value::String(format!("Invalid actor ID: {}", e))),
                     };
 
                     // Get actor handle from theater runtime
@@ -213,13 +213,13 @@ impl Handler for RpcHandler {
                             response_tx,
                         })
                     {
-                        return Ok::<Value, Value>(make_error(&format!("Failed to send to theater: {}", e)));
+                        return Err::<Value, Value>(Value::String(format!("Failed to send to theater: {}", e)));
                     }
 
                     let target_handle = match response_rx.await {
                         Ok(Some(handle)) => handle,
-                        Ok(None) => return Ok::<Value, Value>(make_error(&format!("Actor not found: {}", actor_id_str))),
-                        Err(e) => return Ok::<Value, Value>(make_error(&format!("Failed to get actor handle: {}", e))),
+                        Ok(None) => return Err::<Value, Value>(Value::String(format!("Actor not found: {}", actor_id_str))),
+                        Err(e) => return Err::<Value, Value>(Value::String(format!("Failed to get actor handle: {}", e))),
                     };
 
                     // Call the function on the target actor
@@ -235,17 +235,19 @@ impl Handler for RpcHandler {
                     .await;
 
                     match result {
-                        Ok(Ok(value)) => {
-                            // Success - wrap in result::ok variant
-                            Ok(Value::Variant {
-                                type_name: String::from("result"),
-                                case_name: String::from("ok"),
-                                tag: 0,
-                                payload: vec![value],
-                            })
-                        }
-                        Ok(Err(e)) => Ok(make_error(&format!("Call failed: {}", e))),
-                        Err(_) => Ok(make_error("Call timed out")),
+                        // Return the callee's value directly. `pact_result_host_fn`
+                        // already supplies the single first-class `result` transport
+                        // (Ok -> result::ok(value)); the old manual
+                        // `Value::Variant{type_name:"result", case_name:"ok"}` was a
+                        // redundant SECOND (legacy-form) wrap that consumers had to
+                        // peel through — the root cause of the "router rpc failed"
+                        // double-decode. Drop it.
+                        Ok(Ok(value)) => Ok(value),
+                        // rpc-transport failures ride the transport's err arm
+                        // (Err -> result::err(string)), kept DISTINCT from a callee
+                        // err (which is nested inside the ok payload).
+                        Ok(Err(e)) => Err(Value::String(format!("Call failed: {}", e))),
+                        Err(_) => Err(Value::String(String::from("Call timed out"))),
                     }
                 }
             }),
