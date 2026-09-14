@@ -13,6 +13,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use theater::config::actor_manifest::{HandlerConfig, ManifestConfig};
 use theater::config::inheritance::HandlerPermissionPolicy;
+use theater::events::lifecycle::{ActorLifecycleEvent, TerminationCause};
+use theater::events::{decode_chain_event_payload, ChainEventPayload};
 use theater::handler::HandlerRegistry;
 use theater::messages::default_init_state;
 use theater::messages::TheaterCommand;
@@ -325,6 +327,147 @@ async fn test_multiple_actor_shutdown_timing() {
 
     drop(theater_tx);
     let _ = tokio::time::timeout(Duration::from_secs(2), runtime_handle).await;
+}
+
+/// The full-runtime graceful drain: a single `ShutdownRuntime` must gracefully
+/// tear down EVERY live actor — not just break the loop — then exit on its own.
+///
+/// Before the drain fix, `ShutdownRuntime` was a bare `break`: actors were
+/// dropped without graceful teardown (no `wait_for_shutdown`, no TCP
+/// `close_notify`, no terminal event). Here we spawn several actors, send ONE
+/// `ShutdownRuntime`, and assert every actor emits `Terminated { Stopped }`
+/// (the graceful cause, not `Killed`) and the runtime exits promptly — well
+/// under the 10s drain deadline, i.e. it drained rather than deadline-killed.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_shutdown_runtime_drains_all_actors() {
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter("info,theater=debug")
+        .try_init();
+
+    let temp_dir = tempfile::tempdir().expect("Failed to create temp directory");
+    std::env::set_var("THEATER_HOME", temp_dir.path());
+
+    let wasm_path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../test-actors/shutdown-test/target/wasm32-unknown-unknown/release/shutdown_test_actor.wasm"
+    );
+    let member = std::fs::read(wasm_path).unwrap_or_else(|e| {
+        panic!(
+            "Failed to read shutdown-test WASM from {}: {}",
+            wasm_path, e
+        )
+    });
+    let wasm_bytes = link_self_contained(member);
+
+    let (theater_tx, theater_rx) = mpsc::unbounded_channel::<TheaterCommand>();
+    let theater_tx_clone = theater_tx.clone();
+    let mut handler_registry = HandlerRegistry::new();
+    handler_registry.register(SelfHandler::new(
+        SelfHostConfig {},
+        theater_tx.clone(),
+        None,
+    ));
+
+    // Global subscription: observe terminal events to prove graceful teardown.
+    let (events_tx, mut events_rx) = mpsc::channel(256);
+
+    let runtime_handle = tokio::spawn(async move {
+        let mut runtime = theater::theater_runtime::TheaterRuntime::new(
+            theater_tx_clone,
+            theater_rx,
+            handler_registry,
+            Arc::new(ResourceCache::new()),
+            theater_native::TokioSpawn,
+        )
+        .await
+        .expect("Failed to create runtime");
+        runtime.add_global_subscription(events_tx);
+        runtime.run().await
+    });
+
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    // Spawn several actors.
+    let num_actors = 3usize;
+    let mut actor_ids = std::collections::HashSet::new();
+    for i in 0..num_actors {
+        let manifest = create_test_manifest(&format!("shutdown-test-{}", i), wasm_path);
+        let (spawn_tx, spawn_rx) = oneshot::channel();
+        theater_tx
+            .send(TheaterCommand::SetupActor {
+                wasm_bytes: wasm_bytes.clone(),
+                name: Some(format!("shutdown-test-{}", i)),
+                manifest: Some(manifest),
+                init_state: default_init_state(),
+                response_tx: spawn_tx,
+                subscription_tx: None,
+                parent_id: None,
+            })
+            .expect("Failed to send spawn command");
+        let id = tokio::time::timeout(Duration::from_secs(5), spawn_rx)
+            .await
+            .expect("Timeout waiting for spawn")
+            .expect("Spawn channel closed")
+            .expect("Failed to spawn");
+        actor_ids.insert(id);
+    }
+    assert_eq!(actor_ids.len(), num_actors, "expected distinct actor ids");
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    // ONE runtime-wide shutdown — NOT per-actor StopActor.
+    let drain_start = Instant::now();
+    theater_tx
+        .send(TheaterCommand::ShutdownRuntime)
+        .expect("Failed to send ShutdownRuntime");
+
+    // Every actor must emit a graceful terminal event (Stopped, not Killed).
+    let mut stopped = std::collections::HashSet::new();
+    let collected = tokio::time::timeout(Duration::from_secs(8), async {
+        while stopped.len() < num_actors {
+            match events_rx.recv().await {
+                Some((actor_id, chain_event)) => {
+                    if chain_event.event_type == "terminated" {
+                        if let Some(ChainEventPayload::Lifecycle(
+                            ActorLifecycleEvent::Terminated { cause },
+                        )) = decode_chain_event_payload(&chain_event.data)
+                        {
+                            assert!(
+                                matches!(cause, TerminationCause::Stopped),
+                                "actor {:?} drained with non-graceful cause {:?}",
+                                actor_id,
+                                cause
+                            );
+                            stopped.insert(actor_id);
+                        }
+                    }
+                }
+                None => break, // channel closed (runtime exited)
+            }
+        }
+    })
+    .await;
+    collected.expect("timed out waiting for all actors to drain gracefully");
+    assert_eq!(
+        stopped, actor_ids,
+        "not every actor emitted a graceful terminal event"
+    );
+
+    // The runtime must exit on its own (drain reached empty -> break), promptly.
+    let exited = tokio::time::timeout(Duration::from_secs(4), runtime_handle).await;
+    assert!(
+        exited.is_ok(),
+        "runtime did not exit after draining all actors"
+    );
+    let drain_duration = drain_start.elapsed();
+    info!(
+        "Full-runtime drain of {} actors completed in {:?}",
+        num_actors, drain_duration
+    );
+    assert!(
+        drain_duration < Duration::from_secs(10),
+        "drain took {:?} — hit the deadline instead of draining gracefully",
+        drain_duration
+    );
 }
 
 /// Test shutdown timing with the runtime (control) handler registered.

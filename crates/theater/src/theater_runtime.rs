@@ -439,21 +439,7 @@ impl<E: crate::executor::Spawn> TheaterRuntime<E> {
                     // the subject's chain and issuing `PeerTerminated`. Supervision
                     // cascade is the supervisor handler stopping its own children.
                     // The runtime just finalizes the one actor that finished.
-
-                    // Teardown mechanism: drop the chain, registration, channels.
-                    self.chains.remove(&actor_id);
-                    self.deregister_actor(&actor_id);
-
-                    let id_for_channels = ChannelParticipant::Actor(actor_id);
-                    let mut channels_to_remove = Vec::new();
-                    for (channel_id, participants) in self.channels.iter_mut() {
-                        if participants.remove(&id_for_channels) && participants.is_empty() {
-                            channels_to_remove.push(channel_id.clone());
-                        }
-                    }
-                    for channel_id in channels_to_remove {
-                        self.channels.remove(&channel_id);
-                    }
+                    self.finalize_actor(actor_id);
 
                     if self.actors.is_empty() {
                         info!("All actors have shut down, exiting runtime");
@@ -606,7 +592,71 @@ impl<E: crate::executor::Spawn> TheaterRuntime<E> {
                     }
                 }
                 TheaterCommand::ShutdownRuntime => {
-                    info!("Received shutdown runtime command");
+                    // Full-runtime graceful drain. The runtime is lineage-free,
+                    // so this is a flat sweep (NOT a cascade): signal the existing
+                    // per-actor graceful teardown — ActorControl::Shutdown ->
+                    // handler wait_for_shutdown -> TCP close_notify + listener
+                    // release — to every live actor, then pump their
+                    // ActorShutdownComplete reports until the set empties. The
+                    // teardowns run concurrently (each actor is its own task), so
+                    // total drain time is ~the slowest single actor, not the sum.
+                    // A bounded deadline force-kills any straggler (e.g. an actor
+                    // wedged in wasm that never polls its control channel) so
+                    // `systemctl stop` cannot hang indefinitely.
+                    const DRAIN_DEADLINE: std::time::Duration = std::time::Duration::from_secs(10);
+
+                    let ids: Vec<_> = self.actors.keys().cloned().collect();
+                    if ids.is_empty() {
+                        info!("Shutdown requested with no live actors; exiting");
+                        break;
+                    }
+                    info!(
+                        "Shutdown requested; gracefully draining {} actor(s)",
+                        ids.len()
+                    );
+                    for id in ids {
+                        self.initiate_teardown(
+                            id,
+                            crate::events::lifecycle::TerminationCause::Stopped,
+                            /* force = */ false,
+                        )
+                        .await;
+                    }
+
+                    let deadline = tokio::time::sleep(DRAIN_DEADLINE);
+                    tokio::pin!(deadline);
+                    while !self.actors.is_empty() {
+                        tokio::select! {
+                            maybe = self.theater_rx.recv() => match maybe {
+                                Some(TheaterCommand::ActorShutdownComplete { actor_id }) => {
+                                    info!("ActorShutdownComplete for {:?} during drain", actor_id);
+                                    self.finalize_actor(actor_id);
+                                }
+                                Some(other) => {
+                                    debug!("Ignoring {} during shutdown drain", other.to_log());
+                                }
+                                None => break,
+                            },
+                            _ = &mut deadline => {
+                                // Every remaining actor is already in `Stopping`
+                                // (we signalled graceful teardown above), so a
+                                // second `initiate_teardown` would be a no-op —
+                                // the actor task is wedged (e.g. spinning in wasm,
+                                // not polling its control channel). Stop waiting
+                                // and exit; process teardown reclaims what the
+                                // stuck tasks still hold. This bound is what keeps
+                                // `systemctl stop` from hanging indefinitely.
+                                warn!(
+                                    "shutdown drain deadline ({:?}) reached with {} actor(s) still \
+                                     draining; abandoning graceful drain and exiting",
+                                    DRAIN_DEADLINE,
+                                    self.actors.len()
+                                );
+                                break;
+                            }
+                        }
+                    }
+                    info!("Runtime drain complete; exiting");
                     break;
                 }
             };
@@ -626,6 +676,27 @@ impl<E: crate::executor::Spawn> TheaterRuntime<E> {
     /// process, if the actor was present.
     fn deregister_actor(&mut self, actor_id: &TheaterId) -> Option<ActorProcess<E>> {
         self.actors.remove(actor_id)
+    }
+
+    /// Mechanical finalization of an actor whose task has confirmed teardown
+    /// (via [`TheaterCommand::ActorShutdownComplete`]): drop its chain and
+    /// registration, and remove it from any channels — pruning channels it was
+    /// the last participant in. The terminal event was already emitted at the
+    /// stop decision ([`Self::initiate_teardown`]); this is only bookkeeping.
+    fn finalize_actor(&mut self, actor_id: TheaterId) {
+        self.chains.remove(&actor_id);
+        self.deregister_actor(&actor_id);
+
+        let id_for_channels = ChannelParticipant::Actor(actor_id);
+        let mut channels_to_remove = Vec::new();
+        for (channel_id, participants) in self.channels.iter_mut() {
+            if participants.remove(&id_for_channels) && participants.is_empty() {
+                channels_to_remove.push(channel_id.clone());
+            }
+        }
+        for channel_id in channels_to_remove {
+            self.channels.remove(&channel_id);
+        }
     }
 
     /// Spawns a new actor from WASM bytes.

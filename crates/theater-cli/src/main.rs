@@ -30,28 +30,36 @@ async fn main() -> Result<()> {
     let shutdown_token = tokio_util::sync::CancellationToken::new();
     let shutdown_token_clone = shutdown_token.clone();
 
-    // Handle Ctrl+C and other termination signals
+    // Handle termination signals — SIGINT (Ctrl-C) AND SIGTERM (systemd
+    // stop/restart), so a service stop drives the same graceful shutdown.
     tokio::spawn(async move {
-        // Use a simpler approach for cross-platform compatibility
-        match tokio::signal::ctrl_c().await {
-            Ok(()) => {
-                println!("\nReceived interrupt signal, shutting down...");
-                shutdown_token_clone.cancel();
-            }
-            Err(err) => {
-                eprintln!("Unable to listen for shutdown signal: {}", err);
-                // We also shut down in this case
-                shutdown_token_clone.cancel();
-            }
-        }
+        let sig = theater_cli::utils::shutdown_signal().await;
+        println!("\nReceived {}, shutting down...", sig);
+        shutdown_token_clone.cancel();
     });
 
-    // Run the CLI with cancellation support
+    // Run the CLI with cancellation support. On signal, the token is cancelled;
+    // rather than hard-exit immediately (which would preempt a graceful drain —
+    // the spawn command drains the whole runtime, delivering wait_for_shutdown
+    // to every actor), we give the running command a bounded grace period to
+    // finish, and only force-exit if it overruns.
+    let run_fut = run(cli, config, shutdown_token.clone());
+    tokio::pin!(run_fut);
+
     let result = tokio::select! {
-        result = run(cli, config, shutdown_token.clone()) => result,
+        result = &mut run_fut => result,
         _ = shutdown_token.cancelled() => {
-            println!("Operation cancelled by user");
-            std::process::exit(130); // Standard exit code for Ctrl+C
+            const SHUTDOWN_GRACE: std::time::Duration = std::time::Duration::from_secs(15);
+            match tokio::time::timeout(SHUTDOWN_GRACE, &mut run_fut).await {
+                Ok(result) => result,
+                Err(_) => {
+                    eprintln!(
+                        "Shutdown grace period ({:?}) elapsed; forcing exit.",
+                        SHUTDOWN_GRACE
+                    );
+                    std::process::exit(130); // Standard exit code for Ctrl+C
+                }
+            }
         }
     };
 
