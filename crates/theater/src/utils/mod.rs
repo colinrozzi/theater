@@ -126,7 +126,7 @@ pub async fn resolve_reference(reference: &str) -> Result<Vec<u8>, ReferenceErro
 
     if let Some(content) = reference.strip_prefix("inline:") {
         // Inline content — no I/O. The bytes are the text after the prefix.
-        return Ok(content.as_bytes().to_vec());
+        Ok(content.as_bytes().to_vec())
     } else if reference.starts_with("store://") {
         Err(ReferenceError::ResolveError(format!(
             "store:// references are no longer resolved by the runtime: {}. \
