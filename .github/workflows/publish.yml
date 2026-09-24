@@ -142,6 +142,20 @@ jobs:
           # dependents and the loop bails before publishing it.
           LC_ALL: C
 
+      # Static-musl release binary — runs on ANY linux, with no glibc-version
+      # floor and no nix-store dependency (the old nix result was glibc-dynamic
+      # and only ran on hosts with a matching glibc → broke `curl | sh`).
+      # theater is rustls-only, so musl-static is clean; musl-gcc is needed only
+      # to compile ring's C. Do NOT override the linker — let rustc use its
+      # self-contained musl crt (musl-gcc's own crt segfaults in _start_c).
+      - name: Build static-musl theater binary
+        env:
+          CC_x86_64_unknown_linux_musl: musl-gcc
+        run: |
+          sudo apt-get update && sudo apt-get install -y musl-tools
+          rustup target add x86_64-unknown-linux-musl
+          cargo build --release --target x86_64-unknown-linux-musl -p theater-cli
+
       - name: Create tag and GitHub release with binary artifact
         run: |
           DATE=$(date +%Y%m%d)
@@ -151,13 +165,10 @@ jobs:
           git push origin "$TAG"
           gh release create "$TAG" --generate-notes
 
-          # Build artifact via the same nix target the pre-publish check
-          # used (result is cached). Strip the nix-store rpath via
-          # `nix shell` so the tarball stays portable to any host that
-          # has the matching glibc.
+          # Portable static-musl binary from the step above (zero deps).
           ARCH=$(uname -m)
           OS=$(uname -s | tr '[:upper:]' '[:lower:]')
-          BIN_PATH="$(realpath result)/bin/theater"
+          BIN_PATH="target/x86_64-unknown-linux-musl/release/theater"
           STAGE="theater-${TAG#release-}-${OS}-${ARCH}"
           mkdir -p "$STAGE"
           cp "$BIN_PATH" "$STAGE/theater"
