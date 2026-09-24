@@ -1,0 +1,56 @@
+diff --git a/.github/workflows/publish.yml b/.github/workflows/publish.yml
+index f682c244..9d6cf25f 100644
+--- a/.github/workflows/publish.yml
++++ b/.github/workflows/publish.yml
+@@ -41,7 +41,7 @@ jobs:
+           echo "changed=$CHANGED" >> "$GITHUB_OUTPUT"
+ 
+   publish:
+-    name: Publish
++    name: Publish crates
+     runs-on: ubuntu-latest
+     needs: check-version
+     if: needs.check-version.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'
+@@ -142,6 +142,21 @@ jobs:
+           # dependents and the loop bails before publishing it.
+           LC_ALL: C
+ 
++  # The portable binary that powers `curl … | sh` is built and released in its
++  # OWN job, depending only on check-version — NOT on `publish`. Crate publishing
++  # (crates.io tokens/perms, a new-crate 403, registry flakiness) must never block
++  # the installer asset: the static `theater` binary needs nothing from crates.io.
++  # Runs in parallel with `publish`; each fails independently.
++  release-binary:
++    name: Release binary
++    runs-on: ubuntu-latest
++    needs: check-version
++    if: needs.check-version.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'
++    steps:
++      - uses: actions/checkout@v4
++        with:
++          fetch-depth: 0
++
+       # Static-musl release binary — runs on ANY linux, with no glibc-version
+       # floor and no nix-store dependency (the old nix result was glibc-dynamic
+       # and only ran on hosts with a matching glibc → broke `curl | sh`).
+@@ -161,9 +176,9 @@ jobs:
+           DATE=$(date +%Y%m%d)
+           SHA=$(git rev-parse --short=7 HEAD)
+           TAG="release-$DATE-$SHA"
+-          git tag "$TAG"
+-          git push origin "$TAG"
+-          gh release create "$TAG" --generate-notes
++          # Idempotent re-dispatch: reuse the tag/release if a prior run made it.
++          git tag "$TAG" 2>/dev/null && git push origin "$TAG" || echo "tag $TAG already exists"
++          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --generate-notes
+ 
+           # Portable static-musl binary from the step above (zero deps).
+           ARCH=$(uname -m)
+@@ -175,6 +190,6 @@ jobs:
+           chmod +w "$STAGE/theater"
+           tar -czf "$STAGE.tar.gz" "$STAGE"
+           sha256sum "$STAGE.tar.gz" > "$STAGE.tar.gz.sha256"
+-          gh release upload "$TAG" "$STAGE.tar.gz" "$STAGE.tar.gz.sha256"
++          gh release upload --clobber "$TAG" "$STAGE.tar.gz" "$STAGE.tar.gz.sha256"
+         env:
+           GH_TOKEN: ${{ github.token }}
