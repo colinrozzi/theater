@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Theater — a supervised WebAssembly actor runtime</title>
+<meta name="description" content="Run WebAssembly actors on your own machine. One binary, event-traced, supervised. Install with a single command.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20100%20100'%3E%3Ctext%20y='.9em'%20font-size='88'%3E%F0%9F%8E%AD%3C/text%3E%3C/svg%3E">
+<style>
+  /* ---- tokens: light = "house lights up" (playbill) ---- */
+  :root {
+    --stage:    #f6f1e8;
+    --surface:  #fffdf8;
+    --ink:      #1a1610;
+    --muted:    #6d6353;
+    --hair:     #e4dccb;
+    --brass:    #9a6b16;
+    --brass-glow: rgba(154,107,22,0.14);
+    --cmd-bg:   #fbf7ee;
+
+    --font-display: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --font-body:    "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+    --font-mono:    ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --stage:    #0f0d0a;
+      --surface:  #191510;
+      --ink:      #f3ede1;
+      --muted:    #a89c86;
+      --hair:     #2b2620;
+      --brass:    #e0a84a;
+      --brass-glow: rgba(224,168,74,0.16);
+      --cmd-bg:   #16120d;
+    }
+  }
+  :root[data-theme="light"] {
+    --stage:#f6f1e8; --surface:#fffdf8; --ink:#1a1610; --muted:#6d6353;
+    --hair:#e4dccb; --brass:#9a6b16; --brass-glow:rgba(154,107,22,0.14); --cmd-bg:#fbf7ee;
+  }
+  :root[data-theme="dark"] {
+    --stage:#0f0d0a; --surface:#191510; --ink:#f3ede1; --muted:#a89c86;
+    --hair:#2b2620; --brass:#e0a84a; --brass-glow:rgba(224,168,74,0.16); --cmd-bg:#16120d;
+  }
+
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--stage);
+    color: var(--ink);
+    font-family: var(--font-body);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    min-height: 100vh;
+  }
+
+  .stage {
+    max-width: 46rem;
+    margin: 0 auto;
+    padding: clamp(3.5rem, 12vh, 8rem) 1.6rem 3rem;
+    display: flex;
+    flex-direction: column;
+    gap: 2.4rem;
+  }
+
+  .eyebrow {
+    margin: 0 0 0.9rem;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--brass);
+  }
+  .wordmark {
+    margin: 0;
+    font-family: var(--font-display);
+    font-weight: 800;
+    font-size: clamp(3.2rem, 12vw, 5.6rem);
+    line-height: 0.94;
+    letter-spacing: -0.02em;
+    text-wrap: balance;
+  }
+  .pitch {
+    margin: 0;
+    max-width: 34rem;
+    font-size: 1.24rem;
+    color: var(--ink);
+  }
+  .pitch b { color: var(--brass); font-weight: inherit; font-style: italic; }
+
+  .lit { position: relative; }
+  .lit::before {
+    content: "";
+    position: absolute;
+    inset: -55% -20% -70%;
+    background: radial-gradient(ellipse 60% 55% at 24% 30%, var(--brass-glow), transparent 70%);
+    pointer-events: none;
+    z-index: 0;
+  }
+  .cmd-card {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    gap: 0.85rem;
+    background: var(--cmd-bg);
+    border: 1px solid var(--hair);
+    border-radius: 10px;
+    padding: 1.05rem 1.1rem;
+    box-shadow: 0 1px 0 rgba(0,0,0,0.02), 0 18px 40px -28px var(--brass-glow);
+  }
+  .prompt { color: var(--brass); font-family: var(--font-mono); font-weight: 700; user-select: none; }
+  .cmd {
+    flex: 1;
+    font-family: var(--font-mono);
+    font-size: clamp(0.82rem, 2.4vw, 0.98rem);
+    color: var(--ink);
+    overflow-x: auto;
+    white-space: nowrap;
+    scrollbar-width: none;
+  }
+  .cmd::-webkit-scrollbar { display: none; }
+  .copy {
+    flex-shrink: 0;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    background: transparent;
+    border: 1px solid var(--hair);
+    border-radius: 6px;
+    padding: 0.4rem 0.6rem;
+    cursor: pointer;
+    transition: color 0.15s, border-color 0.15s;
+  }
+  .copy:hover { color: var(--brass); border-color: var(--brass); }
+  .copy:focus-visible { outline: 2px solid var(--brass); outline-offset: 2px; }
+  .copy.done { color: var(--brass); border-color: var(--brass); }
+  .cmd-note {
+    position: relative;
+    z-index: 1;
+    margin: 0.85rem 0 0;
+    font-family: var(--font-mono);
+    font-size: 0.76rem;
+    color: var(--muted);
+    letter-spacing: 0.02em;
+  }
+
+  .then { border-top: 1px solid var(--hair); padding-top: 2rem; }
+  .then-label {
+    margin: 0 0 0.7rem;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .then-cmd {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: 0.9rem;
+    line-height: 1.7;
+    color: var(--ink);
+    overflow-x: auto;
+  }
+  .then-cmd .p { color: var(--brass); user-select: none; }
+  .then-note { margin: 0.85rem 0 0; font-family: var(--font-mono); font-size: 0.76rem; color: var(--muted); letter-spacing: 0.02em; }
+
+  .footer {
+    display: flex;
+    align-items: center;
+    gap: 0.7rem;
+    margin-top: 0.6rem;
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    color: var(--muted);
+  }
+  .footer a { color: var(--muted); text-decoration: none; border-bottom: 1px solid var(--hair); padding-bottom: 1px; transition: color 0.15s, border-color 0.15s; }
+  .footer a:hover { color: var(--brass); border-color: var(--brass); }
+  .footer .dot { opacity: 0.5; }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .stage > * { animation: rise 0.7s cubic-bezier(0.22,0.61,0.36,1) backwards; }
+    .stage > *:nth-child(1) { animation-delay: 0.02s; }
+    .stage > *:nth-child(2) { animation-delay: 0.10s; }
+    .stage > *:nth-child(3) { animation-delay: 0.18s; }
+    .stage > *:nth-child(4) { animation-delay: 0.26s; }
+    @keyframes rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+  }
+</style>
+</head>
+<body>
+<main class="stage">
+  <header>
+    <p class="eyebrow">A supervised WebAssembly actor runtime</p>
+    <h1 class="wordmark">Theater</h1>
+  </header>
+
+  <p class="pitch">
+    Run WebAssembly actors on your own machine — <b>one binary</b>, no cluster to stand
+    up. Every message crossing the sandbox is recorded, so you can trace, replay, and
+    debug exactly what happened. When an actor crashes, its supervisor restarts it
+    clean instead of letting the failure spread.
+  </p>
+
+  <section class="lit" aria-label="Install">
+    <div class="cmd-card">
+      <span class="prompt" aria-hidden="true">$</span>
+      <code class="cmd" id="install">curl -fsSL https://colinrozzi.github.io/theater/install.sh | sh</code>
+      <button class="copy" id="copy" type="button" aria-label="Copy install command">Copy</button>
+    </div>
+    <p class="cmd-note">Linux x86_64 · one static binary · nothing else to install</p>
+  </section>
+
+  <section class="then">
+    <p class="then-label">Then create your first actor</p>
+    <pre class="then-cmd"><code><span class="p">$</span> theater --version
+<span class="p">$</span> theater create hello</code></pre>
+    <p class="then-note">Your new project&rsquo;s README walks it from build to first spawn.</p>
+  </section>
+
+  <footer class="footer">
+    <a href="https://github.com/colinrozzi/theater">colinrozzi/theater</a>
+    <span class="dot" aria-hidden="true">·</span>
+    <span>Apache-2.0</span>
+  </footer>
+</main>
+
+<script>
+  (function () {
+    var btn = document.getElementById('copy');
+    var cmd = document.getElementById('install');
+    if (!btn || !cmd) return;
+    btn.addEventListener('click', function () {
+      var text = cmd.textContent;
+      var done = function () {
+        btn.textContent = 'Copied';
+        btn.classList.add('done');
+        setTimeout(function () { btn.textContent = 'Copy'; btn.classList.remove('done'); }, 1600);
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done, done);
+      } else {
+        var r = document.createRange(); r.selectNode(cmd);
+        var s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+        try { document.execCommand('copy'); } catch (e) {}
+        s.removeAllRanges(); done();
+      }
+    });
+  })();
+</script>
+</body>
+</html>
