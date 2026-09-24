@@ -297,7 +297,19 @@ impl<E: crate::executor::Spawn> TheaterRuntime<E> {
     pub async fn run(&mut self) -> Result<()> {
         info!("Theater runtime starting");
 
-        while let Some(cmd) = self.theater_rx.recv().await {
+        // A command pulled off the channel that must be handled before the next
+        // `recv()`. The auto-exit-on-empty path uses this to avoid dropping a
+        // command that is already queued when the actor set momentarily empties
+        // (see the `ActorShutdownComplete` arm).
+        let mut pending: Option<TheaterCommand> = None;
+        loop {
+            let cmd = match pending.take() {
+                Some(cmd) => cmd,
+                None => match self.theater_rx.recv().await {
+                    Some(cmd) => cmd,
+                    None => break,
+                },
+            };
             debug!("Runtime received command: {:?}", cmd.to_log());
             match cmd {
                 TheaterCommand::RestartActor {
@@ -442,8 +454,24 @@ impl<E: crate::executor::Spawn> TheaterRuntime<E> {
                     self.finalize_actor(actor_id);
 
                     if self.actors.is_empty() {
-                        info!("All actors have shut down, exiting runtime");
-                        break;
+                        // The actor set is transiently empty, but a reused runtime
+                        // (stop the last actor, then immediately spawn the next)
+                        // enqueues that next SpawnActor/SetupActor *before* this
+                        // completion is processed. Exiting here would drop the
+                        // already-queued command and fail its caller with a
+                        // `RecvError`. Only auto-exit when the queue is genuinely
+                        // drained; otherwise hand the queued command to the next
+                        // loop iteration.
+                        match self.theater_rx.try_recv() {
+                            Ok(next) => pending = Some(next),
+                            Err(_) => {
+                                info!(
+                                    "All actors have shut down and no commands are queued; \
+                                     exiting runtime"
+                                );
+                                break;
+                            }
+                        }
                     }
                 }
                 TheaterCommand::ActorError { actor_id, error } => {

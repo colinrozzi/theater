@@ -268,7 +268,16 @@ async fn replay_reconstructs_in_module_state_full_runtime() {
     )
     .expect("write chain file");
 
-    stop_actor(&theater_tx, record_id).await;
+    // NB: do NOT stop the record actor here. Stopping it now would let the
+    // runtime process the record actor's `ActorShutdownComplete` (finding
+    // `actors.is_empty()`) in the window *before* the replay actor's `SetupActor`
+    // reaches the command channel — the runtime then auto-exits (its `try_recv`
+    // mitigation only catches an already-enqueued command), dropping the replay
+    // `SetupActor`'s `response_tx` and failing setup with `RecvError`. Keeping the
+    // record actor alive across the replay setup keeps the actor-set non-empty at
+    // the setup boundary, so the runtime never auto-exits mid-transition. Both
+    // actors are stopped together at the end. (This is a test-harness reuse race
+    // only — real long-lived runtimes like the supervisor never go empty.)
 
     // ---- Replay run: a fresh actor in replay mode, driven by the chain ----
     let (rep_ev_tx, mut rep_ev_rx) = mpsc::channel(256);
@@ -326,6 +335,10 @@ async fn replay_reconstructs_in_module_state_full_runtime() {
         );
     }
 
+    // Stop both actors together now that replay is verified — the record actor was
+    // kept alive across the replay setup to avoid the empty-runtime auto-exit race
+    // (see the note at the record-actor stop site above).
     stop_actor(&theater_tx, replay_id).await;
+    stop_actor(&theater_tx, record_id).await;
     let _ = std::fs::remove_file(&chain_path);
 }

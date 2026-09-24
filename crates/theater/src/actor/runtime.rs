@@ -746,8 +746,15 @@ impl ActorRuntime {
 
                     info!("All loops have exited");
 
-                    if let Err(e) = response_tx.send(Ok(())) {
-                        error!("Failed to send shutdown confirmation: {:?}", e);
+                    // The confirmation is a oneshot; a fire-and-forget caller
+                    // (e.g. the runtime-wide drain) drops the receiver without
+                    // awaiting, so the send "fails" with the unsent value
+                    // (`Ok(())`) — benign, not an error. Shutdown is done either
+                    // way.
+                    if response_tx.send(Ok(())).is_err() {
+                        debug!(
+                            "shutdown confirmation receiver already gone (caller did not await)"
+                        );
                     }
 
                     debug!("Shutdown confirmation sent, exiting control loop");
@@ -767,8 +774,12 @@ impl ActorRuntime {
                             warn!("No handlers shutdown controller found");
                         }
                     }
-                    if let Err(e) = response_tx.send(Ok(())) {
-                        error!("Failed to send terminate confirmation: {:?}", e);
+                    // Same as the graceful path: a fire-and-forget caller may
+                    // have dropped the receiver — the unsent `Ok(())` is benign.
+                    if response_tx.send(Ok(())).is_err() {
+                        debug!(
+                            "terminate confirmation receiver already gone (caller did not await)"
+                        );
                     }
                     break;
                 }
