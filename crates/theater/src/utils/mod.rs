@@ -101,7 +101,15 @@ pub async fn resolve_reference_cached(
 }
 
 /// Resolve a reference to a byte array.
-/// A reference can be a file path or a URL.
+/// A reference can be inline content, a file path, or a URL.
+///
+/// An `inline:` reference carries its content directly after the prefix — the
+/// bytes are the UTF-8 of everything after `inline:`, resolved with no I/O. This
+/// is the "push" primitive: a caller with the content already in hand (e.g. a
+/// manifest pushed over a control channel to a box that must fetch nothing) hands
+/// it to the runtime inline rather than staging it to a file or URL first. Pair it
+/// with `SpawnActor`'s `wasm_bytes` to spawn an actor whose manifest AND wasm both
+/// arrive by push, never fetched.
 ///
 /// A URL is any reference starting with `http://` or `https://`.
 ///
@@ -116,7 +124,10 @@ pub async fn resolve_reference_cached(
 pub async fn resolve_reference(reference: &str) -> Result<Vec<u8>, ReferenceError> {
     info!("Resolving reference: {}", reference);
 
-    if reference.starts_with("store://") {
+    if let Some(content) = reference.strip_prefix("inline:") {
+        // Inline content — no I/O. The bytes are the text after the prefix.
+        return Ok(content.as_bytes().to_vec());
+    } else if reference.starts_with("store://") {
         Err(ReferenceError::ResolveError(format!(
             "store:// references are no longer resolved by the runtime: {}. \
              Resolve it to bytes (or a file/URL) via the store capability before spawning.",
@@ -226,6 +237,18 @@ pub use theater_store::get_theater_home;
 mod tests {
     use super::*;
     use std::io::Write;
+
+    #[tokio::test]
+    async fn inline_reference_returns_content_verbatim_no_io() {
+        // `inline:<content>` resolves to the bytes after the prefix, with no I/O —
+        // the push primitive (manifest content handed to the runtime directly).
+        let toml = "name = \"x\"\nversion = \"0.1.0\"\npackage = \"placeholder\"\n";
+        let got = resolve_reference(&format!("inline:{toml}")).await.unwrap();
+        assert_eq!(got, toml.as_bytes());
+
+        // Empty inline is valid (empty content), still no I/O / no file lookup.
+        assert_eq!(resolve_reference("inline:").await.unwrap(), Vec::<u8>::new());
+    }
 
     #[tokio::test]
     async fn resource_cache_hits_on_repeat_reference() {
