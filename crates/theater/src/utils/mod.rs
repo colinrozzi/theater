@@ -247,7 +247,10 @@ mod tests {
         assert_eq!(got, toml.as_bytes());
 
         // Empty inline is valid (empty content), still no I/O / no file lookup.
-        assert_eq!(resolve_reference("inline:").await.unwrap(), Vec::<u8>::new());
+        assert_eq!(
+            resolve_reference("inline:").await.unwrap(),
+            Vec::<u8>::new()
+        );
     }
 
     #[tokio::test]
