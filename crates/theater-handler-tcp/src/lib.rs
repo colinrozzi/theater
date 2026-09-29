@@ -87,6 +87,16 @@ pub struct TcpHandlerConfig {
     /// TLS configuration for inbound server connections (listeners)
     #[serde(default)]
     pub server_tls: Option<ServerTlsConfig>,
+    /// Close an active/once-mode connection whose read loop has received no
+    /// bytes for this many seconds. `None` (default) keeps the current behaviour
+    /// — a connection may stay open indefinitely. This is the post-handshake
+    /// analogue of `TLS_HANDSHAKE_TIMEOUT`: it releases the FD held by a client
+    /// that completes the handshake (or connects plaintext) and then holds the
+    /// connection open sending nothing, guarding a public listener against
+    /// slow-loris / idle-hold FD exhaustion. The deadline resets on every read,
+    /// so it is an inactivity timeout, not an absolute connection lifetime.
+    #[serde(default)]
+    pub idle_timeout_secs: Option<u64>,
 }
 
 /// TLS configuration for outbound client connections
@@ -257,15 +267,19 @@ struct SharedTcpState {
     listeners: Mutex<HashMap<u64, ListenerEntry>>,
     next_id: AtomicU64,
     max_connections: Option<u32>,
+    /// Inactivity timeout for active/once-mode read loops (from
+    /// `TcpHandlerConfig::idle_timeout_secs`); `None` = no idle timeout.
+    idle_timeout: Option<std::time::Duration>,
 }
 
 impl SharedTcpState {
-    fn new(max_connections: Option<u32>) -> Self {
+    fn new(max_connections: Option<u32>, idle_timeout: Option<std::time::Duration>) -> Self {
         Self {
             connections: Mutex::new(HashMap::new()),
             listeners: Mutex::new(HashMap::new()),
             next_id: AtomicU64::new(1),
             max_connections,
+            idle_timeout,
         }
     }
 
@@ -318,9 +332,11 @@ impl TcpHandler {
             }
         };
 
+        let idle_timeout = config.idle_timeout_secs.map(std::time::Duration::from_secs);
+
         Self {
             config,
-            shared_state: Arc::new(SharedTcpState::new(None)),
+            shared_state: Arc::new(SharedTcpState::new(None, idle_timeout)),
             actor_id: Arc::new(std::sync::Mutex::new(None)),
             actor_handle: Arc::new(std::sync::Mutex::new(None)),
             cancellation_token: CancellationToken::new(),
@@ -2076,6 +2092,7 @@ async fn tcp_read_loop(
     );
 
     let mut buf = vec![0u8; ACTIVE_READ_BUFFER_SIZE];
+    let idle_timeout = shared_state.idle_timeout;
 
     loop {
         tokio::select! {
@@ -2084,9 +2101,40 @@ async fn tcp_read_loop(
                 shutdown_write_half_and_remove(&shared_state, conn_id).await;
                 break;
             }
-            result = read_half.read(&mut buf) => {
+            // A read that yields no bytes within `idle_timeout` returns
+            // Err(Elapsed); `None` => a plain read with no deadline. The timeout
+            // is re-armed each iteration, so it is an inactivity timeout.
+            result = async {
+                match idle_timeout {
+                    Some(d) => tokio::time::timeout(d, read_half.read(&mut buf)).await,
+                    None => Ok(read_half.read(&mut buf).await),
+                }
+            } => {
                 match result {
-                    Ok(0) => {
+                    Err(_elapsed) => {
+                        // No data for `idle_timeout` — release the FD (guards a
+                        // public listener against idle-hold / slow-loris).
+                        info!(
+                            "tcp conn={} idle timeout ({:?}) with no data; closing",
+                            conn_id, idle_timeout
+                        );
+                        let params = Value::Tuple(vec![
+                            Value::String(conn_id_str.clone()),
+                            Value::String("idle".to_string()),
+                        ]);
+                        if let Err(e) = actor_handle
+                            .call_function(
+                                "theater:simple/tcp-client.on-close".to_string(),
+                                params,
+                            )
+                            .await
+                        {
+                            warn!("tcp conn={} on-close (idle) callback failed: {}", conn_id, e);
+                        }
+                        shutdown_write_half_and_remove(&shared_state, conn_id).await;
+                        break;
+                    }
+                    Ok(Ok(0)) => {
                         // EOF - connection closed by peer
                         info!("tcp conn={} received EOF", conn_id);
 
@@ -2106,7 +2154,7 @@ async fn tcp_read_loop(
                         shutdown_write_half_and_remove(&shared_state, conn_id).await;
                         break;
                     }
-                    Ok(n) => {
+                    Ok(Ok(n)) => {
                         // Data received - call on-data callback
                         let data = buf[..n].to_vec();
                         debug!("tcp conn={} received {} bytes, calling on-data", conn_id, n);
@@ -2138,7 +2186,7 @@ async fn tcp_read_loop(
                             break;
                         }
                     }
-                    Err(e) => {
+                    Ok(Err(e)) => {
                         // Read error - connection broken
                         error!("tcp conn={} read error: {}", conn_id, e);
 
@@ -2189,7 +2237,7 @@ mod tests {
         let client = tokio::net::TcpStream::connect(addr).await.unwrap();
         let (server, peer_addr) = listener.accept().await.unwrap();
 
-        let st = Arc::new(SharedTcpState::new(None));
+        let st = Arc::new(SharedTcpState::new(None, None));
         let acceptor_id = TheaterId::generate();
         let conn_id = st.next_id();
         st.connections.lock().await.insert(
@@ -2227,6 +2275,95 @@ mod tests {
                 }
             }
         });
+    }
+
+    /// A connection in active mode that receives no bytes within
+    /// `idle_timeout` is torn down: `on-close` fires with reason "idle" and the
+    /// connection is removed (its FD released). This is the FD-exhaustion guard
+    /// for a client that connects (or completes the TLS handshake) then holds
+    /// the connection open sending nothing.
+    #[tokio::test]
+    async fn idle_timeout_closes_a_silent_connection() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        // Keep the client end alive but SILENT — never send a byte.
+        let _client = tokio::net::TcpStream::connect(addr).await.unwrap();
+        let (server, peer_addr) = listener.accept().await.unwrap();
+
+        let idle = Duration::from_millis(300);
+        let st = Arc::new(SharedTcpState::new(None, Some(idle)));
+        let conn_id = st.next_id();
+        let owner = TheaterId::generate();
+
+        // Mirror the activate path: read half drives the loop, write half is
+        // parked in the entry (used by the teardown to flush + close).
+        let (read_half, write_half) = UnifiedStream::Plain(server).into_split();
+        st.connections.lock().await.insert(
+            conn_id,
+            ConnectionEntry {
+                stream: Arc::new(Mutex::new(StreamState::WriteOnly(write_half))),
+                peer_addr,
+                owner,
+                state: ConnectionState::Active,
+                data_mode: DataMode::Active,
+            },
+        );
+
+        // Mock actor: capture the on-close callback's reason, then answer so the
+        // read loop's `call_function(...).await` returns.
+        let (op_tx, mut op_rx) = tokio::sync::mpsc::channel::<ActorOperation>(4);
+        let (info_tx, _info_rx) = tokio::sync::mpsc::channel(4);
+        let (ctrl_tx, _ctrl_rx) = tokio::sync::mpsc::channel(4);
+        let actor_handle = ActorHandle::new(op_tx, info_tx, ctrl_tx);
+
+        let reason = Arc::new(std::sync::Mutex::new(None::<String>));
+        let reason_t = reason.clone();
+        tokio::spawn(async move {
+            if let Some(ActorOperation::CallFunctionPack {
+                name,
+                params,
+                response_tx,
+            }) = op_rx.recv().await
+            {
+                assert_eq!(name, "theater:simple/tcp-client.on-close");
+                if let Ok(Value::Tuple(v)) = theater::pack_bridge::decode_value(&params) {
+                    if let Some(Value::String(r)) = v.get(1) {
+                        *reason_t.lock().unwrap() = Some(r.clone());
+                    }
+                }
+                let _ = response_tx.send(Ok(vec![]));
+            }
+        });
+
+        // Run the read loop; with no data it must close on the idle deadline.
+        let st_loop = st.clone();
+        let loop_task = tokio::spawn(async move {
+            tcp_read_loop(
+                conn_id,
+                read_half,
+                actor_handle,
+                st_loop,
+                /* is_once = */ false,
+                CancellationToken::new(),
+            )
+            .await;
+        });
+
+        // A few idle periods is ample; if it never fires, this times out (fail).
+        tokio::time::timeout(idle * 6, loop_task)
+            .await
+            .expect("read loop should exit on the idle timeout")
+            .unwrap();
+
+        assert_eq!(
+            reason.lock().unwrap().as_deref(),
+            Some("idle"),
+            "on-close should fire with reason \"idle\""
+        );
+        assert!(
+            !st.connections.lock().await.contains_key(&conn_id),
+            "the idle connection should be removed (FD released)"
+        );
     }
 
     /// (a) `transfer-async` returns before a deliberately slow target finishes
@@ -2450,7 +2587,7 @@ mod tests {
             client_auto_handshake: true,
         }));
 
-        let st = Arc::new(SharedTcpState::new(None));
+        let st = Arc::new(SharedTcpState::new(None, None));
         let actor_id = TheaterId::generate();
 
         // Mock actor: records every handle-connection dispatch (proves the conn
