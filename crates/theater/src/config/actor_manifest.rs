@@ -332,9 +332,10 @@ impl ManifestConfig {
     /// }
     /// ```
     pub fn from_file<P: AsRef<std::path::Path>>(path: P) -> anyhow::Result<Self> {
+        // Route through `from_str` so the redacted logging + sanitized parse
+        // error apply here too.
         let content = std::fs::read_to_string(path)?;
-        let config: ManifestConfig = toml::from_str(&content)?;
-        Ok(config)
+        Self::from_str(&content)
     }
 
     /// Loads a manifest configuration from a TOML string.
@@ -372,16 +373,36 @@ impl ManifestConfig {
     /// ```
     #[allow(clippy::should_implement_trait)]
     pub fn from_str(content: &str) -> anyhow::Result<Self> {
-        tracing::info!("Parsing manifest TOML content: {}", content);
+        // SECURITY: never log raw manifest content. `initial_state` can carry
+        // secrets (bearer tokens, DKIM seeds, per-tenant keys, anything
+        // push-spawned), so a full-content log leaks them to the journal. Log
+        // only a redacted fingerprint (byte length).
+        tracing::debug!("Parsing manifest TOML ({} bytes)", content.len());
 
         let config: ManifestConfig = match toml::from_str(content) {
             Ok(config) => {
-                tracing::info!("Successfully parsed manifest TOML");
+                tracing::debug!("Successfully parsed manifest TOML");
                 config
             }
             Err(e) => {
-                tracing::error!("Failed to parse manifest TOML: {}", e);
-                return Err(e.into());
+                // A toml error's first line is "TOML parse error at line L,
+                // column C" — the location, with no source content. The
+                // remaining lines render the offending source span, which may
+                // sit inside a secret-bearing value, so they must NOT be logged
+                // OR propagated (an upstream logger would re-leak them). Keep
+                // the location only.
+                let rendered = e.to_string();
+                let location = rendered.lines().next().unwrap_or("TOML parse error");
+                tracing::error!(
+                    "Failed to parse manifest TOML ({} bytes): {}",
+                    content.len(),
+                    location
+                );
+                return Err(anyhow::anyhow!(
+                    "failed to parse manifest TOML ({} bytes): {}",
+                    content.len(),
+                    location
+                ));
             }
         };
 
@@ -428,8 +449,9 @@ impl ManifestConfig {
     /// }
     /// ```
     pub fn from_vec(content: Vec<u8>) -> anyhow::Result<Self> {
-        let config: ManifestConfig = toml::from_str(&String::from_utf8(content)?)?;
-        Ok(config)
+        // Route through `from_str` so the redacted logging + sanitized parse
+        // error apply here too (this is the push-spawn path).
+        Self::from_str(&String::from_utf8(content)?)
     }
 
     /// Gets the name of the actor.
@@ -502,11 +524,16 @@ impl ManifestConfig {
     /// one representation per possible manifest. The current implementation uses TOML serialization,
     /// but this might be refined in the future to guarantee consistent representations.
     pub fn into_fixed_bytes(self) -> Result<Vec<u8>, anyhow::Error> {
-        debug!("Serializing manifest config to fixed bytes");
-        debug!("Manifest config: {:?}", self);
+        // SECURITY: do not dump the config or the serialized TOML — both carry
+        // `initial_state` (and thus any secret). Log a redacted summary only.
+        debug!("Serializing manifest '{}' to fixed bytes", self.name);
         let serialized = toml::to_string(&self)
             .map_err(|e| anyhow::anyhow!("Failed to serialize manifest: {}", e))?;
-        debug!("Serialized manifest config: {}", serialized);
+        debug!(
+            "Serialized manifest '{}' ({} bytes)",
+            self.name,
+            serialized.len()
+        );
         Ok(serialized.into_bytes())
     }
 
@@ -537,6 +564,43 @@ impl ManifestConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_error_never_leaks_manifest_content() {
+        // A manifest whose secret-bearing `initial_state` triggers a parse error
+        // (here an unterminated triple-quoted string — the real cutover trigger)
+        // must NOT echo the secret in the returned error. The error should carry
+        // the location + a byte length, never the raw content. Guards the
+        // secrets-in-logs hazard (bearer tokens, DKIM seeds, per-tenant keys).
+        let canary = "SECRET-CANARY-123";
+        let bad = format!(
+            "name = \"x\"\nversion = \"0.1.0\"\npackage = \"p.wasm\"\n\
+             initial_state = '''{{\"bearer\":\"{canary}\"\n"
+        );
+
+        let err = ManifestConfig::from_str(&bad)
+            .expect_err("unterminated triple-quote must fail to parse");
+        let msg = err.to_string();
+
+        assert!(
+            !msg.contains(canary),
+            "parse error leaked the secret: {msg}"
+        );
+        // Still useful for debugging: it names the failure + the content size.
+        assert!(
+            msg.contains("parse manifest TOML") && msg.contains("bytes"),
+            "error should carry a redacted location/length, got: {msg}"
+        );
+
+        // from_vec is the push-spawn path and must be equally safe.
+        let err_vec = ManifestConfig::from_vec(bad.into_bytes())
+            .expect_err("from_vec must fail on the same input");
+        assert!(
+            !err_vec.to_string().contains(canary),
+            "from_vec leaked the secret: {}",
+            err_vec
+        );
+    }
 
     #[test]
     fn test_manifest_permission_policy_parsing() {

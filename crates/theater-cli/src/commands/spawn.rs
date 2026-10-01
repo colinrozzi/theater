@@ -109,16 +109,34 @@ pub async fn execute_setup(args: &SetupArgs, ctx: &CommandContext) -> Result<(),
     run(args, ctx, /* call_init = */ false).await
 }
 
+/// Render a manifest reference safe for logs/errors. An `inline:<content>`
+/// reference embeds the manifest body (which may carry secrets in
+/// `initial_state`), so collapse it to a byte count; file/URL/store references
+/// are safe to show verbatim.
+fn redacted_reference(reference: &str) -> String {
+    match reference.strip_prefix("inline:") {
+        Some(content) => format!("inline:<{} bytes>", content.len()),
+        None => reference.to_string(),
+    }
+}
+
 /// Shared body for `spawn` and `setup`. Differs only in which
 /// `TheaterCommand` variant it dispatches.
 async fn run(args: &SpawnArgs, ctx: &CommandContext, call_init: bool) -> Result<(), CliError> {
-    debug!("Starting actor from manifest: {}", args.manifest);
+    // An `inline:<content>` reference carries the manifest body itself, which may
+    // hold secrets in `initial_state`; never log/echo it raw. File/URL/store refs
+    // are safe to show.
+    debug!(
+        "Starting actor from manifest: {}",
+        redacted_reference(&args.manifest)
+    );
 
     // Resolve the manifest reference (file path, URL, or store path)
     let manifest_bytes = resolve_reference(&args.manifest).await.map_err(|e| {
         CliError::invalid_manifest(format!(
             "Failed to resolve manifest reference '{}': {}",
-            args.manifest, e
+            redacted_reference(&args.manifest),
+            e
         ))
     })?;
 
