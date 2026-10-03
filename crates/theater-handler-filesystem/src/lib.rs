@@ -22,6 +22,17 @@
 //!   resolved path must fall within one of those subtrees (interpreted relative
 //!   to the sandbox root) or the op is rejected `permission-denied`.
 //!
+//! ## Sandbox-root lifecycle
+//!
+//! When the root is a fresh per-instance temp dir (`new_dir`, or no configured
+//! `path`), the handler records it and removes it when the actor shuts down
+//! (`setup`). It is *not* removed for a configured `path` — that belongs to the
+//! operator. As a backstop for roots orphaned by a crash/SIGKILL (where
+//! shutdown never fires), a one-time startup sweep removes `theater-fs-<pid>-*`
+//! dirs whose owning process is no longer alive. Without this, every actor
+//! instantiation leaked a temp dir — a slow disk + inode bomb on long-lived
+//! hosts.
+//!
 //! ## Replay
 //!
 //! Every op here is a host call, so its result is recorded on the chain and
@@ -299,6 +310,12 @@ pub struct FileSystemHandler {
     path: Option<PathBuf>,
     /// When `Some(true)`, always root the sandbox at a fresh temp directory.
     new_dir: Option<bool>,
+    /// The per-instance temp directory this handler created as its sandbox root,
+    /// if any. Set by [`Self::resolve_root`] when the root is a fresh temp dir
+    /// (not a configured `path`); removed in [`Handler::setup`] when the actor
+    /// shuts down. `None` for a configured (persistent) root — we must never
+    /// delete a path the operator handed us.
+    ephemeral_root: Option<PathBuf>,
 }
 
 impl FileSystemHandler {
@@ -315,6 +332,7 @@ impl FileSystemHandler {
             permissions,
             path: config.path,
             new_dir: config.new_dir,
+            ephemeral_root: None,
         }
     }
 
@@ -329,27 +347,109 @@ impl FileSystemHandler {
     /// - otherwise a configured `path` is used.
     /// - no configured path (and no `new_dir`) → a fresh temp directory, so an
     ///   unconfigured handler never exposes the host filesystem.
-    fn resolve_root(&self) -> anyhow::Result<PathBuf> {
-        let root = match (&self.path, self.new_dir) {
-            (_, Some(true)) => fresh_temp_root(),
-            (Some(p), _) => p.clone(),
-            (None, _) => fresh_temp_root(),
+    fn resolve_root(&mut self) -> anyhow::Result<PathBuf> {
+        let (root, ephemeral) = match (&self.path, self.new_dir) {
+            (_, Some(true)) => (fresh_temp_root(), true),
+            (Some(p), _) => (p.clone(), false),
+            (None, _) => (fresh_temp_root(), true),
         };
         std::fs::create_dir_all(&root)
             .with_context(|| format!("creating filesystem sandbox root {:?}", root))?;
         let canonical = std::fs::canonicalize(&root)
             .with_context(|| format!("canonicalizing filesystem sandbox root {:?}", root))?;
+        if ephemeral {
+            // Remember the per-instance temp root so `setup` can remove it when
+            // the actor shuts down. Without this, every actor instantiation
+            // leaks a `theater-fs-<pid>-<ts>` dir — a slow disk + inode bomb on
+            // long-lived hosts (an acceptor instantiated 900K of these once).
+            self.ephemeral_root = Some(canonical.clone());
+        }
         Ok(canonical)
     }
 }
 
-/// A fresh, process-and-time-unique temp directory path (not yet created).
+/// A fresh, process-and-time-unique temp directory path (not yet created). The
+/// `theater-fs-<pid>-<nanos>` shape is what [`parse_sandbox_pid`] recognizes
+/// when sweeping orphans, so keep the two in sync.
 fn fresh_temp_root() -> PathBuf {
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_nanos())
         .unwrap_or(0);
     std::env::temp_dir().join(format!("theater-fs-{}-{}", std::process::id(), nanos))
+}
+
+/// Guards [`sweep_orphan_sandboxes`] so it runs at most once per process.
+static ORPHAN_SWEEP: std::sync::Once = std::sync::Once::new();
+
+/// Kick off the one-time orphan sweep (on a detached thread so a pathological
+/// temp dir can't stall the first actor's startup). Idempotent across handlers
+/// and actors.
+fn sweep_orphans_once() {
+    ORPHAN_SWEEP.call_once(|| {
+        std::thread::spawn(sweep_orphan_sandboxes);
+    });
+}
+
+/// Remove leftover `theater-fs-<pid>-<nanos>` sandbox roots whose owning process
+/// is no longer alive — the orphans a crash/SIGKILL (or a pre-GC build) left
+/// behind, which the per-actor shutdown GC can't reach. Dirs belonging to a
+/// live process (including ours) are left untouched: ours are GC'd on shutdown,
+/// and a reused pid is kept conservatively rather than risk deleting a running
+/// host's sandbox.
+fn sweep_orphan_sandboxes() {
+    let tmp = std::env::temp_dir();
+    let me = std::process::id();
+    let rd = match std::fs::read_dir(&tmp) {
+        Ok(rd) => rd,
+        Err(e) => {
+            warn!("theater-fs orphan sweep: cannot read {:?}: {}", tmp, e);
+            return;
+        }
+    };
+    let (mut removed, mut failed) = (0u64, 0u64);
+    for entry in rd.flatten() {
+        let name = entry.file_name();
+        let pid = match name.to_str().and_then(parse_sandbox_pid) {
+            Some(p) => p,
+            None => continue,
+        };
+        if pid == me || is_pid_alive(pid) {
+            continue;
+        }
+        match std::fs::remove_dir_all(entry.path()) {
+            Ok(()) => removed += 1,
+            Err(_) => failed += 1,
+        }
+    }
+    if removed > 0 || failed > 0 {
+        info!(
+            "theater-fs orphan sweep: removed {} stale sandbox dir(s), {} failed",
+            removed, failed
+        );
+    }
+}
+
+/// Parse the `<pid>` out of a `theater-fs-<pid>-<nanos>` dir name. Returns
+/// `None` for anything that is not exactly that shape, so the sweep never
+/// touches an unrelated temp dir.
+fn parse_sandbox_pid(name: &str) -> Option<u32> {
+    let (pid, nanos) = name.strip_prefix("theater-fs-")?.split_once('-')?;
+    if nanos.is_empty() || !nanos.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    pid.parse::<u32>().ok()
+}
+
+/// Is `pid` a live process? Linux-only, via `/proc/<pid>`. Where `/proc` is
+/// absent (non-Linux) we conservatively report `true` so the sweep can never
+/// delete a live host's sandbox; the per-actor shutdown GC still runs there.
+fn is_pid_alive(pid: u32) -> bool {
+    let proc = Path::new("/proc");
+    if !proc.exists() {
+        return true;
+    }
+    proc.join(pid.to_string()).exists()
 }
 
 impl Handler for FileSystemHandler {
@@ -385,9 +485,21 @@ impl Handler for FileSystemHandler {
         _event_rx: theater::handler::HandlerEventReceiver,
     ) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>> {
         info!("FileSystem handler setup");
+        // Capture the per-instance temp root (if any) so we can delete it once
+        // the actor stops — the fix for the sandbox-root leak.
+        let ephemeral_root = self.ephemeral_root.clone();
         Box::pin(async move {
             shutdown_receiver.wait_for_shutdown().await;
             info!("FileSystem handler received shutdown signal");
+            if let Some(root) = ephemeral_root {
+                match std::fs::remove_dir_all(&root) {
+                    Ok(()) => debug!("removed ephemeral filesystem sandbox root {:?}", root),
+                    Err(e) => warn!(
+                        "failed to remove ephemeral filesystem sandbox root {:?}: {}",
+                        root, e
+                    ),
+                }
+            }
             Ok(())
         })
     }
@@ -430,6 +542,9 @@ impl Handler for FileSystemHandler {
         ctx: &mut HandlerContext,
     ) -> anyhow::Result<()> {
         info!("Setting up filesystem host functions (Pack)");
+
+        // One-time per process: clear sandbox roots orphaned by dead processes.
+        sweep_orphans_once();
 
         if ctx.is_satisfied("theater:simple/filesystem") {
             info!("theater:simple/filesystem already satisfied, skipping");
@@ -867,5 +982,61 @@ mod tests {
                 other => panic!("expected variant, got {:?}", other),
             }
         }
+    }
+
+    // --- sandbox-root GC (the /tmp leak fix) ---
+
+    #[test]
+    fn test_parse_sandbox_pid_shape() {
+        // Exact shape → the pid.
+        assert_eq!(parse_sandbox_pid("theater-fs-1234-56789"), Some(1234));
+        assert_eq!(parse_sandbox_pid("theater-fs-1-0"), Some(1));
+        // Wrong prefix, missing halves, or non-numeric nanos → None (never swept).
+        assert_eq!(parse_sandbox_pid("theater-fs-1234"), None);
+        assert_eq!(parse_sandbox_pid("theater-fs--5"), None);
+        assert_eq!(parse_sandbox_pid("theater-fs-12-ab"), None);
+        assert_eq!(parse_sandbox_pid("not-ours-1-2"), None);
+        assert_eq!(parse_sandbox_pid("theater-fs-"), None);
+    }
+
+    #[test]
+    fn test_fresh_temp_root_name_is_parseable() {
+        // The name fresh_temp_root() mints must be recognized by the sweeper,
+        // and must carry our own pid.
+        let root = fresh_temp_root();
+        let name = root.file_name().unwrap().to_str().unwrap();
+        assert_eq!(parse_sandbox_pid(name), Some(std::process::id()));
+    }
+
+    #[test]
+    fn test_ephemeral_root_recorded_and_removable() {
+        // A no-config handler roots at a fresh temp dir, records it, and that
+        // dir is what setup() would remove on shutdown.
+        let mut handler = FileSystemHandler::new(cfg(), None);
+        assert!(handler.ephemeral_root.is_none());
+        let root = handler.resolve_root().expect("resolve a fresh root");
+        assert!(root.exists());
+        assert_eq!(handler.ephemeral_root.as_deref(), Some(root.as_path()));
+        // Simulate the shutdown GC.
+        std::fs::remove_dir_all(&root).expect("remove ephemeral root");
+        assert!(!root.exists());
+    }
+
+    #[test]
+    fn test_configured_root_is_not_ephemeral() {
+        // A configured path must never be recorded as ephemeral — we must not
+        // delete an operator-provided directory on shutdown.
+        let dir = std::env::temp_dir().join(fresh_temp_root().file_name().unwrap());
+        std::fs::create_dir_all(&dir).unwrap();
+        let cfg = FileSystemHandlerConfig {
+            path: Some(dir.clone()),
+            new_dir: None,
+            allowed_commands: None,
+        };
+        let mut handler = FileSystemHandler::new(cfg, None);
+        let root = handler.resolve_root().expect("resolve configured root");
+        assert_eq!(root, std::fs::canonicalize(&dir).unwrap());
+        assert!(handler.ephemeral_root.is_none());
+        std::fs::remove_dir_all(&dir).ok();
     }
 }
