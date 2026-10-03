@@ -262,14 +262,25 @@ struct ListenerEntry {
 /// This state is shared via Arc, so all TcpHandler instances in a Theater
 /// runtime see the same connections and listeners. This enables connection
 /// transfer between actors.
+/// `None` → `0` (disabled); `Some(d)` → its whole milliseconds, saturated into
+/// `u64`. Inverse of the `0 == disabled` convention used by `idle_timeout_ms`.
+fn duration_to_ms(d: Option<std::time::Duration>) -> u64 {
+    d.map(|d| d.as_millis().min(u64::MAX as u128) as u64)
+        .unwrap_or(0)
+}
+
 struct SharedTcpState {
     connections: Mutex<HashMap<u64, ConnectionEntry>>,
     listeners: Mutex<HashMap<u64, ListenerEntry>>,
     next_id: AtomicU64,
     max_connections: Option<u32>,
     /// Inactivity timeout for active/once-mode read loops (from
-    /// `TcpHandlerConfig::idle_timeout_secs`); `None` = no idle timeout.
-    idle_timeout: Option<std::time::Duration>,
+    /// `TcpHandlerConfig::idle_timeout_secs`), in milliseconds; `0` = no idle
+    /// timeout. Stored as an atomic because this state is shared across every
+    /// actor on the handler (for connection transfer), so a per-actor manifest
+    /// value is applied here by `create_instance` AFTER the template built the
+    /// state — see [`SharedTcpState::set_idle_timeout`].
+    idle_timeout_ms: AtomicU64,
 }
 
 impl SharedTcpState {
@@ -279,12 +290,31 @@ impl SharedTcpState {
             listeners: Mutex::new(HashMap::new()),
             next_id: AtomicU64::new(1),
             max_connections,
-            idle_timeout,
+            idle_timeout_ms: AtomicU64::new(duration_to_ms(idle_timeout)),
         }
     }
 
     fn next_id(&self) -> u64 {
         self.next_id.fetch_add(1, Ordering::Relaxed)
+    }
+
+    /// Current inactivity timeout, or `None` if disabled. Read once per read
+    /// loop when a connection activates.
+    fn idle_timeout(&self) -> Option<std::time::Duration> {
+        match self.idle_timeout_ms.load(Ordering::Relaxed) {
+            0 => None,
+            ms => Some(std::time::Duration::from_millis(ms)),
+        }
+    }
+
+    /// Set (or clear) the shared inactivity timeout. Called from
+    /// `create_instance` when an actor's manifest provides `idle_timeout_secs`.
+    /// Because the state is shared per-runtime, this is a coarse, runtime-wide
+    /// knob (the last actor to configure it wins); for per-listener control a
+    /// `listen()` option would be needed (that is an ABI change, deferred).
+    fn set_idle_timeout(&self, idle_timeout: Option<std::time::Duration>) {
+        self.idle_timeout_ms
+            .store(duration_to_ms(idle_timeout), Ordering::Relaxed);
     }
 
     async fn check_connection_limit(&self) -> Result<(), Value> {
@@ -712,6 +742,17 @@ impl Handler for TcpHandler {
             // Reuse existing TLS context
             self.tls_context.clone()
         };
+
+        // Apply a per-actor manifest `idle_timeout_secs` onto the shared state.
+        // The state itself is shared across all instances (the key for transfer,
+        // below), and it was built by the template with no timeout — so without
+        // this, a manifest-provided idle_timeout_secs would be silently ignored.
+        // Only override when the manifest actually sets it, so an actor that
+        // omits the field never clobbers a value a sibling actor configured.
+        if let Some(secs) = tcp_config.idle_timeout_secs {
+            self.shared_state
+                .set_idle_timeout(Some(std::time::Duration::from_secs(secs)));
+        }
 
         // Share the same state across all instances - this is the key for transfer!
         // Each instance gets its own cancellation token (cancelled when that actor shuts down)
@@ -2092,7 +2133,7 @@ async fn tcp_read_loop(
     );
 
     let mut buf = vec![0u8; ACTIVE_READ_BUFFER_SIZE];
-    let idle_timeout = shared_state.idle_timeout;
+    let idle_timeout = shared_state.idle_timeout();
 
     loop {
         tokio::select! {
@@ -2793,6 +2834,45 @@ mod tests {
         // The key test: shared_state Arc should be the same
         // (We can't easily test this without exposing internals, but the
         // implementation clones the Arc, not the data)
+    }
+
+    #[test]
+    fn test_shared_state_idle_timeout_set_get() {
+        let st = SharedTcpState::new(None, None);
+        assert_eq!(st.idle_timeout(), None);
+        st.set_idle_timeout(Some(Duration::from_secs(5)));
+        assert_eq!(st.idle_timeout(), Some(Duration::from_secs(5)));
+        st.set_idle_timeout(None);
+        assert_eq!(st.idle_timeout(), None, "0 ms must read back as disabled");
+    }
+
+    #[test]
+    fn test_create_instance_applies_manifest_idle_timeout() {
+        // Template built with no timeout — mirrors theater-stage's registration.
+        let handler = TcpHandler::new(TcpHandlerConfig::default());
+        assert_eq!(handler.shared_state.idle_timeout(), None);
+
+        // A per-actor manifest that sets idle_timeout_secs must take effect on
+        // the shared state the read loop reads — the bug this fix closes.
+        let cfg = TcpHandlerConfig {
+            idle_timeout_secs: Some(42),
+            ..Default::default()
+        };
+        let hc = HandlerConfig::new("tcp", cfg);
+        let _inst = handler.create_instance(Some(&hc));
+        assert_eq!(
+            handler.shared_state.idle_timeout(),
+            Some(Duration::from_secs(42))
+        );
+
+        // An actor that omits the field must NOT clobber a sibling's value.
+        let hc_none = HandlerConfig::new("tcp", TcpHandlerConfig::default());
+        let _inst2 = handler.create_instance(Some(&hc_none));
+        assert_eq!(
+            handler.shared_state.idle_timeout(),
+            Some(Duration::from_secs(42)),
+            "omitting idle_timeout_secs must not reset an already-configured value"
+        );
     }
 
     #[test]
