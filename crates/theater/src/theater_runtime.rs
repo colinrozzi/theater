@@ -410,7 +410,7 @@ impl<E: crate::executor::Spawn> TheaterRuntime<E> {
                     response_tx,
                 } => {
                     debug!("Terminating actor: {:?}", actor_id);
-                    match self.stop_actor(actor_id, ShutdownType::Force).await {
+                    match self.stop_actor(actor_id, ShutdownType::Force, false).await {
                         Ok(_) => {
                             info!("Actor terminated successfully");
                             let _ = response_tx.send(Ok(()));
@@ -986,7 +986,7 @@ impl<E: crate::executor::Spawn> TheaterRuntime<E> {
         // NOT run its graceful shutdown handlers / wait on a corpse) and record
         // the terminal event as `Failed{error}`.
         debug!("Shutting down actor {:?} due to error", actor_id);
-        self.stop_actor(actor_id, ShutdownType::Failed(error.to_string()))
+        self.stop_actor(actor_id, ShutdownType::Failed(error.to_string()), false)
             .await
             .map_err(|e| {
                 error!("Failed to stop actor after error: {}", e);
@@ -1011,21 +1011,29 @@ impl<E: crate::executor::Spawn> TheaterRuntime<E> {
     /// Idempotent: a second call while already `Stopping` is a no-op (the
     /// `status` is the guard), so an actor reached by two death paths at once
     /// emits exactly one terminal.
+    ///
+    /// Returns the teardown-completion ack receiver (the actor control loop
+    /// sends on it AFTER its bounded teardown — handlers signalled + loops
+    /// exited). Callers that need teardown to be DONE before proceeding (e.g.
+    /// the external stop that precedes a rebind) await it; fire-and-forget
+    /// callers (drain, fate cascade) drop it. `None` when there was nothing to
+    /// signal (unknown / already-stopping actor, or the control channel is
+    /// gone), so there is no ack to wait for.
     async fn initiate_teardown(
         &mut self,
         actor_id: TheaterId,
         cause: crate::events::lifecycle::TerminationCause,
         force: bool,
-    ) {
+    ) -> Option<oneshot::Receiver<Result<(), ActorError>>> {
         // Guard + record the cause + take the control channel (scoped so the
         // `&mut self.actors` borrow ends before we touch `self.chains`).
         let control_tx = {
             let proc = match self.actors.get_mut(&actor_id) {
                 Some(p) => p,
-                None => return,
+                None => return None,
             };
             if matches!(proc.status, ActorStatus::Stopping(_)) {
-                return; // already stopping
+                return None; // already stopping
             }
             proc.status = ActorStatus::Stopping(cause.clone());
             proc.control_tx.clone()
@@ -1048,8 +1056,9 @@ impl<E: crate::executor::Spawn> TheaterRuntime<E> {
 
         // Signal the actor task. `Terminate` for a force-kill (abort loops),
         // `Shutdown` for the graceful path; either way the task runs its own
-        // bounded teardown and self-reports. The ack channel is unused.
-        let (ack_tx, _ack_rx) = oneshot::channel();
+        // bounded teardown and self-reports. The ack is returned to the caller
+        // (sent by the control loop AFTER teardown) — see the doc comment.
+        let (ack_tx, ack_rx) = oneshot::channel();
         let ctrl = if force {
             ActorControl::Terminate {
                 response_tx: ack_tx,
@@ -1061,22 +1070,67 @@ impl<E: crate::executor::Spawn> TheaterRuntime<E> {
         };
         if let Err(e) = control_tx.try_send(ctrl) {
             warn!("Failed to signal teardown for {:?}: {}", actor_id, e);
+            return None; // never delivered → no ack will come
         }
+        Some(ack_rx)
     }
 
     /// Stop an actor by [`ShutdownType`] — a thin wrapper over
     /// [`Self::initiate_teardown`] mapping the shutdown kind to the recorded
     /// terminal cause (`Graceful`→`Stopped`, `Force`→`Killed`,
-    /// `Failed`→`Failed`). Fire-and-forget; the real teardown is the actor
-    /// task's job (see `initiate_teardown`).
-    async fn stop_actor(&mut self, actor_id: TheaterId, shutdown_type: ShutdownType) -> Result<()> {
+    /// `Failed`→`Failed`). The real teardown is the actor task's job (see
+    /// `initiate_teardown`); this only signals it and, optionally, waits.
+    /// `await_teardown`: when true (the external-stop path), block until the
+    /// actor's teardown actually completes before returning, so a caller that
+    /// immediately rebinds does not race the old actor's resource release. When
+    /// false (internal sweeps / error path), stay fire-and-forget.
+    async fn stop_actor(
+        &mut self,
+        actor_id: TheaterId,
+        shutdown_type: ShutdownType,
+        await_teardown: bool,
+    ) -> Result<()> {
         use crate::events::lifecycle::TerminationCause;
         let (cause, force) = match shutdown_type {
             ShutdownType::Graceful => (TerminationCause::Stopped, false),
             ShutdownType::Force => (TerminationCause::Killed, true),
             ShutdownType::Failed(e) => (TerminationCause::Failed { error: e }, false),
         };
-        self.initiate_teardown(actor_id, cause, force).await;
+        let ack_rx = self.initiate_teardown(actor_id, cause, force).await;
+
+        // Block until the actor's teardown actually completes (or a bounded
+        // deadline) before returning — ONLY on the external-stop GRACEFUL path.
+        // The supervisor `restart` op has no theater restart primitive: it does
+        // runtime.stop-actor + runtime.spawn with no await between, so without
+        // this it rebinds a listener port the old actor has not yet released →
+        // "Address in use". With the tcp handler now joining its accept loop
+        // before acking (listener fd released at ack), awaiting that ack here
+        // makes stop-actor return only after the port is free. FORCE aborts the
+        // loops (no graceful release to wait for); the runtime-wide `stop()`
+        // sweep and the error path pass await_teardown=false so they are NOT
+        // serialized.
+        //
+        // NOTE: this awaits a SINGLE actor's teardown. It does NOT wait for
+        // port-binding DESCENDANT children of `actor_id` (stop-actor does not
+        // reliably cascade to grandchildren today — the #214 family); a restart
+        // of an actor whose children bind ports could still race on those. That
+        // cascade is a separate fix.
+        if await_teardown && !force {
+            if let Some(ack_rx) = ack_rx {
+                const STOP_ACK_DEADLINE: std::time::Duration = std::time::Duration::from_secs(8);
+                match tokio::time::timeout(STOP_ACK_DEADLINE, ack_rx).await {
+                    Ok(Ok(_)) => {}
+                    Ok(Err(_)) => debug!(
+                        "stop {:?}: teardown ack sender dropped (actor task already gone)",
+                        actor_id
+                    ),
+                    Err(_) => warn!(
+                        "stop {:?}: teardown did not ack within {:?}; proceeding",
+                        actor_id, STOP_ACK_DEADLINE
+                    ),
+                }
+            }
+        }
         Ok(())
     }
 
@@ -1090,7 +1144,10 @@ impl<E: crate::executor::Spawn> TheaterRuntime<E> {
         shutdown_type: ShutdownType,
     ) -> Result<()> {
         debug!("Stopping actor externally: {:?}", actor_id);
-        self.stop_actor(actor_id, shutdown_type).await?;
+        // External stop (supervisor stop-actor / restart / remove): wait for the
+        // actor's teardown to complete so a subsequent rebind of its port does
+        // not race the fd release.
+        self.stop_actor(actor_id, shutdown_type, true).await?;
         Ok(())
     }
 
@@ -1242,7 +1299,7 @@ impl<E: crate::executor::Spawn> TheaterRuntime<E> {
         // Stop all actors
         for actor_id in self.actors.keys().cloned().collect::<Vec<_>>() {
             debug!("Stopping actor {} as part of theater shutdown", actor_id);
-            if let Err(e) = self.stop_actor(actor_id, ShutdownType::Graceful).await {
+            if let Err(e) = self.stop_actor(actor_id, ShutdownType::Graceful, false).await {
                 error!("Error stopping actor during shutdown: {}", e);
                 // Continue with other actors even if one fails
             }

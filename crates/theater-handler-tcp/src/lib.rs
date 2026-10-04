@@ -281,6 +281,15 @@ struct SharedTcpState {
     /// value is applied here by `create_instance` AFTER the template built the
     /// state — see [`SharedTcpState::set_idle_timeout`].
     idle_timeout_ms: AtomicU64,
+    /// Per active-`listen()` accept loop: `listener_id -> (owner, JoinHandle)`.
+    /// `listen()` moves the `TcpListener` into a detached accept-loop task, so
+    /// the socket fd lives ONLY in that task — it is NOT in `listeners` (that
+    /// map is the manual `accept()` path). On actor shutdown the handler cancels
+    /// the loop and JOINs its handle here so the `TcpListener` is provably
+    /// dropped (fd released) before the handler acks shutdown — otherwise a
+    /// stop-then-spawn (e.g. supervisor restart) rebinds the port before the fd
+    /// is freed → EADDRINUSE.
+    accept_tasks: Mutex<HashMap<u64, (TheaterId, tokio::task::JoinHandle<()>)>>,
 }
 
 impl SharedTcpState {
@@ -291,6 +300,7 @@ impl SharedTcpState {
             next_id: AtomicU64::new(1),
             max_connections,
             idle_timeout_ms: AtomicU64::new(duration_to_ms(idle_timeout)),
+            accept_tasks: Mutex::new(HashMap::new()),
         }
     }
 
@@ -823,7 +833,15 @@ impl Handler for TcpHandler {
         // before TCP FIN (the same shape as the `close` host function).
         Box::pin(async move {
             info!("TCP handler setup waiting for shutdown signal");
-            shutdown_receiver.wait_for_shutdown().await;
+            // BIND the signal — do NOT drop it yet. The shutdown ack fires when
+            // this `ShutdownSignal` is dropped (ShutdownSignal::drop), and the
+            // runtime's `signal_shutdown` AWAITS that ack. Holding it to the end
+            // of this cleanup — past the accept-loop join below — makes the
+            // runtime wait for the listener fd to be released before it treats
+            // the handler as shut down. Dropping it at the `.await` (the old
+            // behaviour) acked before cleanup ran, so the fd release raced the
+            // next rebind → EADDRINUSE on stop-then-spawn.
+            let _shutdown_signal = shutdown_receiver.wait_for_shutdown().await;
             info!("TCP handler received shutdown, cleaning up resources");
 
             // Cancel all spawned background tasks (listeners, active mode readers)
@@ -831,6 +849,36 @@ impl Handler for TcpHandler {
             info!("TCP handler cancellation token cancelled");
 
             let actor_id_val = *actor_id_for_cleanup.lock().unwrap();
+
+            // Join this actor's active-listen accept loops so their TcpListeners
+            // are dropped (fds released) BEFORE we fall out of scope and ack
+            // (via `_shutdown_signal` drop). `cancel_token.cancel()` above told
+            // them to exit; the listener fd lives only in these tasks, so a
+            // provable join here is what makes a subsequent rebind safe. Drain
+            // the handles under the lock, then release the lock before awaiting
+            // (the tasks touch other shared maps on their way out).
+            let accept_handles: Vec<tokio::task::JoinHandle<()>> = {
+                let mut accept_tasks = shared_state.accept_tasks.lock().await;
+                let owned: Vec<u64> = accept_tasks
+                    .iter()
+                    .filter(|(_, (owner, _))| Some(*owner) == actor_id_val)
+                    .map(|(id, _)| *id)
+                    .collect();
+                owned
+                    .into_iter()
+                    .filter_map(|id| accept_tasks.remove(&id).map(|(_, handle)| handle))
+                    .collect()
+            };
+            let accept_count = accept_handles.len();
+            for handle in accept_handles {
+                let _ = handle.await; // ignore JoinError (task cancelled/panicked)
+            }
+            if accept_count > 0 {
+                info!(
+                    "TCP handler joined {} accept loop(s) for actor {:?} (listener fds released)",
+                    accept_count, actor_id_val
+                );
+            }
 
             // Collect connection IDs owned by this actor; release the outer
             // lock before driving per-connection shutdowns (those acquire
@@ -1101,7 +1149,7 @@ impl Handler for TcpHandler {
                     // Spawn background accept loop with cancellation support.
                     // The loop body lives in run_accept_loop (a free fn) so it
                     // can be unit-tested directly.
-                    tokio::spawn(run_accept_loop(
+                    let accept_handle = tokio::spawn(run_accept_loop(
                         listener,
                         listener_id,
                         cancel_token,
@@ -1111,6 +1159,15 @@ impl Handler for TcpHandler {
                         actor_handle,
                         TLS_HANDSHAKE_TIMEOUT,
                     ));
+
+                    // Track the accept loop (owner + handle) so this actor's
+                    // shutdown cleanup can cancel + JOIN it, releasing the
+                    // listener fd before the handler acks (prevents EADDRINUSE on
+                    // a fast stop-then-rebind). The fd lives only in this task.
+                    st.accept_tasks
+                        .lock()
+                        .await
+                        .insert(listener_id, (actor_id, accept_handle));
 
                     Ok::<Value, Value>(Value::String(id_to_string(listener_id)))
                 }
@@ -2803,6 +2860,57 @@ mod tests {
             StreamState::Closed.is_tls(),
             None,
             "closed stream must report None"
+        );
+    }
+
+    // The fd-leak regression gate: cancelling an accept loop and JOINing its
+    // task releases the listener fd, so the port is immediately rebindable. The
+    // listen() fd lives ONLY in the accept-loop task — without the join (what
+    // the handler shutdown cleanup now does) a stop-then-rebind races the fd
+    // drop → EADDRINUSE (the supervisor-restart bug).
+    #[tokio::test]
+    async fn accept_loop_releases_listener_fd_on_cancel_join() {
+        // Grab a free port, then hand that exact addr to the accept loop.
+        let probe = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = probe.local_addr().unwrap();
+        drop(probe);
+
+        let listener = TcpListener::bind(addr).await.unwrap();
+        let st = Arc::new(SharedTcpState::new(None, None));
+        let actor_id = TheaterId::generate();
+        let (op_tx, _op_rx) = tokio::sync::mpsc::channel::<ActorOperation>(4);
+        let (info_tx, _info_rx) = tokio::sync::mpsc::channel(4);
+        let (ctrl_tx, _ctrl_rx) = tokio::sync::mpsc::channel(4);
+        let actor_handle = ActorHandle::new(op_tx, info_tx, ctrl_tx);
+        let tls_ctx = Arc::new(None);
+        let cancel = CancellationToken::new();
+
+        let handle = tokio::spawn(run_accept_loop(
+            listener,
+            1,
+            cancel.clone(),
+            tls_ctx,
+            st,
+            actor_id,
+            actor_handle,
+            Duration::from_secs(10),
+        ));
+
+        // While the loop holds the listener, the addr must NOT rebind.
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(
+            TcpListener::bind(addr).await.is_err(),
+            "port must be held by the live accept loop"
+        );
+
+        // Cancel + JOIN: the loop returns and drops the TcpListener.
+        cancel.cancel();
+        let _ = handle.await;
+
+        // fd released → rebind succeeds.
+        assert!(
+            TcpListener::bind(addr).await.is_ok(),
+            "port must be free after the accept loop is cancelled and joined"
         );
     }
 
