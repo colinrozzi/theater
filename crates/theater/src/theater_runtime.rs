@@ -1299,7 +1299,10 @@ impl<E: crate::executor::Spawn> TheaterRuntime<E> {
         // Stop all actors
         for actor_id in self.actors.keys().cloned().collect::<Vec<_>>() {
             debug!("Stopping actor {} as part of theater shutdown", actor_id);
-            if let Err(e) = self.stop_actor(actor_id, ShutdownType::Graceful, false).await {
+            if let Err(e) = self
+                .stop_actor(actor_id, ShutdownType::Graceful, false)
+                .await
+            {
                 error!("Error stopping actor during shutdown: {}", e);
                 // Continue with other actors even if one fails
             }
