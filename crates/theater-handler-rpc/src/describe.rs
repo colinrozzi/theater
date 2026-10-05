@@ -10,11 +10,11 @@
 //!
 //! ```text
 //! actor-description = record {
-//!   exports: list<function>,     // callable surface
-//!   imports: list<function>,     // (classification refined with the live path)
+//!   exports: list<function>,     // functions under the `exports` grouping arena
+//!   imports: list<function>,     // functions under the `imports` grouping arena
 //!   types:   list<type-def>,     // referenced named types (arena + fn-local)
 //! }
-//! function = record { name: string (FQ), interface: string,
+//! function = record { name: string (FQ = <interface-arena>.<fn>), interface: string,
 //!                     params: list<param>, results: list<type-ref>,
 //!                     local-types: list<type-def> }
 //! param    = record { name: string, type: type-ref }
@@ -225,22 +225,22 @@ pub fn typedef_to_value(td: &TypeDef) -> Value {
     )
 }
 
-/// Fully-qualified callable name: `<interface>.<name>` when the interface is
-/// known, else the bare name.
-fn fq_name(f: &Function) -> String {
-    if f.interface.is_empty() {
+/// `interface` is the NAME OF THE ARENA that contains the function, not
+/// `Function.interface` — the embedded/decoded metadata leaves `Function.
+/// interface` empty and carries the interface identity as the leaf arena's
+/// name (e.g. `theater:simple/actor`). So the FQ callable name is
+/// `<arena-name>.<fn-name>`.
+pub fn function_to_value(f: &Function, interface: &str) -> Value {
+    let fq = if interface.is_empty() {
         f.name.clone()
     } else {
-        format!("{}.{}", f.interface, f.name)
-    }
-}
-
-pub fn function_to_value(f: &Function) -> Value {
+        format!("{}.{}", interface, f.name)
+    };
     vrec(
         "function",
         vec![
-            ("name", vstr(&fq_name(f))),
-            ("interface", vstr(&f.interface)),
+            ("name", vstr(&fq)),
+            ("interface", vstr(interface)),
             (
                 "params",
                 vlist(
@@ -260,43 +260,77 @@ pub fn function_to_value(f: &Function) -> Value {
     )
 }
 
-/// Walk an arena tree, pushing every function and every named type (incl.
-/// function-local defs) into the accumulators.
-fn collect_arena(arena: &Arena, functions: &mut Vec<Value>, types: &mut Vec<Value>) {
+/// Direction of an interface in the arena tree (under the `exports`/`imports`
+/// grouping arenas). Defaults to export if no such ancestor is seen.
+#[derive(Clone, Copy, PartialEq)]
+enum Dir {
+    Export,
+    Import,
+}
+
+/// Walk an arena node, qualifying each function by THIS arena's name and
+/// classifying it by the nearest `exports`/`imports` ancestor. Named types
+/// (arena-level and function-local) are collected into `types`.
+fn walk_arena(
+    arena: &Arena,
+    dir: Dir,
+    exports: &mut Vec<Value>,
+    imports: &mut Vec<Value>,
+    types: &mut Vec<Value>,
+) {
+    // The grouping arenas re-key the direction for their subtree.
+    let dir = match arena.name.as_str() {
+        "exports" => Dir::Export,
+        "imports" => Dir::Import,
+        _ => dir,
+    };
     for td in &arena.types {
         types.push(typedef_to_value(td));
     }
     for f in &arena.functions {
-        functions.push(function_to_value(f));
+        let v = function_to_value(f, &arena.name);
+        match dir {
+            Dir::Export => exports.push(v),
+            Dir::Import => imports.push(v),
+        }
         for td in &f.types {
             types.push(typedef_to_value(td));
         }
     }
     for child in &arena.children {
-        collect_arena(child, functions, types);
+        walk_arena(child, dir, exports, imports, types);
     }
 }
 
 /// Top-level: an actor's decoded metadata → the `actor-description` value.
 ///
-/// NOTE: export/import classification (matching each interface's hash against
-/// `export_hashes`/`import_hashes`) is refined on the live describe path; here
-/// every function is surfaced under `exports` with its `interface` tag so the
-/// shape + the full type coverage are exercised. Callers filter by `interface`.
+/// The decoded arena is `package → {exports, imports} → <interface> →
+/// functions`; each function is qualified by its containing interface-arena's
+/// name and placed under exports/imports by that grouping. Named types live on
+/// the functions (function-local in the embedded form) and in arena `types`.
 pub fn describe_metadata(md: &MetadataWithHashes) -> Value {
-    let mut functions = Vec::new();
+    let mut exports = Vec::new();
+    let mut imports = Vec::new();
     let mut types = Vec::new();
-    collect_arena(&md.arena, &mut functions, &mut types);
+    // The top arena is a neutral container; its `exports`/`imports` children set
+    // the direction. Default to export for any functions outside that grouping.
+    walk_arena(
+        &md.arena,
+        Dir::Export,
+        &mut exports,
+        &mut imports,
+        &mut types,
+    );
     vrec(
         "actor-description",
         vec![
             (
                 "exports",
-                vlist(functions, ValueType::Record("function".to_string())),
+                vlist(exports, ValueType::Record("function".to_string())),
             ),
             (
                 "imports",
-                vlist(Vec::new(), ValueType::Record("function".to_string())),
+                vlist(imports, ValueType::Record("function".to_string())),
             ),
             (
                 "types",
@@ -475,7 +509,9 @@ mod tests {
     fn function_fq_name_and_params_ordered() {
         let f = Function {
             name: "init".to_string(),
-            interface: "theater:simple/actor".to_string(),
+            // Empty, like the decoded/embedded form — the interface identity
+            // comes from the containing arena name (the fn arg), not this field.
+            interface: String::new(),
             types: vec![],
             params: vec![
                 Param {
@@ -492,7 +528,7 @@ mod tests {
                 err: Box::new(Type::String),
             }],
         };
-        let v = function_to_value(&f);
+        let v = function_to_value(&f, "theater:simple/actor");
         assert_eq!(
             rec_field(&v, "name"),
             &Value::String("theater:simple/actor.init".to_string())
