@@ -50,7 +50,10 @@ fn vstr(s: &str) -> Value {
 fn vrec(type_name: &str, fields: Vec<(&str, Value)>) -> Value {
     Value::Record {
         type_name: type_name.to_string(),
-        fields: fields.into_iter().map(|(k, v)| (k.to_string(), v)).collect(),
+        fields: fields
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), v))
+            .collect(),
     }
 }
 
@@ -106,18 +109,16 @@ pub fn type_to_value(t: &Type) -> Value {
         Type::String => scalar("string"),
         Type::List(inner) => vvar("list", 3, vec![type_to_value(inner)]),
         Type::Option(inner) => vvar("option", 4, vec![type_to_value(inner)]),
-        Type::Result { ok, err } => {
-            vvar("result", 5, vec![type_to_value(ok), type_to_value(err)])
-        }
+        Type::Result { ok, err } => vvar("result", 5, vec![type_to_value(ok), type_to_value(err)]),
         Type::Tuple(items) => vvar("tuple", 6, vec![type_ref_list(items)]),
-        Type::Map { key, value } => {
-            vvar("map", 7, vec![type_to_value(key), type_to_value(value)])
-        }
+        Type::Map { key, value } => vvar("map", 7, vec![type_to_value(key), type_to_value(value)]),
         Type::Set(inner) => vvar("set", 8, vec![type_to_value(inner)]),
         Type::Ref(path) => vvar("ref", 9, vec![typepath_to_value(path)]),
-        Type::App { path, args } => {
-            vvar("app", 10, vec![typepath_to_value(path), type_ref_list(args)])
-        }
+        Type::App { path, args } => vvar(
+            "app",
+            10,
+            vec![typepath_to_value(path), type_ref_list(args)],
+        ),
     }
 }
 
@@ -143,7 +144,10 @@ fn case_to_value(c: &Case) -> Value {
     // the `unit` type-ref so order (= tag) and arity are unambiguous.
     vrec(
         "case",
-        vec![("name", vstr(&c.name)), ("payload", type_to_value(&c.payload))],
+        vec![
+            ("name", vstr(&c.name)),
+            ("payload", type_to_value(&c.payload)),
+        ],
     )
 }
 
@@ -333,7 +337,14 @@ mod tests {
     fn scalars_and_specials_map_by_case() {
         assert_eq!(case_name(&type_to_value(&Type::Unit)), "unit");
         assert_eq!(case_name(&type_to_value(&Type::Value)), "value");
-        for t in [Type::Bool, Type::U64, Type::S8, Type::F32, Type::Char, Type::String] {
+        for t in [
+            Type::Bool,
+            Type::U64,
+            Type::S8,
+            Type::F32,
+            Type::Char,
+            Type::String,
+        ] {
             assert_eq!(case_name(&type_to_value(&t)), "scalar");
         }
         // scalar carries its name
@@ -435,8 +446,14 @@ mod tests {
         if let Value::Variant { payload, .. } = def {
             if let Value::List { items, .. } = &payload[0] {
                 // ORDER preserved: circle (tag 0) then none (tag 1)
-                assert_eq!(rec_field(&items[0], "name"), &Value::String("circle".to_string()));
-                assert_eq!(rec_field(&items[1], "name"), &Value::String("none".to_string()));
+                assert_eq!(
+                    rec_field(&items[0], "name"),
+                    &Value::String("circle".to_string())
+                );
+                assert_eq!(
+                    rec_field(&items[1], "name"),
+                    &Value::String("none".to_string())
+                );
                 // none's payload is the explicit `unit` type-ref
                 assert_eq!(case_name(rec_field(&items[1], "payload")), "unit");
             } else {
@@ -487,8 +504,14 @@ mod tests {
         );
         if let Value::List { items, .. } = rec_field(&v, "params") {
             assert_eq!(items.len(), 2);
-            assert_eq!(rec_field(&items[0], "name"), &Value::String("config".to_string()));
-            assert_eq!(rec_field(&items[1], "name"), &Value::String("count".to_string()));
+            assert_eq!(
+                rec_field(&items[0], "name"),
+                &Value::String("config".to_string())
+            );
+            assert_eq!(
+                rec_field(&items[1], "name"),
+                &Value::String("count".to_string())
+            );
         } else {
             panic!("params must be a list");
         }
