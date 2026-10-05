@@ -1,0 +1,16 @@
+[package]
+name = "describe-probe-test-actor"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+packr-guest = "0.24"
+
+[profile.release]
+opt-level = "s"
+lto = true

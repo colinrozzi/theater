@@ -24,6 +24,9 @@ use std::pin::Pin;
 use std::time::Duration;
 use tracing::{debug, info};
 
+/// Static-metadata → schema serialization for the `describe` verb.
+mod describe;
+
 /// Configuration for the RPC handler
 /// This handler enables direct actor-to-actor function calls
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
@@ -432,6 +435,69 @@ impl Handler for RpcHandler {
                             items: interface_names,
                         }],
                     })
+                }
+            }),
+        );
+        // ----------------------------------------------------------------
+        // describe: full export/import schema from the actor's STATIC module
+        // metadata (no application export executed). Returns a structured
+        // dynamic value — see describe.rs for the shape.
+        // ----------------------------------------------------------------
+        let theater_tx = self.theater_tx.clone();
+        imports.define(
+            "theater:simple/rpc",
+            "describe",
+            pact_result_host_fn(move |input: Value| {
+                let theater_tx = theater_tx.clone();
+
+                async move {
+                    // NOTE: return Ok(value) / Err(string) — pact_result_host_fn
+                    // wraps these into the single Pact `result`, so an error
+                    // decodes guest-side as result::err (NOT a nested
+                    // result::ok(result::err) that unwraps to success).
+                    let actor_id_str = match &input {
+                        Value::String(s) => s.clone(),
+                        Value::Tuple(items) if !items.is_empty() => match &items[0] {
+                            Value::String(s) => s.clone(),
+                            _ => {
+                                return Err(Value::String(
+                                    "Invalid actor-id: expected string".to_string(),
+                                ))
+                            }
+                        },
+                        _ => {
+                            return Err(Value::String(
+                                "Invalid input: expected actor-id string".to_string(),
+                            ))
+                        }
+                    };
+
+                    debug!("RPC describe query: actor={}", actor_id_str);
+
+                    let target_id = match actor_id_str.parse::<TheaterId>() {
+                        Ok(id) => id,
+                        Err(e) => return Err(Value::String(format!("Invalid actor ID: {}", e))),
+                    };
+
+                    let (response_tx, response_rx) = oneshot::channel();
+                    if let Err(e) = theater_tx.send(TheaterCommand::GetActorMetadata {
+                        actor_id: target_id,
+                        response_tx,
+                    }) {
+                        return Err(Value::String(format!("Failed to send to theater: {}", e)));
+                    }
+
+                    let metadata = match response_rx.await {
+                        Ok(Some(md)) => md,
+                        Ok(None) => {
+                            return Err(Value::String(format!("Actor not found: {}", actor_id_str)))
+                        }
+                        Err(e) => {
+                            return Err(Value::String(format!("Failed to get metadata: {}", e)))
+                        }
+                    };
+
+                    Ok(describe::describe_metadata(&metadata))
                 }
             }),
         );

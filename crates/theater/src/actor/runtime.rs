@@ -16,7 +16,9 @@ use crate::handler::HandlerRegistry;
 use crate::id::TheaterId;
 use crate::interceptor::{RecordingInterceptor, ReplayRecordingInterceptor};
 use crate::messages::TheaterCommand;
-use crate::pack_bridge::{CachingPackRuntime, CallInterceptor, PackInstance, Value};
+use crate::pack_bridge::{
+    CachingPackRuntime, CallInterceptor, MetadataWithHashes, PackInstance, Value,
+};
 use packr_core::WasmEngine;
 
 use crate::Result;
@@ -196,7 +198,7 @@ impl ActorRuntime {
         actor_phase_manager: ActorPhaseManager,
         actor_instance_wrapper: Arc<RwLock<Option<PackInstance>>>,
         executor: E,
-    ) -> Result<(ShutdownController, Vec<E::Handle>), ActorRuntimeError> {
+    ) -> Result<(ShutdownController, Vec<E::Handle>, MetadataWithHashes), ActorRuntimeError> {
         // ---------------- Checkpoint Setup Initial ----------------
 
         debug!("Setting up actor store");
@@ -384,7 +386,11 @@ impl ActorRuntime {
         // `theater:simple/self` which provides `log`, `get-chain`, and `shutdown`.
         // In this case, we compute a subset hash from the handler's functions and
         // compare against the actor's declared interface hash.
-        match actor_instance.get_metadata_with_hashes().await {
+        // Decode the static metadata ONCE here (startup) — it is immutable, so
+        // we also return it to the runtime to CACHE per-actor (rpc.describe reads
+        // the cache; it must never take the execution lock or route through the
+        // info loop, else a self-describe deadlocks and the command loop stalls).
+        let actor_metadata = match actor_instance.get_metadata_with_hashes().await {
             Ok(metadata) => {
                 let actor_import_hashes = &metadata.import_hashes;
                 info!(
@@ -486,6 +492,7 @@ impl ActorRuntime {
                 }
 
                 info!("All interface hashes verified for actor {}", id);
+                metadata
             }
             Err(e) => {
                 // Actor doesn't have __pack_types metadata - FATAL
@@ -497,7 +504,7 @@ impl ActorRuntime {
                 error!("{}", err);
                 return Err(err);
             }
-        }
+        };
 
         // Note: Export discovery is now automatic via Pack's embedded __pack_types metadata.
         // No manual export registration is needed.
@@ -556,7 +563,7 @@ impl ActorRuntime {
             handler_tasks.push(handler_task);
         }
 
-        Ok((shutdown_controller, handler_tasks))
+        Ok((shutdown_controller, handler_tasks, actor_metadata))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -575,7 +582,9 @@ impl ActorRuntime {
         control_rx: Receiver<ActorControl>,
         control_tx: Sender<ActorControl>,
         executor: E,
-        setup_result_tx: Option<tokio::sync::oneshot::Sender<Result<(), ActorRuntimeError>>>,
+        setup_result_tx: Option<
+            tokio::sync::oneshot::Sender<Result<MetadataWithHashes, ActorRuntimeError>>,
+        >,
     ) {
         info!("Actor runtime starting communication loops");
         let actor_phase_manager = ActorPhaseManager::new();
@@ -616,7 +625,7 @@ impl ActorRuntime {
                 )
                 .await
                 {
-                    Ok((shutdown_controller, handlers)) => {
+                    Ok((shutdown_controller, handlers, metadata)) => {
                         {
                             let mut handler_tasks_guard = handler_tasks.write().await;
                             *handler_tasks_guard = handlers;
@@ -630,9 +639,10 @@ impl ActorRuntime {
                         actor_phase_manager.set_phase(ActorPhase::Running);
                         info!("Actor setup complete, now running");
 
-                        // Signal success to spawn_actor
+                        // Signal success to spawn_actor, handing back the decoded
+                        // metadata for the runtime to cache (rpc.describe source).
                         if let Some(tx) = setup_result_tx {
-                            let _ = tx.send(Ok(()));
+                            let _ = tx.send(Ok(metadata));
                         }
                     }
                     Err(e) => {

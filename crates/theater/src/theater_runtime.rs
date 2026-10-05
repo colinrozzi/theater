@@ -12,7 +12,7 @@ use crate::handler::HandlerRegistry;
 use crate::id::TheaterId;
 use crate::messages::{ActorMessage, ActorStatus, ActorTreeRow, TheaterCommand};
 use crate::messages::{ChannelId, ChannelParticipant};
-use crate::pack_bridge::{CachingPackRuntime, Value};
+use crate::pack_bridge::{CachingPackRuntime, MetadataWithHashes, Value};
 use crate::replay::ReplayHandler;
 use crate::shutdown::{ShutdownController, ShutdownType};
 use crate::utils::ResourceCache;
@@ -192,6 +192,11 @@ pub struct ActorProcess<E: crate::executor::Spawn> {
     pub manifest: Option<ManifestConfig>,
     /// Controller for graceful shutdown
     pub shutdown_controller: ShutdownController,
+    /// The actor's decoded static Pact metadata, cached at instantiation so
+    /// `rpc.describe` (via `GetActorMetadata`) can serve it WITHOUT taking the
+    /// actor's execution lock or routing through the info loop — which would
+    /// deadlock a self-describe and stall the central command loop.
+    pub metadata: std::sync::Arc<MetadataWithHashes>,
 }
 
 impl<E: crate::executor::Spawn> TheaterRuntime<E> {
@@ -619,6 +624,17 @@ impl<E: crate::executor::Spawn> TheaterRuntime<E> {
                         let _ = response_tx.send(None);
                     }
                 }
+                TheaterCommand::GetActorMetadata {
+                    actor_id,
+                    response_tx,
+                } => {
+                    debug!("Getting metadata for actor: {:?}", actor_id);
+                    // Served from the per-actor CACHE — no execution lock, no info
+                    // loop, no blocking await in this routing loop. Safe even when
+                    // the target is the caller mid-host-call (self-describe).
+                    let md = self.actors.get(&actor_id).map(|p| Arc::clone(&p.metadata));
+                    let _ = response_tx.send(md);
+                }
                 TheaterCommand::ShutdownRuntime => {
                     // Full-runtime graceful drain. The runtime is lineage-free,
                     // so this is a flat sweep (NOT a cascade): signal the existing
@@ -836,7 +852,8 @@ impl<E: crate::executor::Spawn> TheaterRuntime<E> {
         let pack_runtime = self.pack_runtime.clone();
 
         // Create channel to receive setup result
-        let (setup_tx, setup_rx) = tokio::sync::oneshot::channel::<Result<(), ActorRuntimeError>>();
+        let (setup_tx, setup_rx) =
+            tokio::sync::oneshot::channel::<Result<MetadataWithHashes, ActorRuntimeError>>();
 
         let executor_for_actor = self.executor.clone();
         let actor_runtime_process = self.executor.spawn(Box::pin(async move {
@@ -861,9 +878,12 @@ impl<E: crate::executor::Spawn> TheaterRuntime<E> {
         }));
 
         // Wait for setup to complete
-        match setup_rx.await {
-            Ok(Ok(())) => {
+        // On success the actor hands back its decoded metadata; cache it on the
+        // process so rpc.describe can read it without the execution lock.
+        let actor_metadata = match setup_rx.await {
+            Ok(Ok(metadata)) => {
                 debug!("Actor {} setup completed successfully", actor_id);
+                std::sync::Arc::new(metadata)
             }
             Ok(Err(e)) => {
                 error!("Actor {} setup failed: {}", actor_id, e);
@@ -876,7 +896,7 @@ impl<E: crate::executor::Spawn> TheaterRuntime<E> {
                 let _ = response_tx.send(Err(SpawnError::SetupChannelClosed));
                 return;
             }
-        }
+        };
 
         // Create ActorHandle for lifecycle notification before moving channels.
         // Also used to fire actor.init below when `call_init` is true.
@@ -897,6 +917,7 @@ impl<E: crate::executor::Spawn> TheaterRuntime<E> {
             status: ActorStatus::Running,
             manifest,
             shutdown_controller,
+            metadata: actor_metadata,
         };
 
         self.register_actor(process);
