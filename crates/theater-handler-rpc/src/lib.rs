@@ -24,6 +24,9 @@ use std::pin::Pin;
 use std::time::Duration;
 use tracing::{debug, info};
 
+/// Static-metadata → schema serialization for the `describe` verb.
+mod describe;
+
 /// Configuration for the RPC handler
 /// This handler enables direct actor-to-actor function calls
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
