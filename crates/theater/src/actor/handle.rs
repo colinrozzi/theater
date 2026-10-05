@@ -10,7 +10,7 @@ use tokio::time::timeout;
 use tracing::error;
 
 use crate::actor::types::{ActorError, ActorOperation, DEFAULT_OPERATION_TIMEOUT};
-use crate::pack_bridge::{self, InterfaceHash, MetadataWithHashes, Value};
+use crate::pack_bridge::{self, InterfaceHash, Value};
 
 use super::types::{ActorControl, ActorInfo};
 
@@ -277,40 +277,6 @@ impl ActorHandle {
             Err(_) => {
                 error!(
                     "GetExportHashes operation timed out after {:?}",
-                    DEFAULT_OPERATION_TIMEOUT
-                );
-                Err(ActorError::OperationTimeout(
-                    DEFAULT_OPERATION_TIMEOUT.as_secs(),
-                ))
-            }
-        }
-    }
-
-    /// Retrieve the actor's full decoded Pact metadata (arena + hashes). Static:
-    /// read from the module's embedded metadata, no application export is run.
-    /// Backs `rpc.describe`.
-    pub async fn get_metadata(&self) -> Result<MetadataWithHashes, ActorError> {
-        let (tx, rx) = oneshot::channel();
-
-        self.info_tx
-            .send(ActorInfo::GetMetadata { response_tx: tx })
-            .await
-            .map_err(|e| {
-                error!("Failed to send GetMetadata operation: {}", e);
-                ActorError::ChannelClosed
-            })?;
-
-        match timeout(DEFAULT_OPERATION_TIMEOUT, rx).await {
-            Ok(result) => result.map_err(|e| {
-                error!(
-                    "Channel closed while waiting for GetMetadata response: {:?}",
-                    e
-                );
-                ActorError::ChannelClosed
-            })?,
-            Err(_) => {
-                error!(
-                    "GetMetadata operation timed out after {:?}",
                     DEFAULT_OPERATION_TIMEOUT
                 );
                 Err(ActorError::OperationTimeout(

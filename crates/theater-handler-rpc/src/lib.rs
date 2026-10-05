@@ -451,19 +451,23 @@ impl Handler for RpcHandler {
                 let theater_tx = theater_tx.clone();
 
                 async move {
+                    // NOTE: return Ok(value) / Err(string) — pact_result_host_fn
+                    // wraps these into the single Pact `result`, so an error
+                    // decodes guest-side as result::err (NOT a nested
+                    // result::ok(result::err) that unwraps to success).
                     let actor_id_str = match &input {
                         Value::String(s) => s.clone(),
                         Value::Tuple(items) if !items.is_empty() => match &items[0] {
                             Value::String(s) => s.clone(),
                             _ => {
-                                return Ok::<Value, Value>(make_error(
-                                    "Invalid actor-id: expected string",
+                                return Err(Value::String(
+                                    "Invalid actor-id: expected string".to_string(),
                                 ))
                             }
                         },
                         _ => {
-                            return Ok::<Value, Value>(make_error(
-                                "Invalid input: expected actor-id string",
+                            return Err(Value::String(
+                                "Invalid input: expected actor-id string".to_string(),
                             ))
                         }
                     };
@@ -472,12 +476,7 @@ impl Handler for RpcHandler {
 
                     let target_id = match actor_id_str.parse::<TheaterId>() {
                         Ok(id) => id,
-                        Err(e) => {
-                            return Ok::<Value, Value>(make_error(&format!(
-                                "Invalid actor ID: {}",
-                                e
-                            )))
-                        }
+                        Err(e) => return Err(Value::String(format!("Invalid actor ID: {}", e))),
                     };
 
                     let (response_tx, response_rx) = oneshot::channel();
@@ -485,35 +484,20 @@ impl Handler for RpcHandler {
                         actor_id: target_id,
                         response_tx,
                     }) {
-                        return Ok::<Value, Value>(make_error(&format!(
-                            "Failed to send to theater: {}",
-                            e
-                        )));
+                        return Err(Value::String(format!("Failed to send to theater: {}", e)));
                     }
 
                     let metadata = match response_rx.await {
                         Ok(Some(md)) => md,
                         Ok(None) => {
-                            return Ok::<Value, Value>(make_error(&format!(
-                                "Actor not found: {}",
-                                actor_id_str
-                            )))
+                            return Err(Value::String(format!("Actor not found: {}", actor_id_str)))
                         }
                         Err(e) => {
-                            return Ok::<Value, Value>(make_error(&format!(
-                                "Failed to get metadata: {}",
-                                e
-                            )))
+                            return Err(Value::String(format!("Failed to get metadata: {}", e)))
                         }
                     };
 
-                    // result::ok(actor-description)
-                    Ok(Value::Variant {
-                        type_name: String::from("result"),
-                        case_name: String::from("ok"),
-                        tag: 0,
-                        payload: vec![describe::describe_metadata(&metadata)],
-                    })
+                    Ok(describe::describe_metadata(&metadata))
                 }
             }),
         );

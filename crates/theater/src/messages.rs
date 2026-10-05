@@ -439,7 +439,7 @@ pub enum TheaterCommand {
     /// * `response_tx` - Channel to receive the metadata (or None if actor not found)
     GetActorMetadata {
         actor_id: TheaterId,
-        response_tx: oneshot::Sender<Option<MetadataWithHashes>>,
+        response_tx: oneshot::Sender<Option<std::sync::Arc<MetadataWithHashes>>>,
     },
 }
 

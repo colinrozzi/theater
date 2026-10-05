@@ -26,7 +26,9 @@
 //!   ref(type-path), app(type-path, list<type-ref>),   // named ref / generic application
 //! }
 //! type-path = record { segments: list<string>, absolute: bool }
-//! type-def  = record { name: string, type-params: list<string>, def: type-def-body }
+//! type-def  = record { name: string, scope: string, type-params: list<string>, def: type-def-body }
+//!   // scope = owning path: <interface-arena> (interface-level) or <interface>.<fn>
+//!   // (function-local) — disambiguates same-named defs in the flat `types` table.
 //! type-def-body = variant { alias(type-ref), record(list<field>),
 //!                           variant(list<case>), enum(list<string>), flags(list<string>) }
 //! field = record { name: string, type: type-ref }
@@ -155,7 +157,12 @@ fn param_to_value(p: &Param) -> Value {
 
 /// `packr_abi::types::TypeDef` → `type-def` value. Preserves `type-params`
 /// (generics) and variant/enum/flags member ORDER (the only tag source).
-pub fn typedef_to_value(td: &TypeDef) -> Value {
+///
+/// `scope` is the owning path of this definition — the interface-arena name for
+/// an interface-level def, or `<interface>.<fn>` for a function-local def. It
+/// disambiguates same-named defs across interfaces/functions in the flat global
+/// `types` table, so a scoped `ref`/TypePath resolves to the right definition.
+pub fn typedef_to_value(td: &TypeDef, scope: &str) -> Value {
     let body_var = |case_name: &str, tag: usize, payload: Vec<Value>| Value::Variant {
         type_name: "type-def-body".to_string(),
         case_name: case_name.to_string(),
@@ -219,6 +226,7 @@ pub fn typedef_to_value(td: &TypeDef) -> Value {
         "type-def",
         vec![
             ("name", vstr(name)),
+            ("scope", vstr(scope)),
             ("type-params", list_of_strings(&type_params)),
             ("def", body),
         ],
@@ -236,6 +244,8 @@ pub fn function_to_value(f: &Function, interface: &str) -> Value {
     } else {
         format!("{}.{}", interface, f.name)
     };
+    // Function-local type defs are scoped to this function's FQ name.
+    let local_scope = fq.clone();
     vrec(
         "function",
         vec![
@@ -252,7 +262,10 @@ pub fn function_to_value(f: &Function, interface: &str) -> Value {
             (
                 "local-types",
                 vlist(
-                    f.types.iter().map(typedef_to_value).collect(),
+                    f.types
+                        .iter()
+                        .map(|td| typedef_to_value(td, &local_scope))
+                        .collect(),
                     ValueType::Record("type-def".to_string()),
                 ),
             ),
@@ -285,7 +298,8 @@ fn walk_arena(
         _ => dir,
     };
     for td in &arena.types {
-        types.push(typedef_to_value(td));
+        // Interface-level def: scoped to this arena (interface) name.
+        types.push(typedef_to_value(td, &arena.name));
     }
     for f in &arena.functions {
         let v = function_to_value(f, &arena.name);
@@ -293,8 +307,14 @@ fn walk_arena(
             Dir::Export => exports.push(v),
             Dir::Import => imports.push(v),
         }
+        // Function-local def: scoped to <interface>.<fn>.
+        let fscope = if arena.name.is_empty() {
+            f.name.clone()
+        } else {
+            format!("{}.{}", arena.name, f.name)
+        };
         for td in &f.types {
-            types.push(typedef_to_value(td));
+            types.push(typedef_to_value(td, &fscope));
         }
     }
     for child in &arena.children {
@@ -468,7 +488,7 @@ mod tests {
                 },
             ],
         };
-        let v = typedef_to_value(&td);
+        let v = typedef_to_value(&td, "theater:simple/shapes");
         assert_eq!(rec_field(&v, "name"), &Value::String("shape".to_string()));
         let def = rec_field(&v, "def");
         assert_eq!(case_name(def), "variant");
@@ -493,16 +513,65 @@ mod tests {
 
     #[test]
     fn enum_and_flags_members_preserved() {
-        let e = typedef_to_value(&TypeDef::Enum {
-            name: "color".to_string(),
-            cases: vec!["red".to_string(), "green".to_string()],
-        });
+        let e = typedef_to_value(
+            &TypeDef::Enum {
+                name: "color".to_string(),
+                cases: vec!["red".to_string(), "green".to_string()],
+            },
+            "test",
+        );
         assert_eq!(case_name(rec_field(&e, "def")), "enum");
-        let fl = typedef_to_value(&TypeDef::Flags {
-            name: "perms".to_string(),
-            flags: vec!["read".to_string(), "write".to_string()],
-        });
+        let fl = typedef_to_value(
+            &TypeDef::Flags {
+                name: "perms".to_string(),
+                flags: vec!["read".to_string(), "write".to_string()],
+            },
+            "test",
+        );
         assert_eq!(case_name(rec_field(&fl, "def")), "flags");
+    }
+
+    #[test]
+    fn same_name_defs_in_different_scopes_stay_distinct() {
+        // Two DIFFERENT record shapes sharing the name "thing" in two scopes —
+        // the scope field keeps their global-table entries distinguishable so a
+        // scoped ref resolves to the right one.
+        let a = typedef_to_value(
+            &TypeDef::Record {
+                name: "thing".to_string(),
+                type_params: vec![],
+                fields: vec![Field {
+                    name: "x".to_string(),
+                    ty: Type::U8,
+                }],
+            },
+            "iface/a",
+        );
+        let b = typedef_to_value(
+            &TypeDef::Record {
+                name: "thing".to_string(),
+                type_params: vec![],
+                fields: vec![Field {
+                    name: "y".to_string(),
+                    ty: Type::String,
+                }],
+            },
+            "iface/b",
+        );
+        assert_eq!(rec_field(&a, "name"), rec_field(&b, "name"), "same name");
+        assert_ne!(
+            rec_field(&a, "scope"),
+            rec_field(&b, "scope"),
+            "scope must distinguish same-named defs"
+        );
+        assert_eq!(
+            rec_field(&a, "scope"),
+            &Value::String("iface/a".to_string())
+        );
+        assert_eq!(
+            rec_field(&b, "scope"),
+            &Value::String("iface/b".to_string())
+        );
     }
 
     #[test]
