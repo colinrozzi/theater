@@ -438,6 +438,85 @@ impl Handler for RpcHandler {
                 }
             }),
         );
+        // ----------------------------------------------------------------
+        // describe: full export/import schema from the actor's STATIC module
+        // metadata (no application export executed). Returns a structured
+        // dynamic value — see describe.rs for the shape.
+        // ----------------------------------------------------------------
+        let theater_tx = self.theater_tx.clone();
+        imports.define(
+            "theater:simple/rpc",
+            "describe",
+            pact_result_host_fn(move |input: Value| {
+                let theater_tx = theater_tx.clone();
+
+                async move {
+                    let actor_id_str = match &input {
+                        Value::String(s) => s.clone(),
+                        Value::Tuple(items) if !items.is_empty() => match &items[0] {
+                            Value::String(s) => s.clone(),
+                            _ => {
+                                return Ok::<Value, Value>(make_error(
+                                    "Invalid actor-id: expected string",
+                                ))
+                            }
+                        },
+                        _ => {
+                            return Ok::<Value, Value>(make_error(
+                                "Invalid input: expected actor-id string",
+                            ))
+                        }
+                    };
+
+                    debug!("RPC describe query: actor={}", actor_id_str);
+
+                    let target_id = match actor_id_str.parse::<TheaterId>() {
+                        Ok(id) => id,
+                        Err(e) => {
+                            return Ok::<Value, Value>(make_error(&format!(
+                                "Invalid actor ID: {}",
+                                e
+                            )))
+                        }
+                    };
+
+                    let (response_tx, response_rx) = oneshot::channel();
+                    if let Err(e) = theater_tx.send(TheaterCommand::GetActorMetadata {
+                        actor_id: target_id,
+                        response_tx,
+                    }) {
+                        return Ok::<Value, Value>(make_error(&format!(
+                            "Failed to send to theater: {}",
+                            e
+                        )));
+                    }
+
+                    let metadata = match response_rx.await {
+                        Ok(Some(md)) => md,
+                        Ok(None) => {
+                            return Ok::<Value, Value>(make_error(&format!(
+                                "Actor not found: {}",
+                                actor_id_str
+                            )))
+                        }
+                        Err(e) => {
+                            return Ok::<Value, Value>(make_error(&format!(
+                                "Failed to get metadata: {}",
+                                e
+                            )))
+                        }
+                    };
+
+                    // result::ok(actor-description)
+                    Ok(Value::Variant {
+                        type_name: String::from("result"),
+                        case_name: String::from("ok"),
+                        tag: 0,
+                        payload: vec![describe::describe_metadata(&metadata)],
+                    })
+                }
+            }),
+        );
 
         ctx.mark_satisfied("theater:simple/rpc");
         info!("RPC host functions set up successfully");

@@ -4,7 +4,7 @@
 //! These include operation types, error definitions, and other shared types needed for
 //! the actor system to function.
 
-use crate::pack_bridge::{InterfaceHash, Value};
+use crate::pack_bridge::{InterfaceHash, MetadataWithHashes, Value};
 use crate::ChainEvent;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
@@ -131,5 +131,12 @@ pub enum ActorInfo {
     GetExportHashes {
         /// Channel to send export hashes back to the caller
         response_tx: oneshot::Sender<Result<Vec<InterfaceHash>, ActorError>>,
+    },
+    /// Retrieve the actor's full decoded Pact metadata (the CGRF arena: types +
+    /// functions + import/export hashes). Static — read from the module, no
+    /// application export is executed. Backs `rpc.describe`.
+    GetMetadata {
+        /// Channel to send the decoded metadata back to the caller
+        response_tx: oneshot::Sender<Result<MetadataWithHashes, ActorError>>,
     },
 }

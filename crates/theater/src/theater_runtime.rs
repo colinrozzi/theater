@@ -619,6 +619,30 @@ impl<E: crate::executor::Spawn> TheaterRuntime<E> {
                         let _ = response_tx.send(None);
                     }
                 }
+                TheaterCommand::GetActorMetadata {
+                    actor_id,
+                    response_tx,
+                } => {
+                    debug!("Getting metadata for actor: {:?}", actor_id);
+                    if let Some(proc) = self.actors.get(&actor_id) {
+                        let handle = ActorHandle::new(
+                            proc.operation_tx.clone(),
+                            proc.info_tx.clone(),
+                            proc.control_tx.clone(),
+                        );
+                        match handle.get_metadata().await {
+                            Ok(md) => {
+                                let _ = response_tx.send(Some(md));
+                            }
+                            Err(e) => {
+                                error!("Failed to get metadata: {:?}", e);
+                                let _ = response_tx.send(None);
+                            }
+                        }
+                    } else {
+                        let _ = response_tx.send(None);
+                    }
+                }
                 TheaterCommand::ShutdownRuntime => {
                     // Full-runtime graceful drain. The runtime is lineage-free,
                     // so this is a flat sweep (NOT a cascade): signal the existing

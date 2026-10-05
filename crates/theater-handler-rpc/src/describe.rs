@@ -33,11 +33,6 @@
 //! case  = record { name: string, payload: type-ref }   // payload=unit when none
 //! ```
 
-// TEMPORARY: these are exercised by the unit tests (below) now, and wired into
-// the `describe` host fn in the follow-up chunk that adds the GetActorMetadata
-// plumbing. Remove this allow when `describe_metadata` is called from lib.rs.
-#![allow(dead_code)]
-
 use theater::pack_bridge::{
     Arena, Case, Field, Function, MetadataWithHashes, Param, Type, TypeDef, TypePath, Value,
     ValueType,

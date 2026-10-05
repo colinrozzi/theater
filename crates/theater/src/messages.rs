@@ -71,7 +71,7 @@ use crate::actor::ActorRuntimeError;
 /// to their callers.
 use crate::chain::ChainEvent;
 use crate::id::TheaterId;
-use crate::pack_bridge::{InterfaceHash, Value, ValueType};
+use crate::pack_bridge::{InterfaceHash, MetadataWithHashes, Value, ValueType};
 
 /// The conventional "no initial state" sentinel passed to a freshly-spawned
 /// actor's `init` when no caller-provided state and no manifest
@@ -426,6 +426,21 @@ pub enum TheaterCommand {
         actor_id: TheaterId,
         response_tx: oneshot::Sender<Option<Vec<InterfaceHash>>>,
     },
+
+    /// # Get actor metadata
+    ///
+    /// Retrieves an actor's full decoded Pact metadata (the CGRF arena: types +
+    /// functions + import/export hashes) from its static module metadata — no
+    /// application export is executed. Backs the RPC `describe` verb.
+    ///
+    /// ## Parameters
+    ///
+    /// * `actor_id` - ID of the actor to query
+    /// * `response_tx` - Channel to receive the metadata (or None if actor not found)
+    GetActorMetadata {
+        actor_id: TheaterId,
+        response_tx: oneshot::Sender<Option<MetadataWithHashes>>,
+    },
 }
 
 impl TheaterCommand {
@@ -494,6 +509,9 @@ impl TheaterCommand {
             }
             TheaterCommand::GetActorExportHashes { actor_id, .. } => {
                 format!("GetActorExportHashes: {:?}", actor_id)
+            }
+            TheaterCommand::GetActorMetadata { actor_id, .. } => {
+                format!("GetActorMetadata: {:?}", actor_id)
             }
             TheaterCommand::ShutdownRuntime => "ShutdownRuntime".to_string(),
         }

@@ -1023,6 +1023,32 @@ impl ActorRuntime {
                             }
                         }
                     }
+                    ActorInfo::GetMetadata { response_tx } => {
+                        match &mut *actor_instance_wrapper.write().await {
+                            Some(instance) => match instance.get_metadata_with_hashes().await {
+                                Ok(md) => {
+                                    if let Err(e) = response_tx.send(Ok(md)) {
+                                        error!("Failed to send metadata response: {:?}", e);
+                                    }
+                                }
+                                Err(e) => {
+                                    let err = ActorError::UnexpectedError(format!(
+                                        "Failed to get metadata: {}",
+                                        e
+                                    ));
+                                    if let Err(e) = response_tx.send(Err(err)) {
+                                        error!("Failed to send metadata error response: {:?}", e);
+                                    }
+                                }
+                            },
+                            None => {
+                                let err = ActorError::UnexpectedError("Actor instance not found".to_string());
+                                if let Err(e) = response_tx.send(Err(err)) {
+                                    error!("Failed to send metadata error response: {:?}", e);
+                                }
+                            }
+                        }
+                    }
                 }  // close match info
             }  // close Some(info) branch
 
