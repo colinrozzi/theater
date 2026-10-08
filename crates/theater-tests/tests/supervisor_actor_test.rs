@@ -492,3 +492,76 @@ async fn monitor_delivers_lifecycle_events_to_wasm() {
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
 }
+
+/// End-to-end proof that `monitor` delivers a subject's `wasm` (function-call)
+/// events — NOT only lifecycle terminals. This is the exact scenario wisp-dev
+/// reported as "rpc.call is chain-silent": a function invocation on the subject
+/// goes through its operation loop (`CallFunctionPack` -> `execute_call_pack`),
+/// which records `WasmCall` + `WasmResult` on the subject's chain; those
+/// broadcast to the subject's subscribers, so a monitor sees them. The subject
+/// is NOT stopped here, so a delivered event can only be the wasm event.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn monitor_delivers_wasm_call_events_to_wasm() {
+    let _ = tracing_subscriber::fmt().with_env_filter("info").try_init();
+    let temp = tempfile::tempdir().expect("temp dir");
+    std::env::set_var("THEATER_HOME", temp.path());
+
+    let theater_tx = start_runtime();
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    // Subject: a state-test actor with a callable `increment` export.
+    let subject_wasm =
+        std::fs::read(wasm_path("state-test", "state_test_actor.wasm")).expect("read subject wasm");
+    let subject = spawn_with_parent(&theater_tx, subject_wasm, "w-subject", None).await;
+
+    // Monitor: handed the subject id; on init it calls monitor(subject).
+    let monitor_wasm = std::fs::read(wasm_path("monitor-test", "monitor_test_actor.wasm"))
+        .expect("read monitor wasm");
+    let monitor = spawn_with_init(
+        &theater_tx,
+        monitor_wasm,
+        "w-monitor",
+        id_init_state(subject),
+    )
+    .await;
+    // Let the subscription register on the subject's chain.
+    tokio::time::sleep(Duration::from_millis(150)).await;
+
+    // Drive the subject via call_function (operation loop -> execute_call_pack),
+    // recording WasmCall + WasmResult on the SUBJECT's chain. Subject stays alive.
+    let (htx, hrx) = oneshot::channel();
+    theater_tx
+        .send(TheaterCommand::GetActorHandle {
+            actor_id: subject,
+            response_tx: htx,
+        })
+        .expect("send GetActorHandle");
+    let handle = hrx
+        .await
+        .expect("handle channel closed")
+        .expect("subject actor handle");
+    handle
+        .call_function(
+            "theater:simple/state-test.increment".to_string(),
+            Value::Tuple(vec![]),
+        )
+        .await
+        .expect("increment call failed");
+
+    // The monitor records the event-type of the last delivered event; a wasm
+    // function call is recorded with event_type "wasm".
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        if monitor_received(&theater_tx, monitor).await.as_deref() == Some("wasm") {
+            break;
+        }
+        if std::time::Instant::now() > deadline {
+            panic!(
+                "monitor never received a wasm event from the subject's function call; \
+                 state = {:?} (expected \"wasm\")",
+                monitor_received(&theater_tx, monitor).await
+            );
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
