@@ -71,6 +71,16 @@ interface tcp {
         // Fails if connection is pending, not owned, or in active/once mode
         receive: func(connection-id: string, max-bytes: u32) -> result<list<u8>, string>
 
+        // Bound how long a passive receive() may block waiting for bytes.
+        // timeout-ms = 0 disables (the default: receive blocks indefinitely,
+        // the historic behavior). With a non-zero bound, a receive() that gets
+        // no data within timeout-ms returns Err("timeout: ...") instead of
+        // blocking forever — so a sequential actor cannot be permanently wedged
+        // by a stalled peer; it errors that one read and stays alive. Actor-wide
+        // (applies to all of this actor's passive reads), same shape as the
+        // idle-timeout knob. Additive: actors that never call it are unchanged.
+        set-read-timeout: func(timeout-ms: u64) -> result<_, string>
+
         // Close a connection
         close: func(connection-id: string) -> result<_, string>
 
