@@ -281,6 +281,12 @@ struct SharedTcpState {
     /// value is applied here by `create_instance` AFTER the template built the
     /// state — see [`SharedTcpState::set_idle_timeout`].
     idle_timeout_ms: AtomicU64,
+    /// Bound for a PASSIVE `receive()` blocking on data, in milliseconds; `0` =
+    /// disabled (block indefinitely, the historic default). Set via the
+    /// `set-read-timeout` host verb (opt-in, no manifest/construction input), so
+    /// it defaults to 0 and only an actor that calls the verb is affected.
+    /// Atomic for the same shared-across-actors reason as `idle_timeout_ms`.
+    read_timeout_ms: AtomicU64,
     /// Per active-`listen()` accept loop: `listener_id -> (owner, JoinHandle)`.
     /// `listen()` moves the `TcpListener` into a detached accept-loop task, so
     /// the socket fd lives ONLY in that task — it is NOT in `listeners` (that
@@ -300,6 +306,7 @@ impl SharedTcpState {
             next_id: AtomicU64::new(1),
             max_connections,
             idle_timeout_ms: AtomicU64::new(duration_to_ms(idle_timeout)),
+            read_timeout_ms: AtomicU64::new(0),
             accept_tasks: Mutex::new(HashMap::new()),
         }
     }
@@ -325,6 +332,25 @@ impl SharedTcpState {
     fn set_idle_timeout(&self, idle_timeout: Option<std::time::Duration>) {
         self.idle_timeout_ms
             .store(duration_to_ms(idle_timeout), Ordering::Relaxed);
+    }
+
+    /// Current passive-`receive()` read timeout, or `None` if disabled. Read
+    /// once per `receive()` call.
+    fn read_timeout(&self) -> Option<std::time::Duration> {
+        match self.read_timeout_ms.load(Ordering::Relaxed) {
+            0 => None,
+            ms => Some(std::time::Duration::from_millis(ms)),
+        }
+    }
+
+    /// Set (or clear) the shared passive-read timeout. Called from the
+    /// `set-read-timeout` host verb. Shared-per-runtime like `idle_timeout`, so
+    /// it is a coarse runtime-wide knob (last writer wins); fine for the known
+    /// consumers (a gateway/SMTP client that wants all its blocking reads
+    /// bounded). `0` ms disables.
+    fn set_read_timeout(&self, read_timeout: Option<std::time::Duration>) {
+        self.read_timeout_ms
+            .store(duration_to_ms(read_timeout), Ordering::Relaxed);
     }
 
     async fn check_connection_limit(&self) -> Result<(), Value> {
@@ -457,6 +483,57 @@ fn parse_string_and_u32(input: &Value) -> Result<(String, u32), Value> {
             Ok((id, n))
         }
         _ => Err(Value::String("Expected tuple (id, u32)".to_string())),
+    }
+}
+
+fn parse_u64(input: &Value) -> Result<u64, Value> {
+    match input {
+        Value::U64(n) => Ok(*n),
+        Value::Tuple(fields) if fields.len() == 1 => match &fields[0] {
+            Value::U64(n) => Ok(*n),
+            _ => Err(Value::String("Expected u64".to_string())),
+        },
+        _ => Err(Value::String("Expected u64".to_string())),
+    }
+}
+
+/// One passive `receive()` read, interruptible on shutdown and optionally
+/// bounded by `read_timeout`. Returns the byte count (0 = EOF) on success, or:
+/// - `Err("Connection closed: actor shutting down")` if the handler is
+///   cancelling (shutdown),
+/// - `Err("timeout: no data within <ms>ms")` if `read_timeout` is `Some` and no
+///   bytes arrive within it — the `"timeout:"` prefix lets a guest tell this
+///   apart from a hard I/O error (and from EOF, which is `Ok(0)`) and recover
+///   per-request instead of wedging a sequential actor on a stalled peer.
+///
+/// When `read_timeout` is `None` the timeout branch is a never-ready future, so
+/// the read blocks indefinitely — the historic default, byte-for-byte.
+async fn read_once_bounded<R: tokio::io::AsyncRead + Unpin>(
+    stream: &mut R,
+    buf: &mut [u8],
+    read_timeout: Option<std::time::Duration>,
+    cancel: &CancellationToken,
+    conn_id: u64,
+) -> Result<usize, Value> {
+    use tokio::io::AsyncReadExt;
+    let timeout_fut = async {
+        match read_timeout {
+            Some(d) => tokio::time::sleep(d).await,
+            None => std::future::pending::<()>().await,
+        }
+    };
+    tokio::pin!(timeout_fut);
+    tokio::select! {
+        result = stream.read(buf) => result.map_err(|e| Value::String(e.to_string())),
+        _ = cancel.cancelled() => {
+            info!("TCP receive cancelled due to shutdown, conn={}", conn_id);
+            Err(Value::String("Connection closed: actor shutting down".to_string()))
+        }
+        _ = &mut timeout_fut => {
+            let ms = read_timeout.map(|d| d.as_millis()).unwrap_or(0);
+            debug!("tcp receive timed out conn={} after {}ms", conn_id, ms);
+            Err(Value::String(format!("timeout: no data within {}ms", ms)))
+        }
     }
 }
 
@@ -1001,6 +1078,8 @@ impl Handler for TcpHandler {
         let st_receive = state.clone();
         let aid_receive = actor_id_for_closures;
         let cancel_token_for_receive = self.cancellation_token.clone();
+
+        let st_set_read_timeout = state.clone();
 
         let st_close = state.clone();
         let aid_close = actor_id_for_closures;
@@ -1753,16 +1832,17 @@ impl Handler for TcpHandler {
 
                         let mut buf = vec![0u8; max_bytes as usize];
 
-                        // Use select to make the read interruptible on shutdown
-                        let n = tokio::select! {
-                            result = stream.read(&mut buf) => {
-                                result.map_err(|e| Value::String(e.to_string()))?
-                            }
-                            _ = cancel_token.cancelled() => {
-                                info!("TCP receive cancelled due to shutdown, conn={}", conn_id);
-                                return Err(Value::String("Connection closed: actor shutting down".to_string()));
-                            }
-                        };
+                        // Interruptible on shutdown and (optionally) bounded by
+                        // the actor's read timeout. See `read_once_bounded`.
+                        let read_timeout = st.read_timeout();
+                        let n = read_once_bounded(
+                            stream,
+                            &mut buf,
+                            read_timeout,
+                            &cancel_token,
+                            conn_id,
+                        )
+                        .await?;
 
                         debug!(
                             "tcp receive conn={} {} bytes (max={})",
@@ -1776,6 +1856,32 @@ impl Handler for TcpHandler {
                     }
                 }),
             );
+        // ----------------------------------------------------------------
+        // set-read-timeout(timeout-ms: u64) -> result<_, string>
+        //
+        // Bound how long a passive receive() may block. 0 disables (the
+        // historic block-forever default). Opt-in, actor-wide — stored on the
+        // shared state like idle_timeout; a receive() with no data within the
+        // bound returns Err("timeout: ..."). Makes a sequential actor resilient
+        // to a stalled peer instead of permanently wedged.
+        // ----------------------------------------------------------------
+        imports.define(
+            "theater:simple/tcp",
+            "set-read-timeout",
+            pact_result_host_fn(move |input: Value| {
+                let st = st_set_read_timeout.clone();
+                async move {
+                    let _ph = PhaseLog::new("tcp.set-read-timeout");
+                    let ms = parse_u64(&input)?;
+                    st.set_read_timeout(match ms {
+                        0 => None,
+                        ms => Some(std::time::Duration::from_millis(ms)),
+                    });
+                    debug!("tcp set-read-timeout = {}ms (0=disabled)", ms);
+                    Ok::<Value, Value>(Value::Tuple(vec![]))
+                }
+            }),
+        );
         // ----------------------------------------------------------------
         // close(connection-id: string) -> result<_, string>
         //
@@ -2952,6 +3058,79 @@ mod tests {
         assert_eq!(st.idle_timeout(), Some(Duration::from_secs(5)));
         st.set_idle_timeout(None);
         assert_eq!(st.idle_timeout(), None, "0 ms must read back as disabled");
+    }
+
+    #[test]
+    fn test_shared_state_read_timeout_set_get() {
+        let st = SharedTcpState::new(None, None);
+        assert_eq!(st.read_timeout(), None, "disabled by default (opt-in)");
+        st.set_read_timeout(Some(Duration::from_millis(250)));
+        assert_eq!(st.read_timeout(), Some(Duration::from_millis(250)));
+        st.set_read_timeout(None);
+        assert_eq!(st.read_timeout(), None, "0 ms must read back as disabled");
+    }
+
+    /// The bounded read used by `receive()`: a silent peer must trip the
+    /// `"timeout:"` error (not block forever), while a peer that sends data is
+    /// read normally and an EOF is `Ok(0)`.
+    #[tokio::test]
+    async fn read_once_bounded_times_out_on_silent_peer() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let mut client = tokio::net::TcpStream::connect(addr).await.unwrap();
+        let (mut server, _) = listener.accept().await.unwrap();
+        let cancel = CancellationToken::new();
+
+        // Silent peer + a bound → "timeout:" error (and it returns promptly,
+        // not after the test harness times out).
+        let mut buf = vec![0u8; 64];
+        let err = tokio::time::timeout(
+            Duration::from_secs(5),
+            read_once_bounded(
+                &mut server,
+                &mut buf,
+                Some(Duration::from_millis(150)),
+                &cancel,
+                1,
+            ),
+        )
+        .await
+        .expect("read_once_bounded must return on its own timeout, not hang")
+        .expect_err("a silent peer must produce an error");
+        match err {
+            Value::String(s) => assert!(
+                s.starts_with("timeout:"),
+                "expected a `timeout:`-prefixed error, got {s:?}"
+            ),
+            other => panic!("expected Value::String, got {other:?}"),
+        }
+
+        // Peer sends data → read normally, even with the same bound.
+        use tokio::io::AsyncWriteExt;
+        client.write_all(b"hello").await.unwrap();
+        let n = read_once_bounded(
+            &mut server,
+            &mut buf,
+            Some(Duration::from_millis(500)),
+            &cancel,
+            1,
+        )
+        .await
+        .expect("a peer that sent data must read Ok");
+        assert_eq!(&buf[..n], b"hello");
+
+        // Peer closes → EOF is Ok(0), not a timeout error.
+        drop(client);
+        let n = read_once_bounded(
+            &mut server,
+            &mut buf,
+            Some(Duration::from_millis(500)),
+            &cancel,
+            1,
+        )
+        .await
+        .expect("EOF must be Ok(0), not an error");
+        assert_eq!(n, 0, "EOF reads zero bytes");
     }
 
     #[test]
