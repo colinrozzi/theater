@@ -3054,6 +3054,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "theater-handler-udp"
+version = "0.3.0"
+dependencies = [
+ "anyhow",
+ "serde",
+ "socket2 0.5.10",
+ "theater",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "theater-native"
 version = "0.1.0"
 dependencies = [
@@ -3079,6 +3093,7 @@ dependencies = [
  "theater-handler-tcp",
  "theater-handler-terminal",
  "theater-handler-timer",
+ "theater-handler-udp",
  "tokio",
 ]
 

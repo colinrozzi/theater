@@ -1,0 +1,27 @@
+[package]
+name = "theater-handler-udp"
+version = "0.3.0"
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+rust-version.workspace = true
+
+description = "Raw UDP datagram networking handler for Theater WebAssembly runtime"
+
+[dependencies]
+theater = { workspace = true }
+serde = { workspace = true }
+anyhow.workspace = true
+tracing.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+# Socket options tokio::net::UdpSocket does not expose: SO_REUSEADDR + dual-stack
+# at bind, SO_RCVBUF/SO_SNDBUF, and IP_TOS/DSCP.
+socket2 = "0.5"
+
+[dev-dependencies]
+tracing-subscriber.workspace = true
