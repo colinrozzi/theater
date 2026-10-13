@@ -7,7 +7,7 @@
 //!
 //! [`standard_handlers`] builds a [`HandlerRegistry`] with the standard battery of
 //! handlers (self, lifecycle, store, runtime, message-server, rpc,
-//! tcp, terminal, timer, loop, podman, http-client). It is the *single* answer to
+//! tcp, udp, terminal, timer, loop, podman, http-client). It is the *single* answer to
 //! "what is a standard Theater node," reused by the CLI, the integration tests,
 //! and any embedder — instead of each hand-rolling the same registration.
 //!
@@ -42,6 +42,7 @@ use theater_handler_store::{StoreHandler, StoreHandlerConfig};
 use theater_handler_tcp::{TcpHandler, TcpHandlerConfig};
 use theater_handler_terminal::{TerminalHandler, TerminalHandlerConfig};
 use theater_handler_timer::{TimerHandler, TimerHandlerConfig};
+use theater_handler_udp::{UdpHandler, UdpHandlerConfig};
 
 /// Options for assembling the standard handler set.
 pub struct StandardHandlers {
@@ -118,6 +119,9 @@ pub fn standard_handlers(
         max_connections: None,
         ..Default::default()
     }));
+
+    // UDP — raw datagram sockets, per-manifest bind/peer/multicast permissions.
+    registry.register(UdpHandler::new(UdpHandlerConfig::default()));
 
     // Terminal — stdin/stdout/stderr for interactive apps.
     registry.register(TerminalHandler::new(TerminalHandlerConfig::default()));
