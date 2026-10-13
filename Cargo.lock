@@ -2782,7 +2782,7 @@ dependencies = [
 
 [[package]]
 name = "theater"
-version = "0.3.29"
+version = "0.3.30"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2829,7 +2829,7 @@ dependencies = [
 
 [[package]]
 name = "theater-cli"
-version = "0.3.18"
+version = "0.3.19"
 dependencies = [
  "anyhow",
  "clap",
@@ -2885,7 +2885,7 @@ dependencies = [
 
 [[package]]
 name = "theater-handler-filesystem"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "anyhow",
  "theater",
@@ -2958,7 +2958,7 @@ dependencies = [
 
 [[package]]
 name = "theater-handler-rpc"
-version = "0.3.11"
+version = "0.3.12"
 dependencies = [
  "anyhow",
  "serde",
@@ -3010,7 +3010,7 @@ dependencies = [
 
 [[package]]
 name = "theater-handler-tcp"
-version = "0.3.22"
+version = "0.3.23"
 dependencies = [
  "anyhow",
  "rcgen",
@@ -3055,7 +3055,7 @@ dependencies = [
 
 [[package]]
 name = "theater-handler-udp"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "anyhow",
  "serde",
@@ -3077,7 +3077,7 @@ dependencies = [
 
 [[package]]
 name = "theater-stage"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "theater",
  "theater-handler-filesystem",
@@ -3112,7 +3112,7 @@ dependencies = [
 
 [[package]]
 name = "theater-tests"
-version = "0.3.16"
+version = "0.3.17"
 dependencies = [
  "anyhow",
  "packr",
