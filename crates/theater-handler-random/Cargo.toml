@@ -1,0 +1,25 @@
+[package]
+name = "theater-handler-random"
+version = "0.1.0"
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+rust-version.workspace = true
+
+description = "Cryptographically-secure randomness handler for Theater WebAssembly runtime (chain-recorded for deterministic replay)"
+
+[dependencies]
+theater = { workspace = true }
+serde = { workspace = true }
+anyhow.workspace = true
+tracing.workspace = true
+tokio.workspace = true
+getrandom = "0.2"
+uuid = { workspace = true }
+
+[dev-dependencies]
+tracing-subscriber.workspace = true

@@ -22,6 +22,7 @@ theater-handler-tcp.workspace = true
 theater-handler-udp.workspace = true
 theater-handler-terminal.workspace = true
 theater-handler-timer.workspace = true
+theater-handler-random.workspace = true
 theater-handler-loop.workspace = true
 theater-handler-podman.workspace = true
 theater-handler-http-client.workspace = true
