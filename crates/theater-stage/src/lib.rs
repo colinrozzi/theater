@@ -35,6 +35,7 @@ use theater_handler_lifecycle::LifecycleHandler;
 use theater_handler_loop::LoopHandler;
 use theater_handler_message_server::{MessageRouter, MessageServerHandler};
 use theater_handler_podman::{PodmanHandler, PodmanHandlerConfig};
+use theater_handler_random::{RandomHandler, RandomHandlerConfig};
 use theater_handler_rpc::RpcHandler;
 use theater_handler_runtime::{RuntimeHandler, RuntimeHostConfig};
 use theater_handler_self::{SelfHandler, SelfHostConfig};
@@ -128,6 +129,10 @@ pub fn standard_handlers(
 
     // Timer — periodic tick callbacks.
     registry.register(TimerHandler::new(TimerHandlerConfig::default()));
+
+    // Random — cryptographically-secure OS entropy (chain-recorded for
+    // deterministic replay). A guest has no ambient entropy of its own.
+    registry.register(RandomHandler::new(RandomHandlerConfig::default()));
 
     // Loop — cooperative looping with yield points.
     registry.register(LoopHandler::new());
