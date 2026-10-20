@@ -7,7 +7,7 @@
 //!
 //! [`standard_handlers`] builds a [`HandlerRegistry`] with the standard battery of
 //! handlers (self, lifecycle, store, runtime, message-server, rpc,
-//! tcp, udp, terminal, timer, loop, podman, http-client). It is the *single* answer to
+//! tcp, udp, terminal, timer, loop, process, podman, http-client). It is the *single* answer to
 //! "what is a standard Theater node," reused by the CLI, the integration tests,
 //! and any embedder — instead of each hand-rolling the same registration.
 //!
@@ -35,6 +35,7 @@ use theater_handler_lifecycle::LifecycleHandler;
 use theater_handler_loop::LoopHandler;
 use theater_handler_message_server::{MessageRouter, MessageServerHandler};
 use theater_handler_podman::{PodmanHandler, PodmanHandlerConfig};
+use theater_handler_process::{ProcessHandler, ProcessHandlerConfig};
 use theater_handler_random::{RandomHandler, RandomHandlerConfig};
 use theater_handler_rpc::RpcHandler;
 use theater_handler_runtime::{RuntimeHandler, RuntimeHostConfig};
@@ -136,6 +137,9 @@ pub fn standard_handlers(
 
     // Loop — cooperative looping with yield points.
     registry.register(LoopHandler::new());
+
+    // Process — native OS processes (pipes + PTY), owned by the spawning actor.
+    registry.register(ProcessHandler::new(ProcessHandlerConfig::default()));
 
     // Podman — container management via the podman CLI.
     registry.register(PodmanHandler::new(PodmanHandlerConfig::default()));

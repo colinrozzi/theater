@@ -2957,6 +2957,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "theater-handler-process"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "libc",
+ "serde",
+ "theater",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "theater-handler-random"
 version = "0.1.0"
 dependencies = [
@@ -3100,6 +3114,7 @@ dependencies = [
  "theater-handler-loop",
  "theater-handler-message-server",
  "theater-handler-podman",
+ "theater-handler-process",
  "theater-handler-random",
  "theater-handler-rpc",
  "theater-handler-runtime",
@@ -3130,6 +3145,7 @@ name = "theater-tests"
 version = "0.3.17"
 dependencies = [
  "anyhow",
+ "libc",
  "packr",
  "serde",
  "serde_json",
@@ -3139,6 +3155,7 @@ dependencies = [
  "theater-handler-lifecycle",
  "theater-handler-loop",
  "theater-handler-message-server",
+ "theater-handler-process",
  "theater-handler-rpc",
  "theater-handler-runtime",
  "theater-handler-self",
