@@ -20,6 +20,7 @@ members = [
     "crates/theater-handler-terminal",
     "crates/theater-handler-timer",
     "crates/theater-handler-random",
+    "crates/theater-handler-process",
     "crates/theater-handler-assembler",
     "crates/theater-handler-rpc",
     "crates/theater-handler-loop",
@@ -75,6 +76,7 @@ theater-handler-udp = { version = "0.3.0", path = "crates/theater-handler-udp" }
 theater-handler-terminal = { version = "0.3.11", path = "crates/theater-handler-terminal" }
 theater-handler-timer = { version = "0.3.13", path = "crates/theater-handler-timer" }
 theater-handler-random = { version = "0.1.0", path = "crates/theater-handler-random" }
+theater-handler-process = { version = "0.1.0", path = "crates/theater-handler-process" }
 theater-handler-assembler = { version = "0.3.11", path = "crates/theater-handler-assembler" }
 theater-handler-rpc = { version = "0.3.11", path = "crates/theater-handler-rpc" }
 theater-handler-loop = { version = "0.3.11", path = "crates/theater-handler-loop" }

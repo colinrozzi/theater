@@ -18,6 +18,7 @@ theater-handler-timer.workspace = true
 theater-handler-loop.workspace = true
 theater-handler-terminal.workspace = true
 theater-handler-rpc.workspace = true
+theater-handler-process.workspace = true
 anyhow.workspace = true
 tokio.workspace = true
 tracing.workspace = true
@@ -25,6 +26,7 @@ tracing-subscriber.workspace = true
 
 [dev-dependencies]
 tempfile = "3.8.1"
+libc = "0.2"
 test-log = "0.2"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

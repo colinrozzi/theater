@@ -1,0 +1,9 @@
+name = "process-test"
+version = "0.1.0"
+package = "target/wasm32-unknown-unknown/release/process_test_actor.wasm"
+
+[[handler]]
+type = "self"
+
+[[handler]]
+type = "process"
