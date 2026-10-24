@@ -4,6 +4,8 @@
 **Date:** 2026-08-29 (design) / 2026-08-31 (landed).
 **Context:** follow-on to the runtime-owned actor tree (PR #164). Supersedes the
 ad-hoc "supervision tree + handler-driven cascade" model.
+**Current behavior** (verified against the code, with line references): see
+[messaging-and-lifecycle-behavior.md](messaging-and-lifecycle-behavior.md).
 
 > **As-landed architecture (read this first — it overrides the runtime-tree
 > framing below).** The runtime holds **no lineage at all**: just a flat set of

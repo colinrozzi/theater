@@ -2,6 +2,7 @@
 
 ## Core Concepts
 
+- **[Messaging and Lifecycle: What Actually Happens](./messaging-and-lifecycle-behavior.md)** — Verified reference: message delivery, request and channel behavior, how actors die, and the tools for watching them. Read before designing anything that depends on them.
 - **[Contract Enforcement](./contract-enforcement.md)** — How Theater validates type contracts between the runtime and actors, on both input and output.
 
 ## System Design
