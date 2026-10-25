@@ -57,5 +57,24 @@ interface filesystem {
         create-dir: func(path: string) -> result<_, filesystem-error>
         // Remove the directory and its contents.
         remove-dir: func(path: string) -> result<_, filesystem-error>
+
+        // --- durability (require `write`) ---
+        // write-file and append-file return once the bytes are in the kernel:
+        // they survive the actor or the runtime dying, not a kernel crash or
+        // power loss. These make a write durable.
+        //
+        // fsync the file's data and metadata (File::sync_all).
+        sync-file: func(path: string) -> result<_, filesystem-error>
+        // fsync a directory, so a create, delete or rename in it is durable.
+        sync-dir: func(path: string) -> result<_, filesystem-error>
+        // Atomically rename `from` to `to`, replacing `to` if it is a file.
+        // Both paths must be writable by the actor. A rename that would cross
+        // filesystems fails with io-error (EXDEV); there is no copy fallback.
+        rename: func(from: string, to: string) -> result<_, filesystem-error>
+        // Write `content` to `path` so that afterwards `path` holds either its
+        // old content or all of the new, even across a crash: write a temp
+        // file in the same directory, sync it, rename it over `path`, sync the
+        // directory. A crash midway can leave the hidden temp file behind.
+        write-file-durable: func(path: string, content: list<u8>) -> result<_, filesystem-error>
     }
 }

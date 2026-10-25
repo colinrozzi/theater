@@ -3,7 +3,8 @@
 //! Sandboxed, permission-gated filesystem access for WebAssembly actors in the
 //! Theater system. Implements the `theater:simple/filesystem` interface
 //! (`filesystem.pact`): read-file / write-file / append-file / delete-file /
-//! exists / list-dir / create-dir / remove-dir / metadata.
+//! exists / list-dir / create-dir / remove-dir / metadata, plus the durability
+//! ops sync-file / sync-dir / rename / write-file-durable.
 //!
 //! ## Security model
 //!
@@ -15,12 +16,17 @@
 //!   an unconfigured handler never exposes the host filesystem.
 //! - **Capability gate (default-deny).** Reads (read-file / exists / list-dir /
 //!   metadata) require [`FileSystemPermissions::read`]; writes (write-file /
-//!   append-file / delete-file / create-dir / remove-dir) require
+//!   append-file / delete-file / create-dir / remove-dir, and the durability
+//!   ops) require
 //!   [`FileSystemPermissions::write`]. A missing capability (or a false bit)
 //!   yields `permission-denied`.
 //! - **allowed-paths.** When [`FileSystemPermissions::allowed_paths`] is set, the
 //!   resolved path must fall within one of those subtrees (interpreted relative
 //!   to the sandbox root) or the op is rejected `permission-denied`.
+//! - **rename.** Both paths pass the checks above, and additionally the real
+//!   location of each path's parent directory (symlinks resolved) must be in
+//!   the sandbox and the allowed-paths, so a rename can't move a file into or
+//!   out of a place the actor can't write. See [`prepare_rename`].
 //!
 //! ## Sandbox-root lifecycle
 //!
@@ -250,6 +256,152 @@ fn prepare(
     Ok(resolved)
 }
 
+/// [`prepare`] for a write that renames: additionally resolve symlinks in the
+/// path's *parent* directories and require the real location to be inside the
+/// sandbox and the allowed-paths.
+///
+/// [`resolve_in_sandbox`] is pure path arithmetic, so a symlinked directory
+/// inside the sandbox that points out (`out -> /elsewhere`) passes it. For most
+/// ops that is a known v1 gap; for rename it would let an actor move a host file
+/// into its sandbox, or move one of its files out. The final component is left
+/// unresolved on purpose: rename acts on a symlink itself, never its target.
+/// The sandbox root itself cannot be renamed or replaced.
+async fn prepare_rename(
+    perms: &Option<FileSystemPermissions>,
+    root: &Path,
+    user_path: &str,
+) -> Result<PathBuf, FsError> {
+    let p = gate(perms, true)?;
+    let resolved = resolve_in_sandbox(root, user_path)?;
+    check_allowed(root, p, &resolved, user_path)?;
+    let (parent, name) = match (resolved.parent(), resolved.file_name()) {
+        (Some(parent), Some(name)) if resolved != root => (parent, name),
+        _ => {
+            return Err(FsError::InvalidPath(format!(
+                "path '{}' is the sandbox root",
+                user_path
+            )))
+        }
+    };
+    let real = tokio::fs::canonicalize(parent)
+        .await
+        .map_err(|e| map_io_error(e, user_path))?
+        .join(name);
+    if !real.starts_with(root) {
+        return Err(FsError::InvalidPath(format!(
+            "path '{}' escapes the sandbox root via a symlink",
+            user_path
+        )));
+    }
+    check_allowed(root, p, &real, user_path)?;
+    Ok(real)
+}
+
+// ============================================================================
+// Durability ops (sync-file / sync-dir / rename / write-file-durable)
+// ============================================================================
+
+/// fsync an open file's data and metadata, requiring it to be a file
+/// (`want_dir = false`) or a directory (`want_dir = true`).
+async fn sync_path(path: &Path, want_dir: bool) -> std::io::Result<()> {
+    let f = tokio::fs::File::open(path).await?;
+    let is_dir = f.metadata().await?.is_dir();
+    if is_dir != want_dir {
+        return Err(std::io::Error::from(if want_dir {
+            std::io::ErrorKind::NotADirectory
+        } else {
+            std::io::ErrorKind::IsADirectory
+        }));
+    }
+    f.sync_all().await
+}
+
+async fn sync_file_op(
+    perms: &Option<FileSystemPermissions>,
+    root: &Path,
+    path: &str,
+) -> Result<(), FsError> {
+    let resolved = prepare(perms, root, path, true)?;
+    sync_path(&resolved, false)
+        .await
+        .map_err(|e| map_io_error(e, path))
+}
+
+async fn sync_dir_op(
+    perms: &Option<FileSystemPermissions>,
+    root: &Path,
+    path: &str,
+) -> Result<(), FsError> {
+    let resolved = prepare(perms, root, path, true)?;
+    sync_path(&resolved, true)
+        .await
+        .map_err(|e| map_io_error(e, path))
+}
+
+/// rename(2): atomic, replaces an existing file at `to`. Across filesystems
+/// (a mount inside the sandbox) the OS returns EXDEV, which surfaces as
+/// `io-error`; we deliberately do not fall back to copy + delete, which would
+/// not be atomic.
+async fn rename_op(
+    perms: &Option<FileSystemPermissions>,
+    root: &Path,
+    from: &str,
+    to: &str,
+) -> Result<(), FsError> {
+    let src = prepare_rename(perms, root, from).await?;
+    let dst = prepare_rename(perms, root, to).await?;
+    tokio::fs::rename(&src, &dst)
+        .await
+        .map_err(|e| map_io_error(e, &format!("{} -> {}", from, to)))
+}
+
+/// Write a hidden temp file next to `path`, sync it, rename it over `path`,
+/// then sync the directory. The temp file is removed if any step before the
+/// rename fails.
+async fn write_file_durable_op(
+    perms: &Option<FileSystemPermissions>,
+    root: &Path,
+    path: &str,
+    content: &[u8],
+) -> Result<(), FsError> {
+    use tokio::io::AsyncWriteExt;
+    let target = prepare_rename(perms, root, path).await?;
+    // prepare_rename guarantees a parent and a file name.
+    let dir = target.parent().expect("target has a parent");
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let tmp = dir.join(format!(
+        ".{}.tmp-{}",
+        target
+            .file_name()
+            .expect("target has a name")
+            .to_string_lossy(),
+        nanos
+    ));
+    let res = async {
+        let mut f = tokio::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp)
+            .await?;
+        f.write_all(content).await?;
+        f.flush().await?;
+        f.sync_all().await?;
+        drop(f);
+        tokio::fs::rename(&tmp, &target).await
+    }
+    .await;
+    if let Err(e) = res {
+        let _ = tokio::fs::remove_file(&tmp).await;
+        return Err(map_io_error(e, path));
+    }
+    sync_path(dir, true)
+        .await
+        .map_err(|e| map_io_error(e, path))
+}
+
 // ============================================================================
 // Input parsing (Composite Value → args)
 // ============================================================================
@@ -264,6 +416,21 @@ fn parse_path(input: &Value) -> Result<String, FsError> {
             _ => Err(FsError::InvalidPath("expected string for path".to_string())),
         },
         _ => Err(FsError::InvalidPath("expected string for path".to_string())),
+    }
+}
+
+/// A `(from: string, to: string)` argument tuple.
+fn parse_two_paths(input: &Value) -> Result<(String, String), FsError> {
+    match input {
+        Value::Tuple(fields) if fields.len() == 2 => match (&fields[0], &fields[1]) {
+            (Value::String(a), Value::String(b)) => Ok((a.clone(), b.clone())),
+            _ => Err(FsError::InvalidPath(
+                "expected strings for paths".to_string(),
+            )),
+        },
+        _ => Err(FsError::InvalidPath(
+            "expected tuple (from, to)".to_string(),
+        )),
     }
 }
 
@@ -565,6 +732,10 @@ impl Handler for FileSystemHandler {
         let (r_delete, p_delete) = (root.clone(), perms.clone());
         let (r_cdir, p_cdir) = (root.clone(), perms.clone());
         let (r_rdir, p_rdir) = (root.clone(), perms.clone());
+        let (r_sfile, p_sfile) = (root.clone(), perms.clone());
+        let (r_sdir, p_sdir) = (root.clone(), perms.clone());
+        let (r_rename, p_rename) = (root.clone(), perms.clone());
+        let (r_durable, p_durable) = (root.clone(), perms.clone());
 
         // --- reads (require `read`) ---
 
@@ -774,6 +945,73 @@ impl Handler for FileSystemHandler {
                     match tokio::fs::remove_dir_all(&resolved).await {
                         Ok(()) => Ok(Value::Tuple(vec![])),
                         Err(e) => Err(map_io_error(e, &path).to_value()),
+                    }
+                }
+            }),
+        );
+
+        // --- durability (require `write`) ---
+
+        // sync-file(path: string) -> result<_, filesystem-error>
+        imports.define(
+            "theater:simple/filesystem",
+            "sync-file",
+            pact_result_host_fn(move |input: Value| {
+                let (root, perms) = (r_sfile.clone(), p_sfile.clone());
+                async move {
+                    let path = parse_path(&input).map_err(|e| e.to_value())?;
+                    match sync_file_op(&perms, &root, &path).await {
+                        Ok(()) => Ok(Value::Tuple(vec![])),
+                        Err(e) => Err(e.to_value()),
+                    }
+                }
+            }),
+        );
+
+        // sync-dir(path: string) -> result<_, filesystem-error>
+        imports.define(
+            "theater:simple/filesystem",
+            "sync-dir",
+            pact_result_host_fn(move |input: Value| {
+                let (root, perms) = (r_sdir.clone(), p_sdir.clone());
+                async move {
+                    let path = parse_path(&input).map_err(|e| e.to_value())?;
+                    match sync_dir_op(&perms, &root, &path).await {
+                        Ok(()) => Ok(Value::Tuple(vec![])),
+                        Err(e) => Err(e.to_value()),
+                    }
+                }
+            }),
+        );
+
+        // rename(from: string, to: string) -> result<_, filesystem-error>
+        imports.define(
+            "theater:simple/filesystem",
+            "rename",
+            pact_result_host_fn(move |input: Value| {
+                let (root, perms) = (r_rename.clone(), p_rename.clone());
+                async move {
+                    let (from, to) = parse_two_paths(&input).map_err(|e| e.to_value())?;
+                    match rename_op(&perms, &root, &from, &to).await {
+                        Ok(()) => Ok(Value::Tuple(vec![])),
+                        Err(e) => Err(e.to_value()),
+                    }
+                }
+            }),
+        );
+
+        // write-file-durable(path: string, content: list<u8>) -> result<_, filesystem-error>
+        imports.define(
+            "theater:simple/filesystem",
+            "write-file-durable",
+            pact_result_host_fn(move |input: Value| {
+                let (root, perms) = (r_durable.clone(), p_durable.clone());
+                async move {
+                    let (path, content) =
+                        parse_path_and_content(&input).map_err(|e| e.to_value())?;
+                    match write_file_durable_op(&perms, &root, &path, &content).await {
+                        Ok(()) => Ok(Value::Tuple(vec![])),
+                        Err(e) => Err(e.to_value()),
                     }
                 }
             }),
@@ -1038,5 +1276,319 @@ mod tests {
         assert_eq!(root, std::fs::canonicalize(&dir).unwrap());
         assert!(handler.ephemeral_root.is_none());
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    // --- durability ops: sync-file / sync-dir / rename / write-file-durable ---
+
+    /// A real, canonicalized scratch directory, removed on drop. `sandbox` is
+    /// the sandbox root; `outside` is a sibling the actor must never reach.
+    struct Scratch {
+        base: PathBuf,
+        sandbox: PathBuf,
+        outside: PathBuf,
+    }
+
+    impl Scratch {
+        fn new() -> Self {
+            let base = std::env::temp_dir().join(format!(
+                "theater-fs-test-{}",
+                fresh_temp_root().file_name().unwrap().to_string_lossy()
+            ));
+            std::fs::create_dir_all(base.join("sandbox")).unwrap();
+            std::fs::create_dir_all(base.join("outside")).unwrap();
+            let base = std::fs::canonicalize(&base).unwrap();
+            Scratch {
+                sandbox: base.join("sandbox"),
+                outside: base.join("outside"),
+                base,
+            }
+        }
+    }
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            std::fs::remove_dir_all(&self.base).ok();
+        }
+    }
+
+    fn perms(write: bool, allowed_paths: Option<Vec<&str>>) -> Option<FileSystemPermissions> {
+        Some(FileSystemPermissions {
+            read: true,
+            write,
+            execute: false,
+            allowed_commands: None,
+            new_dir: None,
+            allowed_paths: allowed_paths.map(|v| v.into_iter().map(String::from).collect()),
+        })
+    }
+
+    #[tokio::test]
+    async fn test_sync_file_and_dir() {
+        let s = Scratch::new();
+        let rw = perms(true, None);
+        std::fs::create_dir(s.sandbox.join("d")).unwrap();
+        std::fs::write(s.sandbox.join("d/f"), b"x").unwrap();
+
+        assert!(sync_file_op(&rw, &s.sandbox, "d/f").await.is_ok());
+        assert!(sync_dir_op(&rw, &s.sandbox, "d").await.is_ok());
+        assert!(sync_dir_op(&rw, &s.sandbox, "").await.is_ok());
+
+        assert!(matches!(
+            sync_file_op(&rw, &s.sandbox, "d").await,
+            Err(FsError::IsADirectory(_))
+        ));
+        assert!(matches!(
+            sync_dir_op(&rw, &s.sandbox, "d/f").await,
+            Err(FsError::NotADirectory(_))
+        ));
+        assert!(matches!(
+            sync_file_op(&rw, &s.sandbox, "missing").await,
+            Err(FsError::NotFound(_))
+        ));
+        assert!(matches!(
+            sync_file_op(&perms(false, None), &s.sandbox, "d/f").await,
+            Err(FsError::PermissionDenied(_))
+        ));
+        assert!(matches!(
+            sync_dir_op(&rw, &s.sandbox, "../outside").await,
+            Err(FsError::InvalidPath(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_rename_moves_and_replaces() {
+        let s = Scratch::new();
+        let rw = perms(true, None);
+        std::fs::write(s.sandbox.join("a"), b"new").unwrap();
+        std::fs::write(s.sandbox.join("b"), b"old").unwrap();
+
+        rename_op(&rw, &s.sandbox, "a", "b").await.unwrap();
+        assert!(!s.sandbox.join("a").exists());
+        assert_eq!(std::fs::read(s.sandbox.join("b")).unwrap(), b"new");
+
+        std::fs::create_dir(s.sandbox.join("sub")).unwrap();
+        rename_op(&rw, &s.sandbox, "b", "sub/c").await.unwrap();
+        assert_eq!(std::fs::read(s.sandbox.join("sub/c")).unwrap(), b"new");
+
+        assert!(matches!(
+            rename_op(&rw, &s.sandbox, "missing", "x").await,
+            Err(FsError::NotFound(_))
+        ));
+        assert!(matches!(
+            rename_op(&rw, &s.sandbox, "sub/c", "nodir/c").await,
+            Err(FsError::NotFound(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_rename_rejects_paths_outside_the_sandbox() {
+        let s = Scratch::new();
+        let rw = perms(true, None);
+        std::fs::write(s.sandbox.join("in"), b"in").unwrap();
+        std::fs::write(s.outside.join("secret"), b"secret").unwrap();
+
+        for (from, to) in [
+            ("in", "../outside/in"),
+            ("../outside/secret", "stolen"),
+            ("in", "a/../../outside/in"),
+            ("a/../../outside/secret", "stolen"),
+        ] {
+            assert!(
+                matches!(
+                    rename_op(&rw, &s.sandbox, from, to).await,
+                    Err(FsError::InvalidPath(_))
+                ),
+                "{} -> {}",
+                from,
+                to
+            );
+        }
+        let abs_secret = s.outside.join("secret").to_string_lossy().into_owned();
+        let abs_dst = s.outside.join("in").to_string_lossy().into_owned();
+        assert!(matches!(
+            rename_op(&rw, &s.sandbox, &abs_secret, "stolen").await,
+            Err(FsError::InvalidPath(_))
+        ));
+        assert!(matches!(
+            rename_op(&rw, &s.sandbox, "in", &abs_dst).await,
+            Err(FsError::InvalidPath(_))
+        ));
+        // The sandbox root itself can be neither source nor target.
+        assert!(matches!(
+            rename_op(&rw, &s.sandbox, "", "x").await,
+            Err(FsError::InvalidPath(_))
+        ));
+        assert!(matches!(
+            rename_op(&rw, &s.sandbox, "in", ".").await,
+            Err(FsError::InvalidPath(_))
+        ));
+
+        assert!(s.sandbox.join("in").exists());
+        assert!(s.outside.join("secret").exists());
+        assert!(!s.outside.join("in").exists());
+        assert!(!s.sandbox.join("stolen").exists());
+    }
+
+    #[tokio::test]
+    async fn test_rename_requires_write_on_both_paths() {
+        let s = Scratch::new();
+        std::fs::create_dir(s.sandbox.join("public")).unwrap();
+        std::fs::create_dir(s.sandbox.join("private")).unwrap();
+        std::fs::write(s.sandbox.join("public/f"), b"f").unwrap();
+        std::fs::write(s.sandbox.join("private/g"), b"g").unwrap();
+        let public_only = perms(true, Some(vec!["public"]));
+
+        assert!(matches!(
+            rename_op(&public_only, &s.sandbox, "public/f", "private/f").await,
+            Err(FsError::PermissionDenied(_))
+        ));
+        assert!(matches!(
+            rename_op(&public_only, &s.sandbox, "private/g", "public/g").await,
+            Err(FsError::PermissionDenied(_))
+        ));
+        assert!(matches!(
+            rename_op(&perms(false, None), &s.sandbox, "public/f", "public/h").await,
+            Err(FsError::PermissionDenied(_))
+        ));
+        assert!(matches!(
+            rename_op(&None, &s.sandbox, "public/f", "public/h").await,
+            Err(FsError::PermissionDenied(_))
+        ));
+        rename_op(&public_only, &s.sandbox, "public/f", "public/h")
+            .await
+            .unwrap();
+        assert!(s.sandbox.join("private/g").exists());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_rename_symlinked_dir_cannot_escape() {
+        // `out` is a symlink inside the sandbox to a directory outside it.
+        // Path arithmetic alone sees `out/secret` as in-sandbox; rename must
+        // resolve the parent and refuse both directions.
+        let s = Scratch::new();
+        let rw = perms(true, None);
+        std::os::unix::fs::symlink(&s.outside, s.sandbox.join("out")).unwrap();
+        std::fs::write(s.outside.join("secret"), b"secret").unwrap();
+        std::fs::write(s.sandbox.join("in"), b"in").unwrap();
+
+        assert!(matches!(
+            rename_op(&rw, &s.sandbox, "out/secret", "stolen").await,
+            Err(FsError::InvalidPath(_))
+        ));
+        assert!(matches!(
+            rename_op(&rw, &s.sandbox, "in", "out/in").await,
+            Err(FsError::InvalidPath(_))
+        ));
+        assert!(matches!(
+            write_file_durable_op(&rw, &s.sandbox, "out/new", b"x").await,
+            Err(FsError::InvalidPath(_))
+        ));
+        assert!(s.outside.join("secret").exists());
+        assert!(!s.outside.join("in").exists());
+        assert!(!s.outside.join("new").exists());
+        assert!(s.sandbox.join("in").exists());
+
+        // A symlinked dir that stays inside the sandbox is fine, and an
+        // allowed-paths check applies to where it really points.
+        std::fs::create_dir(s.sandbox.join("private")).unwrap();
+        std::fs::create_dir(s.sandbox.join("public")).unwrap();
+        std::os::unix::fs::symlink(s.sandbox.join("private"), s.sandbox.join("public/p")).unwrap();
+        std::fs::write(s.sandbox.join("public/f"), b"f").unwrap();
+        assert!(matches!(
+            rename_op(
+                &perms(true, Some(vec!["public"])),
+                &s.sandbox,
+                "public/f",
+                "public/p/f"
+            )
+            .await,
+            Err(FsError::PermissionDenied(_))
+        ));
+        rename_op(&rw, &s.sandbox, "public/f", "public/p/f")
+            .await
+            .unwrap();
+        assert!(s.sandbox.join("private/f").exists());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_rename_acts_on_the_symlink_not_its_target() {
+        let s = Scratch::new();
+        let rw = perms(true, None);
+        std::fs::write(s.outside.join("secret"), b"secret").unwrap();
+        std::os::unix::fs::symlink(s.outside.join("secret"), s.sandbox.join("link")).unwrap();
+
+        // Moving the link moves only the link.
+        rename_op(&rw, &s.sandbox, "link", "moved").await.unwrap();
+        assert!(s
+            .sandbox
+            .join("moved")
+            .symlink_metadata()
+            .unwrap()
+            .is_symlink());
+        assert_eq!(std::fs::read(s.outside.join("secret")).unwrap(), b"secret");
+
+        // Renaming over the link replaces the link, not the file it points to.
+        std::fs::write(s.sandbox.join("f"), b"mine").unwrap();
+        rename_op(&rw, &s.sandbox, "f", "moved").await.unwrap();
+        assert!(!s
+            .sandbox
+            .join("moved")
+            .symlink_metadata()
+            .unwrap()
+            .is_symlink());
+        assert_eq!(std::fs::read(s.sandbox.join("moved")).unwrap(), b"mine");
+        assert_eq!(std::fs::read(s.outside.join("secret")).unwrap(), b"secret");
+    }
+
+    #[tokio::test]
+    async fn test_write_file_durable() {
+        let s = Scratch::new();
+        let rw = perms(true, None);
+        std::fs::create_dir(s.sandbox.join("d")).unwrap();
+
+        write_file_durable_op(&rw, &s.sandbox, "d/f", b"one")
+            .await
+            .unwrap();
+        assert_eq!(std::fs::read(s.sandbox.join("d/f")).unwrap(), b"one");
+        write_file_durable_op(&rw, &s.sandbox, "d/f", b"two")
+            .await
+            .unwrap();
+        assert_eq!(std::fs::read(s.sandbox.join("d/f")).unwrap(), b"two");
+        // No temp file left behind.
+        let names: Vec<_> = std::fs::read_dir(s.sandbox.join("d"))
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(names, vec![std::ffi::OsString::from("f")]);
+
+        // Failure before the rename leaves the target untouched and no temp.
+        assert!(matches!(
+            write_file_durable_op(&rw, &s.sandbox, "nodir/f", b"x").await,
+            Err(FsError::NotFound(_))
+        ));
+        assert!(matches!(
+            write_file_durable_op(&rw, &s.sandbox, "d", b"x").await,
+            Err(FsError::IsADirectory(_)) | Err(FsError::IoError(_))
+        ));
+        assert_eq!(std::fs::read_dir(s.sandbox.join("d")).unwrap().count(), 1);
+        assert_eq!(std::fs::read_dir(&s.sandbox).unwrap().count(), 1);
+
+        assert!(matches!(
+            write_file_durable_op(&perms(false, None), &s.sandbox, "d/f", b"x").await,
+            Err(FsError::PermissionDenied(_))
+        ));
+        assert!(matches!(
+            write_file_durable_op(&rw, &s.sandbox, "../outside/f", b"x").await,
+            Err(FsError::InvalidPath(_))
+        ));
+    }
+
+    #[test]
+    fn test_parse_two_paths() {
+        let input = Value::Tuple(vec![Value::String("a".into()), Value::String("b".into())]);
+        assert_eq!(parse_two_paths(&input).unwrap(), ("a".into(), "b".into()));
+        assert!(parse_two_paths(&Value::String("a".into())).is_err());
     }
 }
