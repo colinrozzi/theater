@@ -119,6 +119,16 @@ subscribers, and dropped; only the head hash is kept
 (`theater/src/chain/mod.rs:6-10`). Anything that needs a record must
 subscribe and store it.
 
+**Host calls are recorded generically.** A handler doesn't record its own
+events. After every host function returns, `RecordingInterceptor` adds an
+event of type `<interface>/<function>` (for example
+`theater:simple/filesystem/rename`) holding the input and output
+(`theater/src/interceptor.rs:55-64`). On replay,
+`ReplayRecordingInterceptor::before_import` returns the next recorded output
+for that function, and the host function isn't run
+(`theater/src/interceptor.rs:134-143`). So a replayed filesystem write does
+not touch the disk. (Checked at `d6148f98`, 2026-10-25.)
+
 **Delivery to subscribers is strict.** Each event is sent with
 `.send().await` to each subscriber (`theater/src/chain/mod.rs:125`), so **a
 slow subscriber slows the actor it watches**, and through it anything waiting
