@@ -134,6 +134,11 @@ pub struct ServerTlsConfig {
     pub cert: PathBuf,
     /// Path to the server private key file (PEM format)
     pub key: PathBuf,
+    /// Whether to TLS-handshake automatically on accept. False keeps accepted
+    /// connections plain until an explicit upgrade-to-tls-server (STARTTLS-style
+    /// protocols); true is implicit TLS.
+    #[serde(default = "default_true")]
+    pub auto_handshake: bool,
 }
 
 use theater::pack_bridge::{
@@ -296,6 +301,13 @@ struct SharedTcpState {
     /// stop-then-spawn (e.g. supervisor restart) rebinds the port before the fd
     /// is freed → EADDRINUSE.
     accept_tasks: Mutex<HashMap<u64, (TheaterId, tokio::task::JoinHandle<()>)>>,
+    /// TLS upgrades requested on active-mode connections, waiting for their read
+    /// loop: `conn_id -> acceptor`. The loop owns the read half, so it does the
+    /// handshake, and the actor never waits on a client.
+    tls_upgrades: Mutex<HashMap<u64, tokio_rustls::TlsAcceptor>>,
+    /// Bumped after each insert into `tls_upgrades`, to wake read loops that
+    /// are blocked in a read.
+    tls_upgrades_changed: tokio::sync::watch::Sender<u64>,
 }
 
 impl SharedTcpState {
@@ -308,6 +320,8 @@ impl SharedTcpState {
             idle_timeout_ms: AtomicU64::new(duration_to_ms(idle_timeout)),
             read_timeout_ms: AtomicU64::new(0),
             accept_tasks: Mutex::new(HashMap::new()),
+            tls_upgrades: Mutex::new(HashMap::new()),
+            tls_upgrades_changed: tokio::sync::watch::channel(0).0,
         }
     }
 
@@ -659,7 +673,11 @@ async fn handle_accepted_connection(
     actor_handle: ActorHandle,
     handshake_timeout: std::time::Duration,
 ) {
-    let unified_stream = if let Some(ref ctx) = *tls_ctx {
+    let unified_stream = if let Some(ctx) = tls_ctx
+        .as_ref()
+        .as_ref()
+        .filter(|c| c.server_auto_handshake)
+    {
         if let Some(ref acceptor) = ctx.server_acceptor {
             debug!("tcp accept: performing TLS handshake for conn={}", conn_id);
             match tokio::time::timeout(handshake_timeout, acceptor.accept(tcp_stream)).await {
@@ -1292,7 +1310,11 @@ impl Handler for TcpHandler {
                     drop(listeners); // Release lock before acquiring connections lock
 
                     // Apply TLS if configured
-                    let unified_stream = if let Some(ref ctx) = *tls_ctx {
+                    let unified_stream = if let Some(ctx) = tls_ctx
+                        .as_ref()
+                        .as_ref()
+                        .filter(|c| c.server_auto_handshake)
+                    {
                         if let Some(ref acceptor) = ctx.server_acceptor {
                             debug!(
                                 "tcp manual accept: performing TLS handshake for conn={}",
@@ -2009,11 +2031,25 @@ impl Handler for TcpHandler {
                                 conn_id_str
                             )));
                         }
-                        if entry.data_mode != DataMode::Passive {
+                        if entry.data_mode == DataMode::Once {
                             return Err(Value::String(format!(
-                                "Connection {} must be in passive mode for TLS upgrade",
+                                "Connection {} must be in passive or active mode for TLS upgrade",
                                 conn_id_str
                             )));
+                        }
+                        if entry.data_mode == DataMode::Active {
+                            if entry.stream.lock().await.is_tls() != Some(false) {
+                                return Err(Value::String(format!(
+                                    "Connection {} is already TLS or closed",
+                                    conn_id_str
+                                )));
+                            }
+                            drop(connections);
+                            st.tls_upgrades.lock().await.insert(conn_id, acceptor);
+                            st.tls_upgrades_changed
+                                .send_modify(|n| *n = n.wrapping_add(1));
+                            debug!("tcp upgrade-to-tls-server queued conn={}", conn_id);
+                            return Ok::<Value, Value>(Value::Tuple(vec![]));
                         }
                         entry.stream.clone()
                     };
@@ -2244,6 +2280,7 @@ const ACTIVE_READ_BUFFER_SIZE: usize = 8192;
 /// close_notify"). The explicit `close` host function had this right
 /// already (PR #45); this is the parallel fix for the auto-cleanup path.
 async fn shutdown_write_half_and_remove(shared_state: &Arc<SharedTcpState>, conn_id: u64) {
+    shared_state.tls_upgrades.lock().await.remove(&conn_id);
     let stream_arc = {
         let mut connections = shared_state.connections.lock().await;
         connections.remove(&conn_id).map(|e| e.stream)
@@ -2281,6 +2318,33 @@ async fn shutdown_write_half_and_remove(shared_state: &Arc<SharedTcpState>, conn
 /// Background task that reads from a connection and calls on-data/on-close callbacks.
 ///
 /// This is spawned when a connection enters "active" or "once" mode.
+/// Turn an active-mode plain connection into TLS: rejoin its halves, handshake
+/// within `limit`, split it again. The write half goes back into `stream`; the
+/// new read half is returned. Sends during the handshake fail as closed.
+/// On `Err` the stream is left `Closed`.
+async fn upgrade_active_to_tls(
+    stream: &Arc<Mutex<StreamState>>,
+    read_half: UnifiedReadHalf,
+    acceptor: tokio_rustls::TlsAcceptor,
+    limit: std::time::Duration,
+) -> Result<UnifiedReadHalf, String> {
+    let taken = std::mem::replace(&mut *stream.lock().await, StreamState::Closed);
+    let tcp = match (read_half, taken) {
+        (UnifiedReadHalf::Plain(r), StreamState::WriteOnly(UnifiedWriteHalf::Plain(w))) => {
+            r.reunite(w).map_err(|e| format!("tls: {}", e))?
+        }
+        _ => return Err("tls: connection is not plain and active".to_string()),
+    };
+    let tls = match tokio::time::timeout(limit, acceptor.accept(tcp)).await {
+        Err(_elapsed) => return Err("tls: handshake timed out".to_string()),
+        Ok(Err(e)) => return Err(format!("tls: handshake failed: {}", e)),
+        Ok(Ok(tls)) => tls,
+    };
+    let (read, write) = UnifiedStream::ServerTls(tls).into_split();
+    *stream.lock().await = StreamState::WriteOnly(write);
+    Ok(read)
+}
+
 async fn tcp_read_loop(
     conn_id: u64,
     mut read_half: UnifiedReadHalf,
@@ -2297,14 +2361,57 @@ async fn tcp_read_loop(
 
     let mut buf = vec![0u8; ACTIVE_READ_BUFFER_SIZE];
     let idle_timeout = shared_state.idle_timeout();
+    let mut upgrades = shared_state.tls_upgrades_changed.subscribe();
 
     loop {
+        // An upgrade requested from an on-data callback is seen here, before the
+        // next read, so no bytes after that chunk are read as plain text.
+        let upgrade = shared_state.tls_upgrades.lock().await.remove(&conn_id);
+        if let Some(acceptor) = upgrade {
+            let stream = shared_state
+                .connections
+                .lock()
+                .await
+                .get(&conn_id)
+                .map(|e| e.stream.clone());
+            let Some(stream) = stream else { break };
+            let result = tokio::select! {
+                _ = cancel_token.cancelled() => {
+                    Err("tls: shutting down".to_string())
+                }
+                r = upgrade_active_to_tls(&stream, read_half, acceptor, TLS_HANDSHAKE_TIMEOUT) => r,
+            };
+            match result {
+                Ok(new_read) => {
+                    read_half = new_read;
+                    continue;
+                }
+                Err(reason) => {
+                    info!("tcp conn={} {}", conn_id, reason);
+                    let params = Value::Tuple(vec![
+                        Value::String(conn_id_str.clone()),
+                        Value::String(reason),
+                    ]);
+                    if let Err(e) = actor_handle
+                        .call_function("theater:simple/tcp-client.on-close".to_string(), params)
+                        .await
+                    {
+                        warn!("tcp conn={} on-close callback failed: {}", conn_id, e);
+                    }
+                    shutdown_write_half_and_remove(&shared_state, conn_id).await;
+                    break;
+                }
+            }
+        }
+
         tokio::select! {
+            biased;
             _ = cancel_token.cancelled() => {
                 info!("tcp read loop cancelled for conn={}", conn_id);
                 shutdown_write_half_and_remove(&shared_state, conn_id).await;
                 break;
             }
+            _ = upgrades.changed() => continue,
             // A read that yields no bytes within `idle_timeout` returns
             // Err(Elapsed); `None` => a plain read with no deadline. The timeout
             // is re-armed each iteration, so it is an inactivity timeout.
@@ -2789,6 +2896,7 @@ mod tests {
             client_connector: Some(connector.clone()),
             server_acceptor: Some(acceptor),
             client_auto_handshake: true,
+            server_auto_handshake: true,
         }));
 
         let st = Arc::new(SharedTcpState::new(None, None));
@@ -3192,5 +3300,95 @@ mod tests {
         assert_ne!(DataMode::Passive, DataMode::Active);
         assert_ne!(DataMode::Passive, DataMode::Once);
         assert_ne!(DataMode::Active, DataMode::Once);
+    }
+}
+
+#[cfg(test)]
+mod tls_upgrade_tests {
+    use super::*;
+    use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName};
+    use std::time::Duration;
+    use tokio::io::AsyncReadExt;
+    use tokio::net::TcpListener;
+
+    fn tls_pair() -> (tokio_rustls::TlsAcceptor, tokio_rustls::TlsConnector) {
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+        let cert = rcgen::generate_simple_self_signed(vec!["localhost".to_string()]).unwrap();
+        let der = CertificateDer::from(cert.cert.der().to_vec());
+        let key = PrivateKeyDer::try_from(cert.key_pair.serialize_der()).unwrap();
+        let server = rustls::ServerConfig::builder()
+            .with_no_client_auth()
+            .with_single_cert(vec![der.clone()], key)
+            .unwrap();
+        let mut roots = rustls::RootCertStore::empty();
+        roots.add(der).unwrap();
+        let client = rustls::ClientConfig::builder()
+            .with_root_certificates(roots)
+            .with_no_client_auth();
+        (
+            tokio_rustls::TlsAcceptor::from(Arc::new(server)),
+            tokio_rustls::TlsConnector::from(Arc::new(client)),
+        )
+    }
+
+    /// An active-mode connection: read half loose, write half in the state.
+    async fn active_pair() -> (UnifiedReadHalf, Arc<Mutex<StreamState>>, TcpStream) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let client = TcpStream::connect(listener.local_addr().unwrap())
+            .await
+            .unwrap();
+        let (sock, _) = listener.accept().await.unwrap();
+        let (r, w) = UnifiedStream::Plain(sock).into_split();
+        (r, Arc::new(Mutex::new(StreamState::WriteOnly(w))), client)
+    }
+
+    #[tokio::test]
+    async fn upgrades_both_directions() {
+        let (acceptor, connector) = tls_pair();
+        let (read, state, client) = active_pair().await;
+        let name = ServerName::try_from("localhost").unwrap();
+        let client = tokio::spawn(async move {
+            let mut tls = connector.connect(name, client).await.unwrap();
+            tls.write_all(b"ping").await.unwrap();
+            let mut buf = [0u8; 4];
+            tls.read_exact(&mut buf).await.unwrap();
+            buf
+        });
+        let mut read = upgrade_active_to_tls(&state, read, acceptor, Duration::from_secs(5))
+            .await
+            .unwrap();
+        assert_eq!(state.lock().await.is_tls(), Some(true));
+        let mut buf = [0u8; 4];
+        read.read_exact(&mut buf).await.unwrap();
+        assert_eq!(&buf, b"ping");
+        if let StreamState::WriteOnly(w) = &mut *state.lock().await {
+            w.write_all(b"pong").await.unwrap();
+            w.flush().await.unwrap();
+        }
+        assert_eq!(&client.await.unwrap(), b"pong");
+    }
+
+    #[tokio::test]
+    async fn silent_client_times_out() {
+        let (acceptor, _) = tls_pair();
+        let (read, state, _client) = active_pair().await;
+        let err = upgrade_active_to_tls(&state, read, acceptor, Duration::from_millis(100))
+            .await
+            .err()
+            .unwrap();
+        assert!(err.contains("timed out"), "{}", err);
+        assert_eq!(state.lock().await.is_tls(), None);
+    }
+
+    #[tokio::test]
+    async fn plain_bytes_fail_the_handshake() {
+        let (acceptor, _) = tls_pair();
+        let (read, state, mut client) = active_pair().await;
+        client.write_all(b"RSET\r\n").await.unwrap();
+        let err = upgrade_active_to_tls(&state, read, acceptor, Duration::from_secs(5))
+            .await
+            .err()
+            .unwrap();
+        assert!(err.contains("handshake failed"), "{}", err);
     }
 }

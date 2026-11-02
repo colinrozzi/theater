@@ -88,11 +88,20 @@ interface tcp {
         close-listener: func(listener-id: string) -> result<_, string>
 
         // Upgrade an existing plain TCP connection to TLS as the server side.
-        // Uses the server_tls cert/key configured on this handler. The actor
+        // Uses the server_tls cert/key configured on this handler, which needs
+        // auto_handshake = false or accepted connections are already TLS. The actor
         // is expected to have already exchanged whatever protocol greeting
         // negotiates the upgrade (e.g. SMTP STARTTLS, IMAP STARTTLS).
         // After this returns Ok, send/receive on this connection-id flow
         // over TLS — same connection-id, encrypted bytes.
+        //
+        // On a passive connection this blocks until the handshake is done. On
+        // an active one it returns at once and the read loop does the
+        // handshake, so the actor never waits on a client: called from on-data,
+        // the next on-data is decrypted. Bytes in chunks already delivered were
+        // plain text, and the actor must discard anything it buffered. A
+        // handshake that fails or takes over 10s ends in on-close with a reason
+        // starting "tls:". Sends during the handshake fail.
         upgrade-to-tls-server: func(connection-id: string) -> result<_, string>
 
         // Upgrade an existing plain TCP connection to TLS as the client side.

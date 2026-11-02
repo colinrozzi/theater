@@ -71,6 +71,10 @@ pub struct TlsContext {
     /// connector is built but used only by explicit upgrade-to-tls-client
     /// calls (STARTTLS-style protocols).
     pub client_auto_handshake: bool,
+    /// Whether to TLS-handshake automatically on accept. False means the
+    /// acceptor is built but used only by explicit upgrade-to-tls-server
+    /// calls (STARTTLS-style protocols).
+    pub server_auto_handshake: bool,
 }
 
 impl TlsContext {
@@ -116,6 +120,11 @@ impl TlsContext {
                 client_connector,
                 server_acceptor,
                 client_auto_handshake,
+                server_auto_handshake: config
+                    .server_tls
+                    .as_ref()
+                    .map(|c| c.auto_handshake)
+                    .unwrap_or(true),
             }))
         }
     }
