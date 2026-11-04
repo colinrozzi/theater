@@ -233,7 +233,8 @@ A new low-level handler is the *actor-facing* API; the runtime is the engine.
 
 Everything else recasts as a *consumer* of this substrate:
 
-- `subscribe-to-actor` = a bare `monitor(subject)` (now full-chain, `filter = all`).
+- `subscribe-to-actor` = `monitor-filtered(subject, any)` (full chain). A bare
+  `monitor(subject)` is terminal-only (ticket 0053 T3).
 - The `handle-actor-error` / `handle-actor-exit` / `handle-actor-external-stop`
   callback trio → filtered monitors on the terminal event → **the
   lifecycle-callback-consolidation** collapses into this automatically.

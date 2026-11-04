@@ -144,15 +144,15 @@ impl StateChain {
 
     /// Register a direct mpsc subscriber.
     ///
-    /// The chain dispatches each new event to `tx` via `try_send` as
-    /// `(actor_id, event)`. The subscriber must drain its receiver fast
-    /// enough (or wrap it in a drainer task) to avoid dropped events
-    /// under burst load. See type docs for the back-pressure / best-effort
-    /// tradeoff.
+    /// The chain dispatches each new event to `tx` with `.send().await` as
+    /// `(actor_id, event)`. Delivery is strict: drain promptly, or a slow
+    /// reader slows every actor it watches. See the type docs for how a
+    /// subscriber can choose best-effort instead.
     ///
     /// Termination is signaled by the actor's terminal chain event
-    /// (`WasmError` for crashes, `"shutdown"` for normal exit), followed
-    /// by the channel closing — no separate error path.
+    /// (`Lifecycle(Terminated { cause })`, see
+    /// [`crate::subscription::any_termination`]), followed by the channel
+    /// closing — no separate error path.
     pub fn add_subscriber(&mut self, tx: Sender<(TheaterId, ChainEvent)>) {
         self.subscribers.push(tx);
     }
