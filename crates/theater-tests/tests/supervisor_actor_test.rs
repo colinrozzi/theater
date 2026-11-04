@@ -17,7 +17,7 @@ use std::time::Duration;
 use theater::config::actor_manifest::{HandlerConfig, ManifestConfig};
 use theater::config::inheritance::{HandlerInheritance, HandlerPermissionPolicy};
 use theater::handler::HandlerRegistry;
-use theater::messages::{default_init_state, TheaterCommand};
+use theater::messages::{default_init_state, SubscribeReply, TheaterCommand};
 use theater::pack_bridge::{Value, ValueType};
 use theater::utils::ResourceCache;
 use theater_handler_lifecycle::LifecycleHandler;
@@ -308,7 +308,11 @@ async fn cascade_ripples_along_lifecycle_links() {
 
 /// An `option<list<u8>>` init state carrying an actor id as a utf-8 string.
 fn id_init_state(id: theater::id::TheaterId) -> Value {
-    let s = id.to_string();
+    str_init_state(&id.to_string())
+}
+
+/// An `option<list<u8>>` init state carrying `s` as utf-8.
+fn str_init_state(s: &str) -> Value {
     Value::Option {
         inner_type: ValueType::List(Box::new(ValueType::U8)),
         value: Some(Box::new(Value::List {
@@ -361,6 +365,29 @@ async fn monitor_received(
     theater_tx: &mpsc::UnboundedSender<TheaterCommand>,
     actor: theater::id::TheaterId,
 ) -> Option<String> {
+    match monitor_field(theater_tx, actor, "received").await? {
+        Value::String(s) => Some(s),
+        _ => None,
+    }
+}
+
+/// Read the monitor-test actor's `count` state field (how many events were
+/// delivered to `handle-actor-event`).
+async fn monitor_count(
+    theater_tx: &mpsc::UnboundedSender<TheaterCommand>,
+    actor: theater::id::TheaterId,
+) -> Option<u32> {
+    match monitor_field(theater_tx, actor, "count").await? {
+        Value::U32(n) => Some(n),
+        _ => None,
+    }
+}
+
+async fn monitor_field(
+    theater_tx: &mpsc::UnboundedSender<TheaterCommand>,
+    actor: theater::id::TheaterId,
+    field: &str,
+) -> Option<Value> {
     let (tx, rx) = oneshot::channel();
     theater_tx
         .send(TheaterCommand::GetActorState {
@@ -370,14 +397,9 @@ async fn monitor_received(
         .ok()?;
     let state = rx.await.ok()?.ok()?;
     match state {
-        Value::Record { fields, .. } => fields.into_iter().find_map(|(n, v)| {
-            if n == "received" {
-                if let Value::String(s) = v {
-                    return Some(s);
-                }
-            }
-            None
-        }),
+        Value::Record { fields, .. } => fields
+            .into_iter()
+            .find_map(|(n, v)| (n == field).then_some(v)),
         _ => None,
     }
 }
@@ -493,8 +515,9 @@ async fn monitor_delivers_lifecycle_events_to_wasm() {
     }
 }
 
-/// End-to-end proof that `monitor` delivers a subject's `wasm` (function-call)
-/// events — NOT only lifecycle terminals. This is the exact scenario wisp-dev
+/// End-to-end proof that `monitor-filtered(subject, any)` delivers a subject's
+/// `wasm` (function-call) events — NOT only lifecycle terminals (a bare
+/// `monitor` is terminal-only). This is the exact scenario wisp-dev
 /// reported as "rpc.call is chain-silent": a function invocation on the subject
 /// goes through its operation loop (`CallFunctionPack` -> `execute_call_pack`),
 /// which records `WasmCall` + `WasmResult` on the subject's chain; those
@@ -514,14 +537,15 @@ async fn monitor_delivers_wasm_call_events_to_wasm() {
         std::fs::read(wasm_path("state-test", "state_test_actor.wasm")).expect("read subject wasm");
     let subject = spawn_with_parent(&theater_tx, subject_wasm, "w-subject", None).await;
 
-    // Monitor: handed the subject id; on init it calls monitor(subject).
+    // Monitor: handed `all:<subject id>`; on init it calls
+    // monitor-filtered(subject, any), the whole chain.
     let monitor_wasm = std::fs::read(wasm_path("monitor-test", "monitor_test_actor.wasm"))
         .expect("read monitor wasm");
     let monitor = spawn_with_init(
         &theater_tx,
         monitor_wasm,
         "w-monitor",
-        id_init_state(subject),
+        str_init_state(&format!("all:{subject}")),
     )
     .await;
     // Let the subscription register on the subject's chain.
@@ -564,6 +588,280 @@ async fn monitor_delivers_wasm_call_events_to_wasm() {
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
+}
+
+/// Get an actor's handle, to call its exports directly.
+async fn actor_handle(
+    theater_tx: &mpsc::UnboundedSender<TheaterCommand>,
+    actor: theater::id::TheaterId,
+) -> theater::actor::handle::ActorHandle {
+    let (tx, rx) = oneshot::channel();
+    theater_tx
+        .send(TheaterCommand::GetActorHandle {
+            actor_id: actor,
+            response_tx: tx,
+        })
+        .expect("send GetActorHandle");
+    rx.await
+        .expect("handle channel closed")
+        .expect("actor handle")
+}
+
+/// A bare `monitor` is terminal-only (ticket 0053 T3): a busy subject causes no
+/// deliveries while it lives, and exactly one when it dies.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn plain_monitor_is_terminal_only() {
+    let _ = tracing_subscriber::fmt().with_env_filter("info").try_init();
+    let temp = tempfile::tempdir().expect("temp dir");
+    std::env::set_var("THEATER_HOME", temp.path());
+
+    let theater_tx = start_runtime();
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let subject_wasm =
+        std::fs::read(wasm_path("state-test", "state_test_actor.wasm")).expect("read subject wasm");
+    let subject = spawn_with_parent(&theater_tx, subject_wasm, "q-subject", None).await;
+    let monitor_wasm = std::fs::read(wasm_path("monitor-test", "monitor_test_actor.wasm"))
+        .expect("read monitor wasm");
+    let monitor = spawn_with_init(
+        &theater_tx,
+        monitor_wasm,
+        "q-monitor",
+        id_init_state(subject),
+    )
+    .await;
+
+    let handle = actor_handle(&theater_tx, subject).await;
+    for _ in 0..1000 {
+        handle
+            .call_function(
+                "theater:simple/state-test.increment".to_string(),
+                Value::Tuple(vec![]),
+            )
+            .await
+            .expect("increment call failed");
+    }
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(monitor_count(&theater_tx, monitor).await, Some(0));
+
+    stop_actor(&theater_tx, subject).await;
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while monitor_received(&theater_tx, monitor).await.as_deref() != Some("terminated") {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "monitor never received the terminated event"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(monitor_count(&theater_tx, monitor).await, Some(1));
+}
+
+/// Two actors that monitor each other with a bare `monitor` stay responsive
+/// (ticket 0053 T3). With a whole-chain monitor, each delivery emitted events
+/// that were delivered back, until both channels filled and both handlers
+/// waited on each other (theater#235 §1.2).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn mutual_plain_monitors_stay_responsive() {
+    let _ = tracing_subscriber::fmt().with_env_filter("info").try_init();
+    let temp = tempfile::tempdir().expect("temp dir");
+    std::env::set_var("THEATER_HOME", temp.path());
+
+    let theater_tx = start_runtime();
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let monitor_wasm = std::fs::read(wasm_path("monitor-test", "monitor_test_actor.wasm"))
+        .expect("read monitor wasm");
+    let no_subject = Value::Option {
+        inner_type: ValueType::List(Box::new(ValueType::U8)),
+        value: None,
+    };
+    let a = spawn_with_init(&theater_tx, monitor_wasm.clone(), "x-a", no_subject.clone()).await;
+    let b = spawn_with_init(&theater_tx, monitor_wasm, "x-b", no_subject).await;
+    let ha = actor_handle(&theater_tx, a).await;
+    let hb = actor_handle(&theater_tx, b).await;
+    let watch = "theater:simple/monitor-test.watch".to_string();
+    ha.call_function(
+        watch.clone(),
+        Value::Tuple(vec![Value::String(b.to_string())]),
+    )
+    .await
+    .expect("a watches b");
+    hb.call_function(watch, Value::Tuple(vec![Value::String(a.to_string())]))
+        .await
+        .expect("b watches a");
+
+    // Every call into `a` adds events to its chain; none may reach `b`.
+    for _ in 0..200 {
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            ha.call_function(
+                "theater:simple/actor.get-state".to_string(),
+                Value::Tuple(vec![]),
+            ),
+        )
+        .await
+        .expect("a stopped answering")
+        .expect("call into a failed");
+    }
+    let count = |id| {
+        let tx = theater_tx.clone();
+        async move {
+            tokio::time::timeout(Duration::from_secs(5), monitor_count(&tx, id))
+                .await
+                .expect("stopped answering")
+        }
+    };
+    assert_eq!(count(a).await, Some(0));
+    assert_eq!(count(b).await, Some(0));
+}
+
+/// Send `SubscribeToActor` with a reply channel and return the receiver for
+/// the reply (not yet awaited, so a test can queue commands back to back).
+fn subscribe(
+    theater_tx: &mpsc::UnboundedSender<TheaterCommand>,
+    actor_id: theater::id::TheaterId,
+    event_tx: mpsc::Sender<(theater::id::TheaterId, theater::chain::ChainEvent)>,
+) -> oneshot::Receiver<SubscribeReply> {
+    let (tx, rx) = oneshot::channel();
+    theater_tx
+        .send(TheaterCommand::SubscribeToActor {
+            actor_id,
+            event_tx,
+            response_tx: Some(tx),
+        })
+        .expect("send SubscribeToActor");
+    rx
+}
+
+/// `SubscribeToActor` says whether the subscription took (ticket 0053 T1):
+/// an unknown id is `NoSuchActor`; a live actor is `Subscribed`, and its
+/// terminal event then arrives exactly once.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn subscribe_to_actor_replies_and_delivers_one_terminal() {
+    let _ = tracing_subscriber::fmt().with_env_filter("info").try_init();
+    let temp = tempfile::tempdir().expect("temp dir");
+    std::env::set_var("THEATER_HOME", temp.path());
+
+    let theater_tx = start_runtime();
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let (event_tx, mut event_rx) = mpsc::channel(1024);
+    let reply = subscribe(
+        &theater_tx,
+        theater::id::TheaterId::generate(),
+        event_tx.clone(),
+    );
+    assert_eq!(reply.await.expect("reply"), SubscribeReply::NoSuchActor);
+
+    let subject_wasm =
+        std::fs::read(wasm_path("state-test", "state_test_actor.wasm")).expect("read subject wasm");
+    let subject = spawn_with_parent(&theater_tx, subject_wasm, "s-subject", None).await;
+    let reply = subscribe(&theater_tx, subject, event_tx);
+    assert_eq!(reply.await.expect("reply"), SubscribeReply::Subscribed);
+
+    stop_actor(&theater_tx, subject).await;
+
+    // The chain is dropped when the actor is finalized, which closes the
+    // channel; count the terminal events seen until then.
+    let terminated = theater::subscription::any_termination();
+    let mut terminals = 0;
+    loop {
+        match tokio::time::timeout(Duration::from_secs(10), event_rx.recv()).await {
+            Ok(Some((_, event))) => {
+                if let Some(payload) = theater::events::decode_chain_event_payload(&event.data) {
+                    if terminated.matches(&Value::from(payload)) {
+                        terminals += 1;
+                    }
+                }
+            }
+            Ok(None) => break,
+            Err(_) => panic!("subscriber channel did not close after the stop"),
+        }
+    }
+    assert_eq!(terminals, 1, "exactly one terminal event");
+}
+
+/// A subscription that arrives after the stop decision is refused with the
+/// cause, instead of being added to a chain whose terminal was already sent.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn subscribe_during_teardown_is_already_terminated() {
+    let _ = tracing_subscriber::fmt().with_env_filter("info").try_init();
+    let temp = tempfile::tempdir().expect("temp dir");
+    std::env::set_var("THEATER_HOME", temp.path());
+
+    let theater_tx = start_runtime();
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let subject_wasm =
+        std::fs::read(wasm_path("state-test", "state_test_actor.wasm")).expect("read subject wasm");
+    let subject = spawn_with_parent(&theater_tx, subject_wasm, "t-subject", None).await;
+
+    // Queue the stop and the subscribe back to back. The runtime handles them
+    // in order, and the actor stays registered (as `Stopping`) until its
+    // teardown completes, which is reported by a later command.
+    let (stop_tx, _stop_rx) = oneshot::channel();
+    theater_tx
+        .send(TheaterCommand::StopActor {
+            actor_id: subject,
+            response_tx: stop_tx,
+        })
+        .expect("send StopActor");
+    let (event_tx, _event_rx) = mpsc::channel(16);
+    let reply = subscribe(&theater_tx, subject, event_tx);
+    assert_eq!(
+        reply.await.expect("reply"),
+        SubscribeReply::AlreadyTerminated(theater::events::lifecycle::TerminationCause::Stopped)
+    );
+}
+
+/// `monitor` of an unknown id returns `err` to the actor (ticket 0053 T1).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn monitor_of_unknown_actor_is_an_error() {
+    let _ = tracing_subscriber::fmt().with_env_filter("info").try_init();
+    let temp = tempfile::tempdir().expect("temp dir");
+    std::env::set_var("THEATER_HOME", temp.path());
+
+    let theater_tx = start_runtime();
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let monitor_wasm = std::fs::read(wasm_path("monitor-test", "monitor_test_actor.wasm"))
+        .expect("read monitor wasm");
+    let monitor = spawn_with_init(
+        &theater_tx,
+        monitor_wasm,
+        "u-monitor",
+        id_init_state(theater::id::TheaterId::generate()),
+    )
+    .await;
+    assert_eq!(
+        monitor_received(&theater_tx, monitor).await.as_deref(),
+        Some("monitor-err: no such actor")
+    );
+}
+
+/// `link` of an unknown id is refused, and the caller keeps running: there is
+/// no subscription to fire, and nothing stops it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn link_of_unknown_actor_keeps_the_caller_running() {
+    let _ = tracing_subscriber::fmt().with_env_filter("info").try_init();
+    let temp = tempfile::tempdir().expect("temp dir");
+    std::env::set_var("THEATER_HOME", temp.path());
+
+    let theater_tx = start_runtime();
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let linker_wasm =
+        std::fs::read(wasm_path("link-test", "link_test_actor.wasm")).expect("read link wasm");
+    let linker = spawn_with_init(
+        &theater_tx,
+        linker_wasm,
+        "u-linker",
+        id_init_state(theater::id::TheaterId::generate()),
+    )
+    .await;
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    assert!(is_alive(&theater_tx, linker).await, "linker still running");
 }
 
 /// A subject that completes normally does not take its linked actor with it
@@ -651,21 +949,4 @@ async fn link_fires_on_failed() {
         );
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
-}
-
-/// Get an actor's handle, to call its exports directly.
-async fn actor_handle(
-    theater_tx: &mpsc::UnboundedSender<TheaterCommand>,
-    actor: theater::id::TheaterId,
-) -> theater::actor::handle::ActorHandle {
-    let (tx, rx) = oneshot::channel();
-    theater_tx
-        .send(TheaterCommand::GetActorHandle {
-            actor_id: actor,
-            response_tx: tx,
-        })
-        .expect("send GetActorHandle");
-    rx.await
-        .expect("handle channel closed")
-        .expect("actor handle")
 }

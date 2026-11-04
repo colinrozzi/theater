@@ -7,7 +7,7 @@
 //! - [`link`] / `unlink` — **fate-sharing**: when the subject terminates
 //!   abnormally (anything but `Completed`), the linking actor is stopped (cause
 //!   `PeerKilled`).
-//! - [`monitor`] / `unmonitor` — **watching**: the subject's whole chain is
+//! - [`monitor`] / `unmonitor` — **watching**: the subject's terminal event is
 //!   delivered to the actor's `handle-actor-event` export.
 //!
 //! Both are the *same* mechanism: `link`/`monitor` subscribe this actor's
@@ -18,11 +18,12 @@
 //! export. The runtime is not in this path; fate and watching both flow chain →
 //! handler → (stop | wasm).
 //!
-//! `link` keys on an abnormal termination (`abnormal_termination()`); a bare `monitor` watches the **whole chain**
-//! (a match-all `Pattern`, so every chain event of the subject is delivered).
-//! [`monitor-filtered`](Handler) lets a caller supply its own `packr_abi::Pattern`
-//! (crossing the wasm↔host boundary as a serialized `value`) to narrow the
-//! delivered stream — otherwise identical to `monitor`.
+//! `link` keys on an abnormal termination (`abnormal_termination()`), and a
+//! bare `monitor` on any termination, so the watcher's wasm runs once, when the
+//! subject dies. [`monitor-filtered`](Handler) lets a caller supply its own
+//! `packr_abi::Pattern` (crossing the wasm↔host boundary as a serialized
+//! `value`) — e.g. `Pattern::any()` for the whole chain — otherwise identical
+//! to `monitor`.
 
 use std::collections::HashMap;
 use std::future::Future;
@@ -36,11 +37,12 @@ use theater::chain::ChainEvent;
 use theater::events::decode_chain_event_payload;
 use theater::handler::{Handler, HandlerContext, SharedActorInstance};
 use theater::id::TheaterId;
-use theater::messages::TheaterCommand;
+use theater::messages::{SubscribeReply, TheaterCommand};
 use theater::shutdown::ShutdownReceiver;
-use theater::subscription::{abnormal_termination, Target};
+use theater::subscription::{abnormal_termination, any_termination, Target};
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::oneshot;
 
 use theater::pack_bridge::{
     pact_result_host_fn, parse_pact, InterfaceImpl, Pattern, TypeHash, Value, ValueType,
@@ -190,12 +192,14 @@ impl Handler for LifecycleHandler {
                 }
             };
 
+            let terminated = any_termination();
             loop {
                 tokio::select! {
                     Some((subject_id, event)) = event_rx.recv() => {
-                        // The Pattern does all filtering now — a bare `monitor`
-                        // watches the whole chain (match-all), `monitor-filtered`
-                        // narrows it. Every delivered event is decoded and matched.
+                        // The Pattern does all filtering: `link` and a bare
+                        // `monitor` key on termination, `monitor-filtered` on the
+                        // caller's pattern. Every delivered event is decoded and
+                        // matched.
                         let value = match decode_chain_event_payload(&event.data) {
                             Some(payload) => Value::from(payload),
                             None => continue,
@@ -213,6 +217,13 @@ impl Handler for LifecycleHandler {
                                 })
                                 .unwrap_or_default()
                         };
+                        // The terminal event is the subject's last: forget it,
+                        // so a later link/monitor of it asks the runtime again
+                        // (and gets `err`) instead of silently reusing a dead
+                        // subscription.
+                        if terminated.matches(&value) {
+                            subs.lock().unwrap().remove(&subject_id);
+                        }
                         for target in matched {
                             match target {
                                 Target::StopSelf => {
@@ -318,12 +329,15 @@ impl Handler for LifecycleHandler {
                         abnormal_termination(),
                         Target::StopSelf,
                     )
+                    .await
                 }
             }),
         );
         // monitor(subject) -> result<_, string>
-        // A bare monitor watches the WHOLE chain: a match-all `Pattern::any()`
-        // filter, so every chain event of the subject is delivered.
+        // A bare monitor is terminal-only: the watcher's wasm runs once, when
+        // the subject dies, so deliveries can't cause more deliveries (two
+        // actors monitoring each other can't feed each other events). For the
+        // whole chain, use `monitor-filtered(subject, any)`.
         imports.define(
             "theater:simple/lifecycle",
             "monitor",
@@ -337,15 +351,16 @@ impl Handler for LifecycleHandler {
                         event_tx,
                         &subs,
                         &self_id,
-                        vec![Pattern::any()],
+                        vec![any_termination()],
                         Target::DeliverToWasm,
                     )
+                    .await
                 }
             }),
         );
         // monitor-filtered(subject, filter) -> result<_, string>
         // Like `monitor`, but the caller supplies the match filter (a serialized
-        // `packr_abi::Pattern`) instead of the whole-chain `Pattern::any()`.
+        // `packr_abi::Pattern`) instead of the terminal-only `any_termination()`.
         imports.define(
             "theater:simple/lifecycle",
             "monitor-filtered",
@@ -363,6 +378,7 @@ impl Handler for LifecycleHandler {
                         vec![filter],
                         Target::DeliverToWasm,
                     )
+                    .await
                 }
             }),
         );
@@ -429,8 +445,11 @@ impl Handler for LifecycleHandler {
 
 /// Record a `{filter, target}` for the caller against `subject`, subscribing
 /// this handler to the subject's chain on the first subscription to it.
+///
+/// The first subscription waits for the runtime's [`SubscribeReply`]: an unknown
+/// or already-terminated subject is an `err`, and the local entry is removed.
 #[allow(clippy::too_many_arguments)]
-fn add_subscription(
+async fn add_subscription(
     id: TheaterId,
     input: &Value,
     theater_tx: &UnboundedSender<TheaterCommand>,
@@ -450,10 +469,24 @@ fn add_subscription(
         first
     };
     if first {
-        let _ = theater_tx.send(TheaterCommand::SubscribeToActor {
+        let (response_tx, response_rx) = oneshot::channel();
+        let sent = theater_tx.send(TheaterCommand::SubscribeToActor {
             actor_id: subject,
             event_tx,
+            response_tx: Some(response_tx),
         });
+        let error = match (sent, response_rx.await) {
+            (Ok(()), Ok(SubscribeReply::Subscribed)) => None,
+            (Ok(()), Ok(SubscribeReply::NoSuchActor)) => Some("no such actor".to_string()),
+            (Ok(()), Ok(SubscribeReply::AlreadyTerminated(cause))) => {
+                Some(format!("already terminated: {cause}"))
+            }
+            _ => Some("runtime unavailable".to_string()),
+        };
+        if let Some(error) = error {
+            subs.lock().unwrap().remove(&subject);
+            return Err(Value::String(error));
+        }
     }
     Ok(Value::Tuple(vec![]))
 }

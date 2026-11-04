@@ -103,11 +103,10 @@ stream. **Stopping a parent does not stop its children.**
 
 ### 2.4 Restart
 
-There is none. `RestartActor` (`theater/src/messages.rs:310`, rt:320) reaches
-`restart_actor` (rt:1157), which always returns "Actor restart not
-implemented". Nothing sends the command. The current direction is to remove it.
-Restarting is a supervisor spawning again: a new id, starting from its
-original init value.
+There is none in the runtime. The unused `RestartActor` command, which only
+ever returned "Actor restart not implemented", was removed (ticket 0053 T5,
+2026-11-03). Restarting is a supervisor spawning again: a new id, starting
+from its original init value.
 
 ## 3. Watching other actors
 
@@ -139,7 +138,7 @@ on that actor.
 | Tool | Gives | Notes |
 |---|---|---|
 | `TheaterRuntime::add_global_subscription(tx)` (rt:280) | Every chain event of **every actor spawned after the call** | Added as an ordinary chain subscriber (rt:851), so it is strict (§3.1): drain it quickly. theater-cli uses it (`theater-cli/src/commands/spawn.rs:179`). |
-| `TheaterCommand::SubscribeToActor { actor_id, event_tx }` (rt:569) | One actor's chain, from now on | **No reply.** If the actor isn't running it only logs (rt:575), so the caller can't tell. |
+| `TheaterCommand::SubscribeToActor { actor_id, event_tx, response_tx }` (rt:569) | One actor's chain, from now on | Optional reply (`SubscribeReply`): `Subscribed`, `NoSuchActor`, or `AlreadyTerminated(cause)` if the actor is already `Stopping` (its terminal was emitted; the subscriber isn't added). Decided on the command loop, where the terminal is emitted and the chain removed, so a subscriber either sees the terminal or is told why not. (Ticket 0053 T1, 2026-11-03; tests in `theater-tests/tests/supervisor_actor_test.rs`.) |
 | `TheaterCommand::SubscribeToSpawns` (`messages.rs:379`) | One row per spawn, with the parent id | |
 
 To learn when any actor dies, a host subscribes globally and keeps only events
@@ -154,34 +153,41 @@ event **in the host** (`theater-handler-lifecycle/src/lib.rs`).
 | Call | Pattern | On a match |
 |---|---|---|
 | `link(subject)` (l.306) | `abnormal_termination()` (l.317): every cause but `Completed` | The caller is stopped with `PeerKilled`. Directed: `A link B` stops A when B dies, not the reverse. A subject that completes normally doesn't stop A (ticket 0053 T4, 2026-11-03; tests `link_does_not_fire_on_completed`, `link_fires_on_failed`) |
-| `monitor(subject)` (l.328) | `Pattern::any()`: **the whole chain** (l.339) | `handle-actor-event(subject, event-type, data)` for **every event** |
+| `monitor(subject)` (l.328) | `any_termination()` (l.339): **terminal only** | `handle-actor-event(subject, event-type, data)` once, when the subject dies |
 | `monitor-filtered(subject, pattern)` (l.350) | The caller's pattern | `handle-actor-event` for matching events only |
 
-**To be told when an actor dies, use `monitor-filtered(subject,
-any_termination())`.** Matching happens in the host, so the watcher's wasm runs
-once, at the death. The cause is in `data`, encoded as pack bytes.
+`link`, `monitor` and `monitor-filtered` return `err("no such actor")` or
+`err("already terminated: <cause>")` when the runtime refuses the
+subscription (above), and keep no local entry. When the subject's terminal
+event arrives, the handler forgets that subject, so a later call on it asks
+the runtime again. (Ticket 0053 T1, 2026-11-03.)
 
-A bare `monitor` is hazardous:
+**To be told when an actor dies, use `monitor(subject)`.** Matching happens in
+the host, so the watcher's wasm runs once, at the death. The cause is in
+`data`, encoded as pack bytes. (Terminal-only since ticket 0053 T3,
+2026-11-03; before that a bare `monitor` used `Pattern::any()`. Tests:
+`plain_monitor_is_terminal_only`, `mutual_plain_monitors_stay_responsive` in
+`theater-tests/tests/supervisor_actor_test.rs`.)
 
-- **It floods.** Every event of the subject becomes a wasm call in the watcher.
-  A watcher's memory can grow with the *subject's* activity.
-- **Two actors that monitor each other deadlock** on the first call. Each
-  delivery emits events on the watcher, which go back to the other side, until
-  both channels are full and each handler waits on the other. A self-monitor
-  does the same with one actor. (Reproduced on a private `theater-repl`
-  daemon; see theater#235 §1.2.)
+A broad `monitor-filtered` (e.g. `Pattern::any()`, the whole chain; the
+guest preset is `theater_guest::filters::everything()`) is hazardous:
+
+- **It floods.** Every matching event of the subject becomes a wasm call in
+  the watcher. A watcher's memory can grow with the *subject's* activity.
+- **Two actors that watch each other this way deadlock** on the first call.
+  Each delivery emits events on the watcher, which go back to the other side,
+  until both channels are full and each handler waits on the other. A
+  self-monitor does the same with one actor. (Reproduced on a private
+  `theater-repl` daemon with a whole-chain `monitor`; see theater#235 §1.2.)
 
 ## 4. Known gaps
 
-- `SubscribeToActor` has no reply (rt:569-578), so `link` and `monitor` of a
-  dead or unknown id return `ok` and never fire, and an actor that dies while
-  the subscription is being set up is missed. Planned fix: reply with
-  subscribed / no such actor / already terminated with the cause.
-- The doc comment on `add_global_subscription` (rt:274-279) and on
-  `add_subscriber` (`theater/src/chain/mod.rs:147`) say delivery uses
-  `try_send` and drops events. The code waits (`.send().await`).
-- The `RestartActor` doc says it is "only available to the actor's
-  supervisor"; there is no supervisor concept in the runtime.
+- `initiate_teardown` emits the terminal event on the runtime's command loop,
+  and chain delivery is strict (§3.1), so one subscriber whose channel is full
+  stalls every runtime command until it drains (rt:1094; checked at
+  `c1941b60`, 2026-11-03). Since T1, `link` / `monitor` wait for the
+  runtime's reply inside the host call, so a watcher whose lifecycle channel
+  is full while the runtime stops one of its subjects waits too.
 - A full mailbox or a slow channel accept stalls the router for everyone
   (§1.1, §1.4).
 - Deferred request replies don't work, and request failures look like empty

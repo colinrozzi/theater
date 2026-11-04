@@ -2,15 +2,15 @@
 //!
 //! Convenience constructors for the common `monitor-filtered` filters, built on
 //! top of the raw structural matcher [`Pattern`]. A bare `monitor(subject)`
-//! watches the subject's **whole chain**; `monitor-filtered(subject, filter)`
-//! narrows that stream to just the events the watcher cares about. `filter` is a
+//! delivers only the subject's terminal event; `monitor-filtered(subject,
+//! filter)` delivers whichever events match `filter` instead. `filter` is a
 //! serialized `packr_abi::Pattern` — a [`Value`] the host decodes with its
 //! `TryFrom<Value>` — so these helpers return a ready-to-pass [`Value`].
 //!
 //! ```ignore
 //! use theater_guest::filters;
-//! // Only wake me when the subject terminates:
-//! monitor_filtered(subject, filters::terminations());
+//! // Every lifecycle event of the subject:
+//! monitor_filtered(subject, filters::lifecycle());
 //! ```
 //!
 //! The shapes mirror the host's `any_termination()` / `any_lifecycle_event()`:
@@ -36,4 +36,11 @@ pub fn terminations() -> Value {
 /// `any_lifecycle_event()`.
 pub fn lifecycle() -> Value {
     Value::from(Pattern::variant("Lifecycle", [Pattern::any()]))
+}
+
+/// A filter matching **every** chain event of the subject (host calls, wasm
+/// calls, lifecycle). The watcher's wasm then runs for each of the subject's
+/// events; use it only when the whole chain is what you want.
+pub fn everything() -> Value {
+    Value::from(Pattern::any())
 }

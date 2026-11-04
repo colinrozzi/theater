@@ -10,7 +10,7 @@ use crate::actor::types::{ActorControl, ActorError, ActorInfo, ActorOperation};
 use crate::chain::ChainEvent;
 use crate::handler::HandlerRegistry;
 use crate::id::TheaterId;
-use crate::messages::{ActorMessage, ActorStatus, ActorTreeRow, TheaterCommand};
+use crate::messages::{ActorMessage, ActorStatus, ActorTreeRow, SubscribeReply, TheaterCommand};
 use crate::messages::{ChannelId, ChannelParticipant};
 use crate::pack_bridge::{CachingPackRuntime, MetadataWithHashes, Value};
 use crate::replay::ReplayHandler;
@@ -273,10 +273,10 @@ impl<E: crate::executor::Spawn> TheaterRuntime<E> {
     /// Existing chains are NOT retroactively updated — for that, use
     /// `TheaterCommand::SubscribeToActor` per actor_id.
     ///
-    /// Each chain dispatches to this sender via `try_send`, so a backed-up
-    /// subscriber drops events with a warning but does not stall any actor.
-    /// Drain the receiver promptly (or via a drainer task with a local ring
-    /// buffer) to size for your tolerance.
+    /// Each chain dispatches to this sender with `.send().await`, so delivery
+    /// is strict: nothing is dropped, and a slow reader slows every actor it
+    /// watches, which here is every actor. Drain the receiver promptly (or
+    /// forward from a drainer task into your own queue).
     pub fn add_global_subscription(&mut self, tx: Sender<(TheaterId, ChainEvent)>) {
         self.global_subscribers.push(tx);
     }
@@ -317,20 +317,6 @@ impl<E: crate::executor::Spawn> TheaterRuntime<E> {
             };
             debug!("Runtime received command: {:?}", cmd.to_log());
             match cmd {
-                TheaterCommand::RestartActor {
-                    actor_id,
-                    response_tx,
-                } => {
-                    debug!("Restarting actor: {:?}", actor_id);
-                    match self.restart_actor(actor_id).await {
-                        Ok(_) => {
-                            let _ = response_tx.send(Ok(()));
-                        }
-                        Err(e) => {
-                            let _ = response_tx.send(Err(e));
-                        }
-                    }
-                }
                 TheaterCommand::GetActorState {
                     actor_id,
                     response_tx,
@@ -566,15 +552,32 @@ impl<E: crate::executor::Spawn> TheaterRuntime<E> {
                         error!("Failed to send actor status: {:?}", e);
                     }
                 }
-                TheaterCommand::SubscribeToActor { actor_id, event_tx } => {
+                TheaterCommand::SubscribeToActor {
+                    actor_id,
+                    event_tx,
+                    response_tx,
+                } => {
                     debug!("Subscribing to events for actor: {:?}", actor_id);
-                    if let Some(chain) = self.chains.get(&actor_id) {
-                        chain.write().await.add_subscriber(event_tx);
-                    } else {
-                        warn!(
-                            "SubscribeToActor: no chain for {:?} (actor not running)",
-                            actor_id
-                        );
+                    // Decided here, on the loop that emits the terminal event
+                    // (`initiate_teardown`) and removes the chain
+                    // (`finalize_actor`), so nothing is missed silently.
+                    let reply = match self.actors.get(&actor_id).map(|p| &p.status) {
+                        Some(ActorStatus::Stopping(cause)) => {
+                            SubscribeReply::AlreadyTerminated(cause.clone())
+                        }
+                        _ => match self.chains.get(&actor_id) {
+                            Some(chain) => {
+                                chain.write().await.add_subscriber(event_tx);
+                                SubscribeReply::Subscribed
+                            }
+                            None => {
+                                debug!("SubscribeToActor: no chain for {:?}", actor_id);
+                                SubscribeReply::NoSuchActor
+                            }
+                        },
+                    };
+                    if let Some(tx) = response_tx {
+                        let _ = tx.send(reply);
                     }
                 }
                 TheaterCommand::UnsubscribeFromActor { actor_id, event_tx } => {
@@ -1152,12 +1155,6 @@ impl<E: crate::executor::Spawn> TheaterRuntime<E> {
         };
         let _ = self.initiate_teardown(actor_id, cause, force).await;
         Ok(())
-    }
-
-    async fn restart_actor(&mut self, actor_id: TheaterId) -> Result<()> {
-        debug!("Starting actor restart process for: {:?}", actor_id);
-
-        Err(anyhow::anyhow!("Actor restart not implemented"))
     }
 
     async fn get_actor_state(&self, actor_id: TheaterId) -> Result<Value> {

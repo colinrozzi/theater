@@ -297,21 +297,6 @@ pub enum TheaterCommand {
 
     /// # Restart an actor
     ///
-    /// Restarts a failed or stopped actor.
-    ///
-    /// ## Parameters
-    ///
-    /// * `actor_id` - ID of the actor to restart
-    /// * `response_tx` - Channel to receive the result (success or error)
-    ///
-    /// ## Security
-    ///
-    /// This operation is only available to the actor's supervisor or to the system itself.
-    RestartActor {
-        actor_id: TheaterId,
-        response_tx: oneshot::Sender<Result<()>>,
-    },
-
     /// # Get actor state
     ///
     /// Retrieves the current state of an actor.
@@ -337,13 +322,16 @@ pub enum TheaterCommand {
     ///
     /// * `actor_id` - ID of the actor to subscribe to
     /// * `event_tx` - Channel to receive events as they occur
+    /// * `response_tx` - Optional channel told whether the subscription took
+    ///   (see [`SubscribeReply`]). `None` for fire-and-forget.
     ///
-    /// ## Security
-    ///
-    /// This operation is only available to the actor's supervisor or to the system itself.
+    /// The reply is decided on the runtime's command loop, where the terminal
+    /// event is emitted and the chain removed, so a subscriber is either in
+    /// place before the terminal event or is told why not.
     SubscribeToActor {
         actor_id: TheaterId,
         event_tx: Sender<(TheaterId, ChainEvent)>,
+        response_tx: Option<oneshot::Sender<SubscribeReply>>,
     },
 
     /// # Unsubscribe a previously-registered chain subscriber
@@ -485,9 +473,6 @@ impl TheaterCommand {
             }
             TheaterCommand::GetActorStatus { actor_id, .. } => {
                 format!("GetActorStatus: {:?}", actor_id)
-            }
-            TheaterCommand::RestartActor { actor_id, .. } => {
-                format!("RestartActor: {:?}", actor_id)
             }
             TheaterCommand::GetActorState { actor_id, .. } => {
                 format!("GetActorState: {:?}", actor_id)
@@ -923,6 +908,18 @@ pub enum MessageCommand {
         sender_id: ChannelParticipant,
         response_tx: oneshot::Sender<Result<()>>,
     },
+}
+
+/// The answer to [`TheaterCommand::SubscribeToActor`].
+#[derive(Debug, Clone, PartialEq)]
+pub enum SubscribeReply {
+    /// The subscriber is on the actor's chain; its terminal event will arrive.
+    Subscribed,
+    /// No actor (and no chain) with that id.
+    NoSuchActor,
+    /// The actor's terminal event was already emitted, with this cause. The
+    /// subscriber was not added.
+    AlreadyTerminated(crate::events::lifecycle::TerminationCause),
 }
 
 /// # Actor Status
