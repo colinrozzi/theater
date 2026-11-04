@@ -153,7 +153,7 @@ event **in the host** (`theater-handler-lifecycle/src/lib.rs`).
 
 | Call | Pattern | On a match |
 |---|---|---|
-| `link(subject)` (l.306) | `any_termination()` (l.317) | The caller is stopped with `PeerKilled`. Directed: `A link B` stops A when B dies, not the reverse |
+| `link(subject)` (l.306) | `abnormal_termination()` (l.317): every cause but `Completed` | The caller is stopped with `PeerKilled`. Directed: `A link B` stops A when B dies, not the reverse. A subject that completes normally doesn't stop A (ticket 0053 T4, 2026-11-03; tests `link_does_not_fire_on_completed`, `link_fires_on_failed`) |
 | `monitor(subject)` (l.328) | `Pattern::any()`: **the whole chain** (l.339) | `handle-actor-event(subject, event-type, data)` for **every event** |
 | `monitor-filtered(subject, pattern)` (l.350) | The caller's pattern | `handle-actor-event` for matching events only |
 
@@ -177,8 +177,6 @@ A bare `monitor` is hazardous:
   dead or unknown id return `ok` and never fire, and an actor that dies while
   the subscription is being set up is missed. Planned fix: reply with
   subscribed / no such actor / already terminated with the cause.
-- `link` fires on `Completed`, but the relationships doc says normal
-  completion should not propagate.
 - The doc comment on `add_global_subscription` (rt:274-279) and on
   `add_subscriber` (`theater/src/chain/mod.rs:147`) say delivery uses
   `try_send` and drops events. The code waits (`.send().await`).

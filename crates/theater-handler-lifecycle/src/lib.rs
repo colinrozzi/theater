@@ -4,8 +4,9 @@
 //! directed relationship to another actor (the *subject*), always as itself
 //! (self-service):
 //!
-//! - [`link`] / `unlink` — **fate-sharing**: when the subject terminates, the
-//!   linking actor is stopped (cause `PeerKilled`).
+//! - [`link`] / `unlink` — **fate-sharing**: when the subject terminates
+//!   abnormally (anything but `Completed`), the linking actor is stopped (cause
+//!   `PeerKilled`).
 //! - [`monitor`] / `unmonitor` — **watching**: the subject's whole chain is
 //!   delivered to the actor's `handle-actor-event` export.
 //!
@@ -17,7 +18,7 @@
 //! export. The runtime is not in this path; fate and watching both flow chain →
 //! handler → (stop | wasm).
 //!
-//! `link` keys on any termination; a bare `monitor` watches the **whole chain**
+//! `link` keys on an abnormal termination (`abnormal_termination()`); a bare `monitor` watches the **whole chain**
 //! (a match-all `Pattern`, so every chain event of the subject is delivered).
 //! [`monitor-filtered`](Handler) lets a caller supply its own `packr_abi::Pattern`
 //! (crossing the wasm↔host boundary as a serialized `value`) to narrow the
@@ -37,7 +38,7 @@ use theater::handler::{Handler, HandlerContext, SharedActorInstance};
 use theater::id::TheaterId;
 use theater::messages::TheaterCommand;
 use theater::shutdown::ShutdownReceiver;
-use theater::subscription::{any_termination, Target};
+use theater::subscription::{abnormal_termination, Target};
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::UnboundedSender;
 
@@ -314,7 +315,7 @@ impl Handler for LifecycleHandler {
                         event_tx,
                         &subs,
                         &self_id,
-                        vec![any_termination()],
+                        abnormal_termination(),
                         Target::StopSelf,
                     )
                 }
@@ -493,7 +494,7 @@ fn remove_subscription(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use theater::subscription::any_lifecycle_event;
+    use theater::subscription::{any_lifecycle_event, any_termination};
 
     #[test]
     fn handler_name_and_interface_hashes_are_stable() {

@@ -204,7 +204,9 @@ pub enum TerminationCause {
 propagate a fate-link; **`Completed` does not** — a child finishing its job
 cleanly must not tear down its fate-peers. That's the Erlang default ("normal
 exit doesn't propagate"), expressed as a filter over the cause rather than a
-special case.
+special case. (`PeerKilled`, added later, propagates too, so a cascade
+ripples. Implemented as `theater::subscription::abnormal_termination()`,
+ticket 0053 T4.)
 
 ## 4. Lineage, spawn, and view-scope
 
