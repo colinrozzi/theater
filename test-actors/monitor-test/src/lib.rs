@@ -4,7 +4,8 @@
 //! `monitor(subject)`. It exports `handle-actor-event`, and records the
 //! event-type of each delivered event into its in-module state, so a test can
 //! spawn this actor, stop the subject, and observe (via `get-state`) that
-//! `"terminated"` was delivered.
+//! `"terminated"` was delivered. If `monitor` itself returns an error, the
+//! state is `"monitor-err: <error>"` instead.
 //!
 //! State lives inside the module now (`docs/in-module-state.md`): the actor
 //! keeps it in a `#[derive(State)]` cell, so the last event stays inspectable.
@@ -91,10 +92,13 @@ fn init(config: Value) -> Value {
     match subject_from_config(&config) {
         Some(subject) => {
             log(format!("monitor-test: monitoring {}", subject));
-            let _ = monitor(subject);
-            MonitorState::set(MonitorState {
-                received: String::from("init"),
-            });
+            // A refused monitor (unknown or dead subject) is recorded, so a
+            // test can see the error.
+            let received = match monitor(subject) {
+                Ok(()) => String::from("init"),
+                Err(e) => format!("monitor-err: {}", e),
+            };
+            MonitorState::set(MonitorState { received });
         }
         None => {
             log(String::from("monitor-test: no subject id in config"));

@@ -35,11 +35,12 @@ use theater::chain::ChainEvent;
 use theater::events::decode_chain_event_payload;
 use theater::handler::{Handler, HandlerContext, SharedActorInstance};
 use theater::id::TheaterId;
-use theater::messages::TheaterCommand;
+use theater::messages::{SubscribeReply, TheaterCommand};
 use theater::shutdown::ShutdownReceiver;
 use theater::subscription::{any_termination, Target};
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::oneshot;
 
 use theater::pack_bridge::{
     pact_result_host_fn, parse_pact, InterfaceImpl, Pattern, TypeHash, Value, ValueType,
@@ -189,6 +190,7 @@ impl Handler for LifecycleHandler {
                 }
             };
 
+            let terminated = any_termination();
             loop {
                 tokio::select! {
                     Some((subject_id, event)) = event_rx.recv() => {
@@ -212,6 +214,13 @@ impl Handler for LifecycleHandler {
                                 })
                                 .unwrap_or_default()
                         };
+                        // The terminal event is the subject's last: forget it,
+                        // so a later link/monitor of it asks the runtime again
+                        // (and gets `err`) instead of silently reusing a dead
+                        // subscription.
+                        if terminated.matches(&value) {
+                            subs.lock().unwrap().remove(&subject_id);
+                        }
                         for target in matched {
                             match target {
                                 Target::StopSelf => {
@@ -317,6 +326,7 @@ impl Handler for LifecycleHandler {
                         vec![any_termination()],
                         Target::StopSelf,
                     )
+                    .await
                 }
             }),
         );
@@ -339,6 +349,7 @@ impl Handler for LifecycleHandler {
                         vec![Pattern::any()],
                         Target::DeliverToWasm,
                     )
+                    .await
                 }
             }),
         );
@@ -362,6 +373,7 @@ impl Handler for LifecycleHandler {
                         vec![filter],
                         Target::DeliverToWasm,
                     )
+                    .await
                 }
             }),
         );
@@ -428,8 +440,11 @@ impl Handler for LifecycleHandler {
 
 /// Record a `{filter, target}` for the caller against `subject`, subscribing
 /// this handler to the subject's chain on the first subscription to it.
+///
+/// The first subscription waits for the runtime's [`SubscribeReply`]: an unknown
+/// or already-terminated subject is an `err`, and the local entry is removed.
 #[allow(clippy::too_many_arguments)]
-fn add_subscription(
+async fn add_subscription(
     id: TheaterId,
     input: &Value,
     theater_tx: &UnboundedSender<TheaterCommand>,
@@ -449,10 +464,24 @@ fn add_subscription(
         first
     };
     if first {
-        let _ = theater_tx.send(TheaterCommand::SubscribeToActor {
+        let (response_tx, response_rx) = oneshot::channel();
+        let sent = theater_tx.send(TheaterCommand::SubscribeToActor {
             actor_id: subject,
             event_tx,
+            response_tx: Some(response_tx),
         });
+        let error = match (sent, response_rx.await) {
+            (Ok(()), Ok(SubscribeReply::Subscribed)) => None,
+            (Ok(()), Ok(SubscribeReply::NoSuchActor)) => Some("no such actor".to_string()),
+            (Ok(()), Ok(SubscribeReply::AlreadyTerminated(cause))) => {
+                Some(format!("already terminated: {cause}"))
+            }
+            _ => Some("runtime unavailable".to_string()),
+        };
+        if let Some(error) = error {
+            subs.lock().unwrap().remove(&subject);
+            return Err(Value::String(error));
+        }
     }
     Ok(Value::Tuple(vec![]))
 }

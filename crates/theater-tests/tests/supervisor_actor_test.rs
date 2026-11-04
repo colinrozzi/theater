@@ -17,7 +17,7 @@ use std::time::Duration;
 use theater::config::actor_manifest::{HandlerConfig, ManifestConfig};
 use theater::config::inheritance::{HandlerInheritance, HandlerPermissionPolicy};
 use theater::handler::HandlerRegistry;
-use theater::messages::{default_init_state, TheaterCommand};
+use theater::messages::{default_init_state, SubscribeReply, TheaterCommand};
 use theater::pack_bridge::{Value, ValueType};
 use theater::utils::ResourceCache;
 use theater_handler_lifecycle::LifecycleHandler;
@@ -564,4 +564,152 @@ async fn monitor_delivers_wasm_call_events_to_wasm() {
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
+}
+
+/// Send `SubscribeToActor` with a reply channel and return the receiver for
+/// the reply (not yet awaited, so a test can queue commands back to back).
+fn subscribe(
+    theater_tx: &mpsc::UnboundedSender<TheaterCommand>,
+    actor_id: theater::id::TheaterId,
+    event_tx: mpsc::Sender<(theater::id::TheaterId, theater::chain::ChainEvent)>,
+) -> oneshot::Receiver<SubscribeReply> {
+    let (tx, rx) = oneshot::channel();
+    theater_tx
+        .send(TheaterCommand::SubscribeToActor {
+            actor_id,
+            event_tx,
+            response_tx: Some(tx),
+        })
+        .expect("send SubscribeToActor");
+    rx
+}
+
+/// `SubscribeToActor` says whether the subscription took (ticket 0053 T1):
+/// an unknown id is `NoSuchActor`; a live actor is `Subscribed`, and its
+/// terminal event then arrives exactly once.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn subscribe_to_actor_replies_and_delivers_one_terminal() {
+    let _ = tracing_subscriber::fmt().with_env_filter("info").try_init();
+    let temp = tempfile::tempdir().expect("temp dir");
+    std::env::set_var("THEATER_HOME", temp.path());
+
+    let theater_tx = start_runtime();
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let (event_tx, mut event_rx) = mpsc::channel(1024);
+    let reply = subscribe(
+        &theater_tx,
+        theater::id::TheaterId::generate(),
+        event_tx.clone(),
+    );
+    assert_eq!(reply.await.expect("reply"), SubscribeReply::NoSuchActor);
+
+    let subject_wasm =
+        std::fs::read(wasm_path("state-test", "state_test_actor.wasm")).expect("read subject wasm");
+    let subject = spawn_with_parent(&theater_tx, subject_wasm, "s-subject", None).await;
+    let reply = subscribe(&theater_tx, subject, event_tx);
+    assert_eq!(reply.await.expect("reply"), SubscribeReply::Subscribed);
+
+    stop_actor(&theater_tx, subject).await;
+
+    // The chain is dropped when the actor is finalized, which closes the
+    // channel; count the terminal events seen until then.
+    let terminated = theater::subscription::any_termination();
+    let mut terminals = 0;
+    loop {
+        match tokio::time::timeout(Duration::from_secs(10), event_rx.recv()).await {
+            Ok(Some((_, event))) => {
+                if let Some(payload) = theater::events::decode_chain_event_payload(&event.data) {
+                    if terminated.matches(&Value::from(payload)) {
+                        terminals += 1;
+                    }
+                }
+            }
+            Ok(None) => break,
+            Err(_) => panic!("subscriber channel did not close after the stop"),
+        }
+    }
+    assert_eq!(terminals, 1, "exactly one terminal event");
+}
+
+/// A subscription that arrives after the stop decision is refused with the
+/// cause, instead of being added to a chain whose terminal was already sent.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn subscribe_during_teardown_is_already_terminated() {
+    let _ = tracing_subscriber::fmt().with_env_filter("info").try_init();
+    let temp = tempfile::tempdir().expect("temp dir");
+    std::env::set_var("THEATER_HOME", temp.path());
+
+    let theater_tx = start_runtime();
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let subject_wasm =
+        std::fs::read(wasm_path("state-test", "state_test_actor.wasm")).expect("read subject wasm");
+    let subject = spawn_with_parent(&theater_tx, subject_wasm, "t-subject", None).await;
+
+    // Queue the stop and the subscribe back to back. The runtime handles them
+    // in order, and the actor stays registered (as `Stopping`) until its
+    // teardown completes, which is reported by a later command.
+    let (stop_tx, _stop_rx) = oneshot::channel();
+    theater_tx
+        .send(TheaterCommand::StopActor {
+            actor_id: subject,
+            response_tx: stop_tx,
+        })
+        .expect("send StopActor");
+    let (event_tx, _event_rx) = mpsc::channel(16);
+    let reply = subscribe(&theater_tx, subject, event_tx);
+    assert_eq!(
+        reply.await.expect("reply"),
+        SubscribeReply::AlreadyTerminated(theater::events::lifecycle::TerminationCause::Stopped)
+    );
+}
+
+/// `monitor` of an unknown id returns `err` to the actor (ticket 0053 T1).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn monitor_of_unknown_actor_is_an_error() {
+    let _ = tracing_subscriber::fmt().with_env_filter("info").try_init();
+    let temp = tempfile::tempdir().expect("temp dir");
+    std::env::set_var("THEATER_HOME", temp.path());
+
+    let theater_tx = start_runtime();
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let monitor_wasm = std::fs::read(wasm_path("monitor-test", "monitor_test_actor.wasm"))
+        .expect("read monitor wasm");
+    let monitor = spawn_with_init(
+        &theater_tx,
+        monitor_wasm,
+        "u-monitor",
+        id_init_state(theater::id::TheaterId::generate()),
+    )
+    .await;
+    assert_eq!(
+        monitor_received(&theater_tx, monitor).await.as_deref(),
+        Some("monitor-err: no such actor")
+    );
+}
+
+/// `link` of an unknown id is refused, and the caller keeps running: there is
+/// no subscription to fire, and nothing stops it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn link_of_unknown_actor_keeps_the_caller_running() {
+    let _ = tracing_subscriber::fmt().with_env_filter("info").try_init();
+    let temp = tempfile::tempdir().expect("temp dir");
+    std::env::set_var("THEATER_HOME", temp.path());
+
+    let theater_tx = start_runtime();
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let linker_wasm =
+        std::fs::read(wasm_path("link-test", "link_test_actor.wasm")).expect("read link wasm");
+    let linker = spawn_with_init(
+        &theater_tx,
+        linker_wasm,
+        "u-linker",
+        id_init_state(theater::id::TheaterId::generate()),
+    )
+    .await;
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    assert!(is_alive(&theater_tx, linker).await, "linker still running");
 }
