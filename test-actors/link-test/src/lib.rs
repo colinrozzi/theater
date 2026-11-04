@@ -77,7 +77,9 @@ fn init(config: Value) -> Value {
     match subject_from_config(&config) {
         Some(subject) => {
             log(format!("link-test: linking to {}", subject));
-            let _ = link(subject);
+            if let Err(e) = link(subject) {
+                log(format!("link-test: link refused: {}", e));
+            }
         }
         None => {
             log(String::from("link-test: no subject id in config"));

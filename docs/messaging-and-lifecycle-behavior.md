@@ -138,7 +138,7 @@ on that actor.
 | Tool | Gives | Notes |
 |---|---|---|
 | `TheaterRuntime::add_global_subscription(tx)` (rt:280) | Every chain event of **every actor spawned after the call** | Added as an ordinary chain subscriber (rt:851), so it is strict (§3.1): drain it quickly. theater-cli uses it (`theater-cli/src/commands/spawn.rs:179`). |
-| `TheaterCommand::SubscribeToActor { actor_id, event_tx }` (rt:569) | One actor's chain, from now on | **No reply.** If the actor isn't running it only logs (rt:575), so the caller can't tell. |
+| `TheaterCommand::SubscribeToActor { actor_id, event_tx, response_tx }` (rt:569) | One actor's chain, from now on | Optional reply (`SubscribeReply`): `Subscribed`, `NoSuchActor`, or `AlreadyTerminated(cause)` if the actor is already `Stopping` (its terminal was emitted; the subscriber isn't added). Decided on the command loop, where the terminal is emitted and the chain removed, so a subscriber either sees the terminal or is told why not. (Ticket 0053 T1, 2026-11-03; tests in `theater-tests/tests/supervisor_actor_test.rs`.) |
 | `TheaterCommand::SubscribeToSpawns` (`messages.rs:379`) | One row per spawn, with the parent id | |
 
 To learn when any actor dies, a host subscribes globally and keeps only events
@@ -155,6 +155,12 @@ event **in the host** (`theater-handler-lifecycle/src/lib.rs`).
 | `link(subject)` (l.306) | `any_termination()` (l.317) | The caller is stopped with `PeerKilled`. Directed: `A link B` stops A when B dies, not the reverse |
 | `monitor(subject)` (l.328) | `any_termination()` (l.339): **terminal only** | `handle-actor-event(subject, event-type, data)` once, when the subject dies |
 | `monitor-filtered(subject, pattern)` (l.350) | The caller's pattern | `handle-actor-event` for matching events only |
+
+`link`, `monitor` and `monitor-filtered` return `err("no such actor")` or
+`err("already terminated: <cause>")` when the runtime refuses the
+subscription (above), and keep no local entry. When the subject's terminal
+event arrives, the handler forgets that subject, so a later call on it asks
+the runtime again. (Ticket 0053 T1, 2026-11-03.)
 
 **To be told when an actor dies, use `monitor(subject)`.** Matching happens in
 the host, so the watcher's wasm runs once, at the death. The cause is in
@@ -176,12 +182,14 @@ guest preset is `theater_guest::filters::everything()`) is hazardous:
 
 ## 4. Known gaps
 
-- `SubscribeToActor` has no reply (rt:569-578), so `link` and `monitor` of a
-  dead or unknown id return `ok` and never fire, and an actor that dies while
-  the subscription is being set up is missed. Planned fix: reply with
-  subscribed / no such actor / already terminated with the cause.
 - `link` fires on `Completed`, but the relationships doc says normal
   completion should not propagate.
+- `initiate_teardown` emits the terminal event on the runtime's command loop,
+  and chain delivery is strict (§3.1), so one subscriber whose channel is full
+  stalls every runtime command until it drains (rt:1094; checked at
+  `c1941b60`, 2026-11-03). Since T1, `link` / `monitor` wait for the
+  runtime's reply inside the host call, so a watcher whose lifecycle channel
+  is full while the runtime stops one of its subjects waits too.
 - A full mailbox or a slow channel accept stalls the router for everyone
   (§1.1, §1.4).
 - Deferred request replies don't work, and request failures look like empty

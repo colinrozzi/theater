@@ -13,6 +13,11 @@
 // `link` and `monitor` both key on any termination. `monitor-filtered` lets
 // the caller supply its own structural (packr_abi::Pattern) filter instead,
 // e.g. `Pattern::any()` to receive every chain event of the subject.
+//
+// link / monitor / monitor-filtered return `err` when the subscription can't
+// be made: "no such actor", or "already terminated: <cause>" when the
+// subject's terminal event was already emitted. On `ok`, the subject's
+// terminal event will be seen.
 
 interface lifecycle {
     @package: string = "theater:simple"

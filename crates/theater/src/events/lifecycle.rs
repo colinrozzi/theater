@@ -51,6 +51,18 @@ pub enum TerminationCause {
     PeerKilled { peer: String },
 }
 
+impl std::fmt::Display for TerminationCause {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TerminationCause::Completed { .. } => write!(f, "completed"),
+            TerminationCause::Failed { error } => write!(f, "failed: {error}"),
+            TerminationCause::Stopped => write!(f, "stopped"),
+            TerminationCause::Killed => write!(f, "killed"),
+            TerminationCause::PeerKilled { peer } => write!(f, "peer killed: {peer}"),
+        }
+    }
+}
+
 impl ActorLifecycleEvent {
     /// The `event_type` string recorded on the chain, for filtering/routing.
     /// (The termination *cause* lives in the payload, not this string.)

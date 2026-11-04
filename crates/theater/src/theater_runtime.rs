@@ -10,7 +10,7 @@ use crate::actor::types::{ActorControl, ActorError, ActorInfo, ActorOperation};
 use crate::chain::ChainEvent;
 use crate::handler::HandlerRegistry;
 use crate::id::TheaterId;
-use crate::messages::{ActorMessage, ActorStatus, ActorTreeRow, TheaterCommand};
+use crate::messages::{ActorMessage, ActorStatus, ActorTreeRow, SubscribeReply, TheaterCommand};
 use crate::messages::{ChannelId, ChannelParticipant};
 use crate::pack_bridge::{CachingPackRuntime, MetadataWithHashes, Value};
 use crate::replay::ReplayHandler;
@@ -552,15 +552,32 @@ impl<E: crate::executor::Spawn> TheaterRuntime<E> {
                         error!("Failed to send actor status: {:?}", e);
                     }
                 }
-                TheaterCommand::SubscribeToActor { actor_id, event_tx } => {
+                TheaterCommand::SubscribeToActor {
+                    actor_id,
+                    event_tx,
+                    response_tx,
+                } => {
                     debug!("Subscribing to events for actor: {:?}", actor_id);
-                    if let Some(chain) = self.chains.get(&actor_id) {
-                        chain.write().await.add_subscriber(event_tx);
-                    } else {
-                        warn!(
-                            "SubscribeToActor: no chain for {:?} (actor not running)",
-                            actor_id
-                        );
+                    // Decided here, on the loop that emits the terminal event
+                    // (`initiate_teardown`) and removes the chain
+                    // (`finalize_actor`), so nothing is missed silently.
+                    let reply = match self.actors.get(&actor_id).map(|p| &p.status) {
+                        Some(ActorStatus::Stopping(cause)) => {
+                            SubscribeReply::AlreadyTerminated(cause.clone())
+                        }
+                        _ => match self.chains.get(&actor_id) {
+                            Some(chain) => {
+                                chain.write().await.add_subscriber(event_tx);
+                                SubscribeReply::Subscribed
+                            }
+                            None => {
+                                debug!("SubscribeToActor: no chain for {:?}", actor_id);
+                                SubscribeReply::NoSuchActor
+                            }
+                        },
+                    };
+                    if let Some(tx) = response_tx {
+                        let _ = tx.send(reply);
                     }
                 }
                 TheaterCommand::UnsubscribeFromActor { actor_id, event_tx } => {
