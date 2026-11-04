@@ -4,15 +4,17 @@
 // attaches a directed relationship to another actor (the "subject") — always
 // as itself (self-service; the runtime sets subscriber = caller):
 //
-//   - link:    fate-sharing. When the subject terminates, the runtime stops
-//              the caller (a StopSelf subscription). No wasm callback.
+//   - link:    fate-sharing. When the subject terminates abnormally (any
+//              cause but Completed), the runtime stops the caller (a
+//              StopSelf subscription). No wasm callback.
 //   - monitor: watching. The subject's terminal event is delivered to the
 //              caller's `handle-actor-event` export (a DeliverToWasm
 //              subscription).
 //
-// `link` and `monitor` both key on any termination. `monitor-filtered` lets
-// the caller supply its own structural (packr_abi::Pattern) filter instead,
-// e.g. `Pattern::any()` to receive every chain event of the subject.
+// `link` keys on an abnormal termination, `monitor` on any termination.
+// `monitor-filtered` lets the caller supply its own structural
+// (packr_abi::Pattern) filter instead, e.g. `Pattern::any()` to receive every
+// chain event of the subject.
 //
 // link / monitor / monitor-filtered return `err` when the subscription can't
 // be made: "no such actor", or "already terminated: <cause>" when the
@@ -24,7 +26,9 @@ interface lifecycle {
 
     exports {
         // Fate-link the caller to `subject` (an actor id). When `subject`
-        // terminates, the caller is stopped by the runtime.
+        // fails, is stopped or killed, or is itself peer-killed, the caller is
+        // stopped by the runtime. A subject that completes normally does not
+        // take the caller with it.
         link: func(subject: string) -> result<_, string>
 
         // Remove the caller's fate-link to `subject`.

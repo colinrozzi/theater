@@ -863,3 +863,90 @@ async fn link_of_unknown_actor_keeps_the_caller_running() {
     tokio::time::sleep(Duration::from_millis(150)).await;
     assert!(is_alive(&theater_tx, linker).await, "linker still running");
 }
+
+/// A subject that completes normally does not take its linked actor with it
+/// (ticket 0053 T4). Completion is the subject's own `shutdown`, which the
+/// `self` handler reports as `ShuttingDown`; the test sends it directly.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn link_does_not_fire_on_completed() {
+    let _ = tracing_subscriber::fmt().with_env_filter("info").try_init();
+    let temp = tempfile::tempdir().expect("temp dir");
+    std::env::set_var("THEATER_HOME", temp.path());
+
+    let theater_tx = start_runtime();
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let subject_wasm =
+        std::fs::read(wasm_path("state-test", "state_test_actor.wasm")).expect("read subject wasm");
+    let subject = spawn_with_parent(&theater_tx, subject_wasm, "c-subject", None).await;
+    let linker_wasm =
+        std::fs::read(wasm_path("link-test", "link_test_actor.wasm")).expect("read link wasm");
+    let linker =
+        spawn_with_init(&theater_tx, linker_wasm, "c-linker", id_init_state(subject)).await;
+    tokio::time::sleep(Duration::from_millis(150)).await;
+
+    theater_tx
+        .send(TheaterCommand::ShuttingDown {
+            actor_id: subject,
+            data: None,
+        })
+        .expect("send ShuttingDown");
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while is_alive(&theater_tx, subject).await {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "subject did not complete"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(
+        is_alive(&theater_tx, linker).await,
+        "linker was stopped by its subject's normal completion"
+    );
+}
+
+/// A subject that traps (`Failed`) does take its linked actor with it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn link_fires_on_failed() {
+    let _ = tracing_subscriber::fmt().with_env_filter("info").try_init();
+    let temp = tempfile::tempdir().expect("temp dir");
+    std::env::set_var("THEATER_HOME", temp.path());
+
+    let theater_tx = start_runtime();
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let subject_wasm = std::fs::read(wasm_path("panic-child", "panic_child_actor.wasm"))
+        .expect("read panic-child wasm");
+    let subject = spawn_with_parent(&theater_tx, subject_wasm, "f-subject", None).await;
+    let linker_wasm =
+        std::fs::read(wasm_path("link-test", "link_test_actor.wasm")).expect("read link wasm");
+    let linker =
+        spawn_with_init(&theater_tx, linker_wasm, "f-linker", id_init_state(subject)).await;
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    assert!(
+        is_alive(&theater_tx, linker).await,
+        "linker alive after linking"
+    );
+
+    let handle = actor_handle(&theater_tx, subject).await;
+    assert!(
+        handle
+            .call_function(
+                "theater:simple/panic-child.boom".to_string(),
+                Value::Tuple(vec![]),
+            )
+            .await
+            .is_err(),
+        "boom should trap"
+    );
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while is_alive(&theater_tx, linker).await {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "linker was not peer-killed when its linked subject trapped"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}

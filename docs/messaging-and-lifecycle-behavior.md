@@ -152,7 +152,7 @@ event **in the host** (`theater-handler-lifecycle/src/lib.rs`).
 
 | Call | Pattern | On a match |
 |---|---|---|
-| `link(subject)` (l.306) | `any_termination()` (l.317) | The caller is stopped with `PeerKilled`. Directed: `A link B` stops A when B dies, not the reverse |
+| `link(subject)` (l.306) | `abnormal_termination()` (l.317): every cause but `Completed` | The caller is stopped with `PeerKilled`. Directed: `A link B` stops A when B dies, not the reverse. A subject that completes normally doesn't stop A (ticket 0053 T4, 2026-11-03; tests `link_does_not_fire_on_completed`, `link_fires_on_failed`) |
 | `monitor(subject)` (l.328) | `any_termination()` (l.339): **terminal only** | `handle-actor-event(subject, event-type, data)` once, when the subject dies |
 | `monitor-filtered(subject, pattern)` (l.350) | The caller's pattern | `handle-actor-event` for matching events only |
 
@@ -182,8 +182,6 @@ guest preset is `theater_guest::filters::everything()`) is hazardous:
 
 ## 4. Known gaps
 
-- `link` fires on `Completed`, but the relationships doc says normal
-  completion should not propagate.
 - `initiate_teardown` emits the terminal event on the runtime's command loop,
   and chain delivery is strict (§3.1), so one subscriber whose channel is full
   stalls every runtime command until it drains (rt:1094; checked at
