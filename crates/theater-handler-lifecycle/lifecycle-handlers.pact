@@ -2,10 +2,10 @@
 //
 // The EXPORT side of monitoring: the function a monitoring actor implements and
 // the lifecycle handler calls to deliver a monitored actor's chain events. A
-// monitor watches the subject's whole chain, so this callback carries ARBITRARY
-// chain events (not just lifecycle events). `monitor-filtered` narrows host-side
-// (in Rust) before calling, so a filtered watcher is only woken for the events
-// it asked to watch.
+// bare `monitor` delivers only the subject's terminal event; `monitor-filtered`
+// delivers whatever its filter matches, which can be ARBITRARY chain events (not
+// just lifecycle events). Matching happens host-side (in Rust) before calling,
+// so a watcher is only woken for the events it asked to watch.
 
 interface lifecycle-handlers {
     @package: string = "theater:simple"
