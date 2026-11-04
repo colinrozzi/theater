@@ -12,20 +12,27 @@
 //!
 //! Both are the *same* mechanism: `link`/`monitor` subscribe this actor's
 //! handler to the subject's chain (via `SubscribeToActor`) and record a
-//! `{ filter, target }`. The handler's loop matches every subject event
+//! `{ filter, target }`. The handler's drainer matches every subject event
 //! host-side (`packr_abi::Pattern`) and **acts by target** — `StopSelf` → ask
-//! the runtime to stop this actor (`PeerTerminated`), `DeliverToWasm` → call the
-//! export. The runtime is not in this path; fate and watching both flow chain →
-//! handler → (stop | wasm).
+//! the runtime to stop this actor (`PeerTerminated`), `DeliverToWasm` → queue a
+//! call to the export, made by the handler's deliverer. The runtime is not in
+//! this path; fate and watching both flow chain → handler → (stop | wasm).
+//!
+//! The drainer never waits on the actor's wasm, so a slow or busy watcher
+//! can't hold up the actors it watches. The delivery queue holds
+//! [`DELIVERY_QUEUE_CAP`] events; past that, events are dropped and counted,
+//! and the next delivery for that subject is preceded by one with event-type
+//! `monitor-dropped:<n>` and empty data. Terminal events are never dropped.
+//! An actor can't link to or monitor itself.
 //!
 //! `link` keys on an abnormal termination (`abnormal_termination()`), and a
 //! bare `monitor` on any termination, so the watcher's wasm runs once, when the
-//! subject dies. [`monitor-filtered`](Handler) lets a caller supply its own
-//! `packr_abi::Pattern` (crossing the wasm↔host boundary as a serialized
-//! `value`) — e.g. `Pattern::any()` for the whole chain — otherwise identical
-//! to `monitor`.
+//! subject dies. [`monitor-filtered`](Handler) lets a
+//! caller supply its own `packr_abi::Pattern` (crossing the wasm↔host boundary
+//! as a serialized `value`) — e.g. `Pattern::any()` for the whole chain —
+//! otherwise identical to `monitor`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::future::Future;
 use std::pin::Pin;
 use std::str::FromStr;
@@ -42,7 +49,7 @@ use theater::shutdown::ShutdownReceiver;
 use theater::subscription::{abnormal_termination, any_termination, Target};
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::UnboundedSender;
-use tokio::sync::oneshot;
+use tokio::sync::{oneshot, Notify};
 
 use theater::pack_bridge::{
     pact_result_host_fn, parse_pact, InterfaceImpl, Pattern, TypeHash, Value, ValueType,
@@ -192,38 +199,49 @@ impl Handler for LifecycleHandler {
                 }
             };
 
-            let terminated = any_termination();
-            loop {
-                tokio::select! {
-                    Some((subject_id, event)) = event_rx.recv() => {
+            // Two halves, so a watcher's wasm never back-pressures its subjects
+            // (theater#235 §1.2). The drainer reads the chain channel
+            // continuously, matches in the host, acts on links at once, and
+            // queues monitor deliveries; the deliverer makes the wasm calls.
+            let queue = Arc::new(Mutex::new(DeliveryQueue::default()));
+            let notify = Arc::new(Notify::new());
+
+            let drainer = {
+                let queue = queue.clone();
+                let notify = notify.clone();
+                async move {
+                    let terminated = any_termination();
+                    while let Some((subject_id, event)) = event_rx.recv().await {
                         // The Pattern does all filtering: `link` and a bare
-                        // `monitor` key on termination, `monitor-filtered` on the
-                        // caller's pattern. Every delivered event is decoded and
-                        // matched.
+                        // `monitor` key on termination, `monitor-filtered` on
+                        // the caller's pattern. Every delivered event is
+                        // decoded and matched.
                         let value = match decode_chain_event_payload(&event.data) {
                             Some(payload) => Value::from(payload),
                             None => continue,
                         };
-                        // Collect the matched targets, then drop the lock before
-                        // any await.
+                        let is_terminal = terminated.matches(&value);
                         let matched: Vec<Target> = {
-                            let subs = subs.lock().unwrap();
-                            subs.get(&subject_id)
+                            let mut subs = subs.lock().unwrap();
+                            let matched = subs
+                                .get(&subject_id)
                                 .map(|list| {
                                     list.iter()
                                         .filter(|s| s.filter.iter().any(|p| p.matches(&value)))
                                         .map(|s| s.target.clone())
                                         .collect()
                                 })
-                                .unwrap_or_default()
+                                .unwrap_or_default();
+                            // The terminal event is the subject's last: forget
+                            // it, so a later link/monitor of it asks the runtime
+                            // again (and gets `err`) instead of silently reusing
+                            // a dead subscription.
+                            if is_terminal {
+                                subs.remove(&subject_id);
+                            }
+                            matched
                         };
-                        // The terminal event is the subject's last: forget it,
-                        // so a later link/monitor of it asks the runtime again
-                        // (and gets `err`) instead of silently reusing a dead
-                        // subscription.
-                        if terminated.matches(&value) {
-                            subs.lock().unwrap().remove(&subject_id);
-                        }
+                        let mut deliver = false;
                         for target in matched {
                             match target {
                                 Target::StopSelf => {
@@ -236,35 +254,42 @@ impl Handler for LifecycleHandler {
                                         });
                                     }
                                 }
-                                Target::DeliverToWasm => {
-                                    if has_callback {
-                                        let params = Value::Tuple(vec![
-                                            Value::String(subject_id.to_string()),
-                                            Value::String(event.event_type.clone()),
-                                            Value::List {
-                                                elem_type: ValueType::U8,
-                                                items: event.data.iter().map(|b| Value::U8(*b)).collect(),
-                                            },
-                                        ]);
-                                        if let Err(e) = actor_handle
-                                            .call_function(
-                                                "theater:simple/lifecycle-handlers.handle-actor-event"
-                                                    .to_string(),
-                                                params,
-                                            )
-                                            .await
-                                        {
-                                            error!("handle-actor-event delivery failed: {}", e);
-                                        }
-                                    }
-                                }
+                                Target::DeliverToWasm => deliver = has_callback,
                             }
                         }
-                    }
-                    _ = &mut shutdown_receiver.receiver => {
-                        break;
+                        // One delivery per event, however many monitors of
+                        // this subject matched it.
+                        if deliver && queue.lock().unwrap().push(subject_id, event, is_terminal) {
+                            notify.notify_one();
+                        }
                     }
                 }
+            };
+
+            let deliverer = async move {
+                loop {
+                    let next = queue.lock().unwrap().pop();
+                    let Some((subject_id, event, dropped)) = next else {
+                        notify.notified().await;
+                        continue;
+                    };
+                    if dropped > 0 {
+                        deliver_to_wasm(
+                            &actor_handle,
+                            subject_id,
+                            format!("monitor-dropped:{dropped}"),
+                            &[],
+                        )
+                        .await;
+                    }
+                    deliver_to_wasm(&actor_handle, subject_id, event.event_type, &event.data).await;
+                }
+            };
+
+            tokio::select! {
+                _ = drainer => {}
+                _ = deliverer => {}
+                _ = &mut shutdown_receiver.receiver => {}
             }
             Ok(())
         })
@@ -443,6 +468,68 @@ impl Handler for LifecycleHandler {
     }
 }
 
+/// How many monitor deliveries may wait for the actor's wasm before further
+/// ones are dropped (and counted).
+const DELIVERY_QUEUE_CAP: usize = 256;
+
+/// Monitor deliveries waiting for the actor's wasm, filled by the handler's
+/// drainer and emptied by its deliverer.
+#[derive(Default)]
+struct DeliveryQueue {
+    items: VecDeque<(TheaterId, ChainEvent)>,
+    /// Events dropped on overflow, per subject, not yet reported.
+    dropped: HashMap<TheaterId, u64>,
+}
+
+impl DeliveryQueue {
+    /// Queue a delivery; returns whether it was queued. Past
+    /// [`DELIVERY_QUEUE_CAP`] the event is dropped and counted, except a
+    /// terminal event, which is always queued (there is one per subject).
+    fn push(&mut self, subject: TheaterId, event: ChainEvent, terminal: bool) -> bool {
+        if terminal || self.items.len() < DELIVERY_QUEUE_CAP {
+            self.items.push_back((subject, event));
+            true
+        } else {
+            *self.dropped.entry(subject).or_default() += 1;
+            false
+        }
+    }
+
+    /// The next delivery, with the number of that subject's events dropped
+    /// since its last delivery (reported to the actor first).
+    fn pop(&mut self) -> Option<(TheaterId, ChainEvent, u64)> {
+        let (subject, event) = self.items.pop_front()?;
+        let dropped = self.dropped.remove(&subject).unwrap_or(0);
+        Some((subject, event, dropped))
+    }
+}
+
+/// Call the actor's `handle-actor-event(subject, event-type, data)`.
+async fn deliver_to_wasm(
+    actor_handle: &ActorHandle,
+    subject: TheaterId,
+    event_type: String,
+    data: &[u8],
+) {
+    let params = Value::Tuple(vec![
+        Value::String(subject.to_string()),
+        Value::String(event_type),
+        Value::List {
+            elem_type: ValueType::U8,
+            items: data.iter().map(|b| Value::U8(*b)).collect(),
+        },
+    ]);
+    if let Err(e) = actor_handle
+        .call_function(
+            "theater:simple/lifecycle-handlers.handle-actor-event".to_string(),
+            params,
+        )
+        .await
+    {
+        error!("handle-actor-event delivery failed: {}", e);
+    }
+}
+
 /// Record a `{filter, target}` for the caller against `subject`, subscribing
 /// this handler to the subject's chain on the first subscription to it.
 ///
@@ -460,6 +547,11 @@ async fn add_subscription(
     target: Target,
 ) -> Result<Value, Value> {
     let subject = parse_subject(input)?;
+    // Watching yourself can only loop (each delivery adds events to the chain
+    // being watched), and a link to yourself means nothing.
+    if subject == id {
+        return Err(Value::String("cannot link/monitor self".into()));
+    }
     *self_id.lock().unwrap() = Some(id);
     let first = {
         let mut subs = subs.lock().unwrap();
@@ -567,6 +659,40 @@ mod tests {
             Value::U8(7),
         ]))
         .is_err());
+    }
+
+    #[test]
+    fn delivery_queue_drops_past_cap_but_keeps_terminals_and_counts() {
+        use theater::events::lifecycle::{ActorLifecycleEvent, TerminationCause};
+        use theater::events::{ChainEventData, ChainEventPayload};
+        let event = |event_type: &str| {
+            ChainEventData {
+                event_type: event_type.to_string(),
+                data: ChainEventPayload::Lifecycle(ActorLifecycleEvent::Terminated {
+                    cause: TerminationCause::Stopped,
+                }),
+            }
+            .to_chain_event(None)
+        };
+        let (a, b) = (TheaterId::generate(), TheaterId::generate());
+        let mut q = DeliveryQueue::default();
+        for _ in 0..DELIVERY_QUEUE_CAP {
+            assert!(q.push(a, event("e"), false));
+        }
+        assert!(!q.push(a, event("e"), false));
+        assert!(!q.push(a, event("e"), false));
+        assert!(!q.push(b, event("e"), false));
+        assert!(q.push(a, event("terminated"), true));
+
+        // The first delivery for each subject carries its dropped count.
+        assert_eq!(q.pop().map(|(s, _, n)| (s, n)), Some((a, 2)));
+        for _ in 1..DELIVERY_QUEUE_CAP {
+            assert_eq!(q.pop().map(|(_, _, n)| n), Some(0));
+        }
+        let (s, e, n) = q.pop().expect("terminal kept");
+        assert_eq!((s, e.event_type.as_str(), n), (a, "terminated", 0));
+        assert!(q.pop().is_none());
+        assert_eq!(q.dropped.get(&b), Some(&1));
     }
 
     #[test]
