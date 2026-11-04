@@ -4,8 +4,9 @@
 //! directed relationship to another actor (the *subject*), always as itself
 //! (self-service):
 //!
-//! - [`link`] / `unlink` — **fate-sharing**: when the subject terminates, the
-//!   linking actor is stopped (cause `PeerKilled`).
+//! - [`link`] / `unlink` — **fate-sharing**: when the subject terminates
+//!   abnormally (anything but `Completed`), the linking actor is stopped (cause
+//!   `PeerKilled`).
 //! - [`monitor`] / `unmonitor` — **watching**: the subject's terminal event is
 //!   delivered to the actor's `handle-actor-event` export.
 //!
@@ -24,8 +25,9 @@
 //! `monitor-dropped:<n>` and empty data. Terminal events are never dropped.
 //! An actor can't link to or monitor itself.
 //!
-//! `link` and a bare `monitor` both key on any termination, so the watcher's
-//! wasm runs once, when the subject dies. [`monitor-filtered`](Handler) lets a
+//! `link` keys on an abnormal termination (`abnormal_termination()`), and a
+//! bare `monitor` on any termination, so the watcher's wasm runs once, when the
+//! subject dies. [`monitor-filtered`](Handler) lets a
 //! caller supply its own `packr_abi::Pattern` (crossing the wasm↔host boundary
 //! as a serialized `value`) — e.g. `Pattern::any()` for the whole chain —
 //! otherwise identical to `monitor`.
@@ -44,7 +46,7 @@ use theater::handler::{Handler, HandlerContext, SharedActorInstance};
 use theater::id::TheaterId;
 use theater::messages::{SubscribeReply, TheaterCommand};
 use theater::shutdown::ShutdownReceiver;
-use theater::subscription::{any_termination, Target};
+use theater::subscription::{abnormal_termination, any_termination, Target};
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::{oneshot, Notify};
@@ -349,7 +351,7 @@ impl Handler for LifecycleHandler {
                         event_tx,
                         &subs,
                         &self_id,
-                        vec![any_termination()],
+                        abnormal_termination(),
                         Target::StopSelf,
                     )
                     .await
@@ -617,7 +619,7 @@ fn remove_subscription(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use theater::subscription::any_lifecycle_event;
+    use theater::subscription::{any_lifecycle_event, any_termination};
 
     #[test]
     fn handler_name_and_interface_hashes_are_stable() {

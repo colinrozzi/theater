@@ -44,6 +44,31 @@ pub fn any_termination() -> Pattern {
     )
 }
 
+/// The match-any set for an **abnormal** termination: every cause except
+/// `Completed` (`Failed`, `Stopped`, `Killed`, `PeerKilled`). The fate filter a
+/// link keys on: a subject that completes normally does not take its linked
+/// actors down (`docs/actor-relationships-and-lifecycle.md` §3).
+///
+/// `Terminated { cause }` is a struct variant, so its payload is a one-field
+/// record; the cause's own payload is wildcarded.
+pub fn abnormal_termination() -> Vec<Pattern> {
+    let terminated = |cause| {
+        Pattern::variant(
+            "Lifecycle",
+            [Pattern::variant(
+                "Terminated",
+                [Pattern::record([("cause", cause)])],
+            )],
+        )
+    };
+    vec![
+        terminated(Pattern::variant("Failed", [Pattern::any()])),
+        terminated(Pattern::variant("Stopped", [])),
+        terminated(Pattern::variant("Killed", [])),
+        terminated(Pattern::variant("PeerKilled", [Pattern::any()])),
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -67,6 +92,29 @@ mod tests {
             assert!(pat.matches(&lifecycle_value(ActorLifecycleEvent::Terminated { cause })));
         }
         assert!(!pat.matches(&lifecycle_value(ActorLifecycleEvent::Spawned)));
+    }
+
+    #[test]
+    fn abnormal_termination_matches_every_cause_but_completed() {
+        let pats = abnormal_termination();
+        let matches = |evt| {
+            let v = lifecycle_value(evt);
+            pats.iter().any(|p| p.matches(&v))
+        };
+        for cause in [
+            TerminationCause::Failed { error: "x".into() },
+            TerminationCause::Stopped,
+            TerminationCause::Killed,
+            TerminationCause::PeerKilled { peer: "p".into() },
+        ] {
+            assert!(matches(ActorLifecycleEvent::Terminated { cause }));
+        }
+        assert!(!matches(ActorLifecycleEvent::Terminated {
+            cause: TerminationCause::Completed {
+                final_state: Some(vec![1])
+            }
+        }));
+        assert!(!matches(ActorLifecycleEvent::Spawned));
     }
 
     #[test]
