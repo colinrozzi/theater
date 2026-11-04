@@ -170,16 +170,27 @@ the host, so the watcher's wasm runs once, at the death. The cause is in
 `plain_monitor_is_terminal_only`, `mutual_plain_monitors_stay_responsive` in
 `theater-tests/tests/supervisor_actor_test.rs`.)
 
-A broad `monitor-filtered` (e.g. `Pattern::any()`, the whole chain; the
-guest preset is `theater_guest::filters::everything()`) is hazardous:
+**The handler never waits on the watcher's wasm** (ticket 0053 T2,
+2026-11-03). A drainer reads the handler's chain channel continuously,
+matches, stops the caller for a link at once, and queues monitor deliveries;
+a second loop makes the wasm calls. So a watcher can't hold up the actors it
+watches. The queue holds 256 events (`DELIVERY_QUEUE_CAP`); past that,
+non-terminal events are dropped and counted per subject, and the next
+delivery for that subject is preceded by one with event-type
+`monitor-dropped:<n>` and empty data. Terminal events are never dropped. Each
+event is delivered once, however many of the caller's monitors on that
+subject match it. `link` / `monitor` of the caller itself is
+`err("cannot link/monitor self")`.
 
-- **It floods.** Every matching event of the subject becomes a wasm call in
-  the watcher. A watcher's memory can grow with the *subject's* activity.
-- **Two actors that watch each other this way deadlock** on the first call.
-  Each delivery emits events on the watcher, which go back to the other side,
-  until both channels are full and each handler waits on the other. A
-  self-monitor does the same with one actor. (Reproduced on a private
-  `theater-repl` daemon with a whole-chain `monitor`; see theater#235 §1.2.)
+A broad `monitor-filtered` (e.g. `Pattern::any()`, the whole chain; the guest
+preset is `theater_guest::filters::everything()`) still floods: every
+matching event of the subject becomes a wasm call in the watcher. Two actors
+that watch each other this way feed each other events without end (each
+delivery adds events to the watcher's own chain). Before T2 they deadlocked on
+the first call, once both channels were full (theater#235 §1.2); now they stay
+responsive and drop the excess. Tests: `self_monitor_is_an_error`,
+`mutual_whole_chain_monitors_stay_responsive_and_report_drops` in
+`theater-tests/tests/supervisor_actor_test.rs`.
 
 ## 4. Known gaps
 
@@ -193,9 +204,9 @@ guest preset is `theater_guest::filters::everything()`) is hazardous:
 - `initiate_teardown` emits the terminal event on the runtime's command loop,
   and chain delivery is strict (§3.1), so one subscriber whose channel is full
   stalls every runtime command until it drains (rt:1094; checked at
-  `c1941b60`, 2026-11-03). Since T1, `link` / `monitor` wait for the
-  runtime's reply inside the host call, so a watcher whose lifecycle channel
-  is full while the runtime stops one of its subjects waits too.
+  `c1941b60`, 2026-11-03). The lifecycle handler's channel no longer fills
+  (its drainer, §3.3), so this is down to other subscribers: host-side ones
+  such as a global subscription.
 - A full mailbox or a slow channel accept stalls the router for everyone
   (§1.1, §1.4).
 - Deferred request replies don't work, and request failures look like empty

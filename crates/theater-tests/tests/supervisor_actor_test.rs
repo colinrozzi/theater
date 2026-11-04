@@ -863,3 +863,113 @@ async fn link_of_unknown_actor_keeps_the_caller_running() {
     tokio::time::sleep(Duration::from_millis(150)).await;
     assert!(is_alive(&theater_tx, linker).await, "linker still running");
 }
+
+/// An actor can't link to or monitor itself (ticket 0053 T2): that can only
+/// loop.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn self_monitor_is_an_error() {
+    let _ = tracing_subscriber::fmt().with_env_filter("info").try_init();
+    let temp = tempfile::tempdir().expect("temp dir");
+    std::env::set_var("THEATER_HOME", temp.path());
+
+    let theater_tx = start_runtime();
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let monitor_wasm = std::fs::read(wasm_path("monitor-test", "monitor_test_actor.wasm"))
+        .expect("read monitor wasm");
+    let no_subject = Value::Option {
+        inner_type: ValueType::List(Box::new(ValueType::U8)),
+        value: None,
+    };
+    let me = spawn_with_init(&theater_tx, monitor_wasm, "self-monitor", no_subject).await;
+    actor_handle(&theater_tx, me)
+        .await
+        .call_function(
+            "theater:simple/monitor-test.watch".to_string(),
+            Value::Tuple(vec![Value::String(format!("all:{me}"))]),
+        )
+        .await
+        .expect("watch call");
+    assert_eq!(
+        monitor_received(&theater_tx, me).await.as_deref(),
+        Some("monitor-err: cannot link/monitor self")
+    );
+}
+
+/// Two actors watching each other's whole chain (`monitor-filtered(any)`)
+/// stay responsive (ticket 0053 T2). Each delivery adds events that are
+/// delivered back, so the stream grows without bound; the lifecycle handler
+/// drains its channel without waiting on the actor's wasm, so the subjects
+/// are never held up, and it drops what its queue can't hold and reports the
+/// count as a `monitor-dropped:<n>` delivery.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn mutual_whole_chain_monitors_stay_responsive_and_report_drops() {
+    let _ = tracing_subscriber::fmt().with_env_filter("info").try_init();
+    let temp = tempfile::tempdir().expect("temp dir");
+    std::env::set_var("THEATER_HOME", temp.path());
+
+    let theater_tx = start_runtime();
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let monitor_wasm = std::fs::read(wasm_path("monitor-test", "monitor_test_actor.wasm"))
+        .expect("read monitor wasm");
+    let no_subject = Value::Option {
+        inner_type: ValueType::List(Box::new(ValueType::U8)),
+        value: None,
+    };
+    let a = spawn_with_init(&theater_tx, monitor_wasm.clone(), "y-a", no_subject.clone()).await;
+    let b = spawn_with_init(&theater_tx, monitor_wasm, "y-b", no_subject).await;
+    let ha = actor_handle(&theater_tx, a).await;
+    let hb = actor_handle(&theater_tx, b).await;
+    let watch = "theater:simple/monitor-test.watch".to_string();
+    ha.call_function(
+        watch.clone(),
+        Value::Tuple(vec![Value::String(format!("all:{b}"))]),
+    )
+    .await
+    .expect("a watches b");
+    hb.call_function(watch, Value::Tuple(vec![Value::String(format!("all:{a}"))]))
+        .await
+        .expect("b watches a");
+
+    for _ in 0..1000 {
+        tokio::time::timeout(
+            Duration::from_secs(10),
+            ha.call_function(
+                "theater:simple/actor.get-state".to_string(),
+                Value::Tuple(vec![]),
+            ),
+        )
+        .await
+        .expect("a stopped answering")
+        .expect("call into a failed");
+    }
+
+    let field = |id, name: &'static str| {
+        let tx = theater_tx.clone();
+        async move {
+            tokio::time::timeout(Duration::from_secs(10), monitor_field(&tx, id, name))
+                .await
+                .expect("stopped answering")
+        }
+    };
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let dropped = |v: Option<Value>| match v {
+            Some(Value::U32(n)) => n,
+            _ => 0,
+        };
+        let (da, db) = (
+            dropped(field(a, "dropped").await),
+            dropped(field(b, "dropped").await),
+        );
+        if da + db > 0 {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "no monitor-dropped delivery was reported"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}

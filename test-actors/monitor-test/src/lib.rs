@@ -60,6 +60,8 @@ fn monitor_filtered(subject: String, filter: Value) -> Result<(), String>;
 struct MonitorState {
     received: String,
     count: u32,
+    /// The sum of the `<n>` in `monitor-dropped:<n>` deliveries.
+    dropped: u32,
 }
 
 /// `result<_, string>::ok(())` — nothing to return but success.
@@ -109,7 +111,9 @@ fn watch(input: Value) -> Value {
         other => other,
     };
     if let Value::String(subject) = subject {
-        let _ = start_monitor(subject);
+        if let Err(e) = start_monitor(subject) {
+            MonitorState::with_mut(|s| s.received = format!("monitor-err: {}", e));
+        }
     }
     ok_unit()
 }
@@ -129,13 +133,18 @@ fn init(config: Value) -> Value {
                 Ok(()) => String::from("init"),
                 Err(e) => format!("monitor-err: {}", e),
             };
-            MonitorState::set(MonitorState { received, count: 0 });
+            MonitorState::set(MonitorState {
+                received,
+                count: 0,
+                dropped: 0,
+            });
         }
         None => {
             log(String::from("monitor-test: no subject id in config"));
             MonitorState::set(MonitorState {
                 received: String::from("no-subject"),
                 count: 0,
+                dropped: 0,
             });
         }
     }
@@ -154,9 +163,14 @@ fn handle_actor_event(input: Value) -> Value {
     };
     log(format!("monitor-test: received lifecycle event {}", event_type));
     // Record the event-type we just saw.
+    let dropped = event_type
+        .strip_prefix("monitor-dropped:")
+        .and_then(|n| n.parse::<u32>().ok())
+        .unwrap_or(0);
     MonitorState::with_mut(|s| {
         s.received = event_type;
         s.count += 1;
+        s.dropped += dropped;
     });
     ok_unit()
 }

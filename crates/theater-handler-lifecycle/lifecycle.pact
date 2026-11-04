@@ -15,9 +15,14 @@
 // e.g. `Pattern::any()` to receive every chain event of the subject.
 //
 // link / monitor / monitor-filtered return `err` when the subscription can't
-// be made: "no such actor", or "already terminated: <cause>" when the
-// subject's terminal event was already emitted. On `ok`, the subject's
-// terminal event will be seen.
+// be made: "no such actor", "already terminated: <cause>" when the subject's
+// terminal event was already emitted, or "cannot link/monitor self". On `ok`,
+// the subject's terminal event will be seen.
+//
+// Monitor delivery is best-effort for non-terminal events: if the caller's
+// wasm falls behind by more than 256 events, further ones are dropped, and the
+// next delivery for that subject is preceded by one with event-type
+// "monitor-dropped:<n>" and empty data. Terminal events are never dropped.
 
 interface lifecycle {
     @package: string = "theater:simple"
