@@ -103,11 +103,10 @@ stream. **Stopping a parent does not stop its children.**
 
 ### 2.4 Restart
 
-There is none. `RestartActor` (`theater/src/messages.rs:310`, rt:320) reaches
-`restart_actor` (rt:1157), which always returns "Actor restart not
-implemented". Nothing sends the command. The current direction is to remove it.
-Restarting is a supervisor spawning again: a new id, starting from its
-original init value.
+There is none in the runtime. The unused `RestartActor` command, which only
+ever returned "Actor restart not implemented", was removed (ticket 0053 T5,
+2026-11-03). Restarting is a supervisor spawning again: a new id, starting
+from its original init value.
 
 ## 3. Watching other actors
 
@@ -179,11 +178,6 @@ A bare `monitor` is hazardous:
   subscribed / no such actor / already terminated with the cause.
 - `link` fires on `Completed`, but the relationships doc says normal
   completion should not propagate.
-- The doc comment on `add_global_subscription` (rt:274-279) and on
-  `add_subscriber` (`theater/src/chain/mod.rs:147`) say delivery uses
-  `try_send` and drops events. The code waits (`.send().await`).
-- The `RestartActor` doc says it is "only available to the actor's
-  supervisor"; there is no supervisor concept in the runtime.
 - A full mailbox or a slow channel accept stalls the router for everyone
   (§1.1, §1.4).
 - Deferred request replies don't work, and request failures look like empty

@@ -297,21 +297,6 @@ pub enum TheaterCommand {
 
     /// # Restart an actor
     ///
-    /// Restarts a failed or stopped actor.
-    ///
-    /// ## Parameters
-    ///
-    /// * `actor_id` - ID of the actor to restart
-    /// * `response_tx` - Channel to receive the result (success or error)
-    ///
-    /// ## Security
-    ///
-    /// This operation is only available to the actor's supervisor or to the system itself.
-    RestartActor {
-        actor_id: TheaterId,
-        response_tx: oneshot::Sender<Result<()>>,
-    },
-
     /// # Get actor state
     ///
     /// Retrieves the current state of an actor.
@@ -485,9 +470,6 @@ impl TheaterCommand {
             }
             TheaterCommand::GetActorStatus { actor_id, .. } => {
                 format!("GetActorStatus: {:?}", actor_id)
-            }
-            TheaterCommand::RestartActor { actor_id, .. } => {
-                format!("RestartActor: {:?}", actor_id)
             }
             TheaterCommand::GetActorState { actor_id, .. } => {
                 format!("GetActorState: {:?}", actor_id)
