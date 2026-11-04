@@ -42,8 +42,9 @@ impl Guest for Component {
 
 impl LifecycleHandlers for Component {
     // The single chain-event callback (it replaced the old
-    // error/exit/external-stop trio). Fires for every event of every actor this
-    // one monitors — a bare monitor watches the whole chain. `subject` is the
+    // error/exit/external-stop trio). A bare monitor fires once, when the
+    // monitored actor terminates; `monitor-filtered` fires for whatever its
+    // filter matches. `subject` is the
     // monitored actor's id; `data` is the pack-encoded chain event payload
     // (decode for the cause + final state).
     fn handle_actor_event(
