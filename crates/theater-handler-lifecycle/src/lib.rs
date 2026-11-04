@@ -6,7 +6,7 @@
 //!
 //! - [`link`] / `unlink` — **fate-sharing**: when the subject terminates, the
 //!   linking actor is stopped (cause `PeerKilled`).
-//! - [`monitor`] / `unmonitor` — **watching**: the subject's whole chain is
+//! - [`monitor`] / `unmonitor` — **watching**: the subject's terminal event is
 //!   delivered to the actor's `handle-actor-event` export.
 //!
 //! Both are the *same* mechanism: `link`/`monitor` subscribe this actor's
@@ -17,11 +17,11 @@
 //! export. The runtime is not in this path; fate and watching both flow chain →
 //! handler → (stop | wasm).
 //!
-//! `link` keys on any termination; a bare `monitor` watches the **whole chain**
-//! (a match-all `Pattern`, so every chain event of the subject is delivered).
-//! [`monitor-filtered`](Handler) lets a caller supply its own `packr_abi::Pattern`
-//! (crossing the wasm↔host boundary as a serialized `value`) to narrow the
-//! delivered stream — otherwise identical to `monitor`.
+//! `link` and a bare `monitor` both key on any termination, so the watcher's
+//! wasm runs once, when the subject dies. [`monitor-filtered`](Handler) lets a
+//! caller supply its own `packr_abi::Pattern` (crossing the wasm↔host boundary
+//! as a serialized `value`) — e.g. `Pattern::any()` for the whole chain —
+//! otherwise identical to `monitor`.
 
 use std::collections::HashMap;
 use std::future::Future;
@@ -194,9 +194,10 @@ impl Handler for LifecycleHandler {
             loop {
                 tokio::select! {
                     Some((subject_id, event)) = event_rx.recv() => {
-                        // The Pattern does all filtering now — a bare `monitor`
-                        // watches the whole chain (match-all), `monitor-filtered`
-                        // narrows it. Every delivered event is decoded and matched.
+                        // The Pattern does all filtering: `link` and a bare
+                        // `monitor` key on termination, `monitor-filtered` on the
+                        // caller's pattern. Every delivered event is decoded and
+                        // matched.
                         let value = match decode_chain_event_payload(&event.data) {
                             Some(payload) => Value::from(payload),
                             None => continue,
@@ -331,8 +332,10 @@ impl Handler for LifecycleHandler {
             }),
         );
         // monitor(subject) -> result<_, string>
-        // A bare monitor watches the WHOLE chain: a match-all `Pattern::any()`
-        // filter, so every chain event of the subject is delivered.
+        // A bare monitor is terminal-only: the watcher's wasm runs once, when
+        // the subject dies, so deliveries can't cause more deliveries (two
+        // actors monitoring each other can't feed each other events). For the
+        // whole chain, use `monitor-filtered(subject, any)`.
         imports.define(
             "theater:simple/lifecycle",
             "monitor",
@@ -346,7 +349,7 @@ impl Handler for LifecycleHandler {
                         event_tx,
                         &subs,
                         &self_id,
-                        vec![Pattern::any()],
+                        vec![any_termination()],
                         Target::DeliverToWasm,
                     )
                     .await
@@ -355,7 +358,7 @@ impl Handler for LifecycleHandler {
         );
         // monitor-filtered(subject, filter) -> result<_, string>
         // Like `monitor`, but the caller supplies the match filter (a serialized
-        // `packr_abi::Pattern`) instead of the whole-chain `Pattern::any()`.
+        // `packr_abi::Pattern`) instead of the terminal-only `any_termination()`.
         imports.define(
             "theater:simple/lifecycle",
             "monitor-filtered",

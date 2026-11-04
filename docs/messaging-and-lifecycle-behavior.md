@@ -154,7 +154,7 @@ event **in the host** (`theater-handler-lifecycle/src/lib.rs`).
 | Call | Pattern | On a match |
 |---|---|---|
 | `link(subject)` (l.306) | `any_termination()` (l.317) | The caller is stopped with `PeerKilled`. Directed: `A link B` stops A when B dies, not the reverse |
-| `monitor(subject)` (l.328) | `Pattern::any()`: **the whole chain** (l.339) | `handle-actor-event(subject, event-type, data)` for **every event** |
+| `monitor(subject)` (l.328) | `any_termination()` (l.339): **terminal only** | `handle-actor-event(subject, event-type, data)` once, when the subject dies |
 | `monitor-filtered(subject, pattern)` (l.350) | The caller's pattern | `handle-actor-event` for matching events only |
 
 `link`, `monitor` and `monitor-filtered` return `err("no such actor")` or
@@ -163,19 +163,23 @@ subscription (above), and keep no local entry. When the subject's terminal
 event arrives, the handler forgets that subject, so a later call on it asks
 the runtime again. (Ticket 0053 T1, 2026-11-03.)
 
-**To be told when an actor dies, use `monitor-filtered(subject,
-any_termination())`.** Matching happens in the host, so the watcher's wasm runs
-once, at the death. The cause is in `data`, encoded as pack bytes.
+**To be told when an actor dies, use `monitor(subject)`.** Matching happens in
+the host, so the watcher's wasm runs once, at the death. The cause is in
+`data`, encoded as pack bytes. (Terminal-only since ticket 0053 T3,
+2026-11-03; before that a bare `monitor` used `Pattern::any()`. Tests:
+`plain_monitor_is_terminal_only`, `mutual_plain_monitors_stay_responsive` in
+`theater-tests/tests/supervisor_actor_test.rs`.)
 
-A bare `monitor` is hazardous:
+A broad `monitor-filtered` (e.g. `Pattern::any()`, the whole chain; the
+guest preset is `theater_guest::filters::everything()`) is hazardous:
 
-- **It floods.** Every event of the subject becomes a wasm call in the watcher.
-  A watcher's memory can grow with the *subject's* activity.
-- **Two actors that monitor each other deadlock** on the first call. Each
-  delivery emits events on the watcher, which go back to the other side, until
-  both channels are full and each handler waits on the other. A self-monitor
-  does the same with one actor. (Reproduced on a private `theater-repl`
-  daemon; see theater#235 §1.2.)
+- **It floods.** Every matching event of the subject becomes a wasm call in
+  the watcher. A watcher's memory can grow with the *subject's* activity.
+- **Two actors that watch each other this way deadlock** on the first call.
+  Each delivery emits events on the watcher, which go back to the other side,
+  until both channels are full and each handler waits on the other. A
+  self-monitor does the same with one actor. (Reproduced on a private
+  `theater-repl` daemon with a whole-chain `monitor`; see theater#235 §1.2.)
 
 ## 4. Known gaps
 
