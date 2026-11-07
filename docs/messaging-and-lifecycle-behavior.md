@@ -290,8 +290,10 @@ Paths are under `crates/`; "rt" is `theater/src/theater_runtime.rs`.
 - **Who may call an actor over rpc** (ticket 0078, 2026-11-07). An actor's
   rpc config `callers` (`theater-handler-rpc/src/lib.rs:41`) says which actors
   may `rpc.call` it: `"any"`, `"spawner"`, `"children"` (actors it spawned
-  directly) or an actor id. Unset means any actor (the default); `[]` means no
-  actor, only the host. Its spawner may always call it. The caller's rpc
+  directly) or an actor id; `[]` means no actor, only the host. A manifest
+  block without `callers` (a bare `[[handler]] type = "rpc"`) keeps the rule
+  the actor would have without it, the host's or its spawner's; with no rule
+  anywhere, any actor may call (the default). Its spawner may always call it. The caller's rpc
   handler checks the target's rule before calling (lib.rs:86, called at
   lib.rs:353) and returns `rpc refused: <target> accepts calls from: <rule>
   (not <caller>)`. Each actor's rule and parent are recorded in state shared
