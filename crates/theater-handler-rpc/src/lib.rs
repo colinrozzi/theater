@@ -34,9 +34,12 @@ mod describe;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct RpcHandlerConfig {
     /// Which actors may `call` this one: `"any"`, `"spawner"`, `"children"`
-    /// (actors it spawned) or an actor id. `None` = any actor; `[]` = no
-    /// actor, only the host. Its spawner may always call it. Calls from the
-    /// host (an `ActorHandle`, not rpc) are not checked.
+    /// (actors it spawned) or an actor id; `[]` = no actor, only the host.
+    /// Its spawner may always call it. Calls from the host (an `ActorHandle`,
+    /// not rpc) are not checked. Unset in a manifest block keeps the rule
+    /// the actor would get without the block (the host's, or its spawner's),
+    /// so a bare `[[handler]] type = "rpc"` widens nothing; a handler with no
+    /// rule anywhere takes calls from any actor.
     #[serde(default)]
     pub callers: Option<Vec<String>>,
 }
@@ -45,6 +48,7 @@ impl RpcHandlerConfig {
     /// A child's config may only narrow this (the spawner's): each caller
     /// it names must be in the spawner's list, or be its spawner. Names are
     /// compared as written ("children" means each actor's own children).
+    /// Unset keeps the spawner's rule, so it always passes.
     fn check_child(&self, child: &Self) -> Result<(), String> {
         let Some(ref allowed) = self.callers else {
             return Ok(());
@@ -53,9 +57,7 @@ impl RpcHandlerConfig {
             return Ok(());
         }
         match child.callers {
-            None => Err(format!(
-                "callers is unset (any actor) but the spawner's is {allowed:?}"
-            )),
+            None => Ok(()),
             Some(ref asked) => match asked
                 .iter()
                 .find(|c| *c != "spawner" && !allowed.contains(c))
@@ -234,13 +236,17 @@ impl Handler for RpcHandler {
         &self,
         config: Option<&theater::config::actor_manifest::HandlerConfig>,
     ) -> Box<dyn Handler> {
-        let config = match config {
+        let mut config = match config {
             Some(c) => c.parse::<RpcHandlerConfig>().unwrap_or_else(|e| {
                 tracing::warn!("invalid rpc handler config: {}; using default", e);
                 self.config.clone()
             }),
             None => self.config.clone(),
         };
+        // A block without `callers` keeps this handler's rule.
+        if config.callers.is_none() {
+            config.callers = self.config.callers.clone();
+        }
         Box::new(RpcHandler {
             theater_tx: self.theater_tx.clone(),
             config,
@@ -812,12 +818,92 @@ mod tests {
             spawner.check_child(&rule(Some(vec!["spawner"]))).is_ok(),
             "its spawner may call it anyway"
         );
-        let e = spawner.check_child(&rule(None)).unwrap_err();
-        assert!(e.contains("callers is unset"), "{e}");
+        assert!(
+            spawner.check_child(&rule(None)).is_ok(),
+            "unset keeps the spawner's rule"
+        );
         let e = spawner.check_child(&rule(Some(vec!["any"]))).unwrap_err();
         assert!(e.contains("callers entry \"any\""), "{e}");
         let id = TheaterId::generate().to_string();
         assert!(spawner.check_child(&rule(Some(vec![id.as_str()]))).is_err());
+    }
+
+    #[test]
+    fn a_block_without_callers_keeps_the_rule() {
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let host = RpcHandler::with_config(
+            tx,
+            RpcHandlerConfig {
+                callers: Some(vec![]),
+            },
+        );
+        let (id, other) = (TheaterId::generate(), TheaterId::generate());
+        // A bare `[[handler]] type = "rpc"` block, as manifests enable it.
+        let mut instance = host.create_instance(Some(
+            &theater::config::actor_manifest::HandlerConfig::unit("rpc"),
+        ));
+        let mut ctx = HandlerContext::new();
+        ctx.actor_id = Some(id);
+        instance
+            .register_host_functions(&mut theater::pack_bridge::HostImports::new(), &mut ctx)
+            .unwrap();
+        let e = check_call(&host.callees, other, id).unwrap_err();
+        assert!(e.contains("no actor (only the host)"), "{e}");
+    }
+
+    /// Register `instance` as actor `id` (with `parent`), as the runtime does.
+    fn register(instance: &mut Box<dyn Handler>, id: TheaterId, parent: Option<TheaterId>) {
+        let mut ctx = HandlerContext::new();
+        ctx.actor_id = Some(id);
+        ctx.parent_id = parent;
+        instance
+            .register_host_functions(&mut theater::pack_bridge::HostImports::new(), &mut ctx)
+            .unwrap();
+    }
+
+    #[test]
+    fn a_bare_block_under_a_host_with_no_rule_takes_any_caller() {
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let host = RpcHandler::new(tx);
+        let bare = theater::config::actor_manifest::HandlerConfig::unit("rpc");
+        let id = TheaterId::generate();
+        register(&mut host.create_instance(Some(&bare)), id, None);
+        assert!(check_call(&host.callees, TheaterId::generate(), id).is_ok());
+    }
+
+    #[test]
+    fn a_bare_block_under_a_locked_spawner_is_accepted_and_inherits_its_rule() {
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let host = RpcHandler::new(tx);
+        let bare = theater::config::actor_manifest::HandlerConfig::unit("rpc");
+        let (spawner_id, child_id, other) = (
+            TheaterId::generate(),
+            TheaterId::generate(),
+            TheaterId::generate(),
+        );
+        // The spawner's own instance has callers = []; a child starts from it.
+        let mut spawner =
+            host.create_instance(Some(&theater::config::actor_manifest::HandlerConfig::new(
+                "rpc",
+                RpcHandlerConfig {
+                    callers: Some(vec![]),
+                },
+            )));
+        register(&mut spawner, spawner_id, None);
+        spawner
+            .check_child_config(&bare)
+            .expect("a bare block is accepted under []");
+        register(
+            &mut spawner.create_instance(Some(&bare)),
+            child_id,
+            Some(spawner_id),
+        );
+        assert!(check_call(&host.callees, spawner_id, child_id).is_ok());
+        let e = check_call(&host.callees, other, child_id).unwrap_err();
+        assert!(
+            e.contains("no actor (only the host)"),
+            "the child inherits []: {e}"
+        );
     }
 
     #[test]

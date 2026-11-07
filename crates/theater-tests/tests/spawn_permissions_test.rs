@@ -470,6 +470,14 @@ async fn a_child_cannot_be_callable_by_more_than_its_spawner_allows() {
     spawn(&tx, manifest("g-rpc-none", vec![callers(&[])]), Some(child))
         .await
         .expect("[] is narrower than anything");
+    // A bare block, as manifests enable the handler, keeps the spawner's rule.
+    spawn(
+        &tx,
+        manifest("rpc-bare", vec![HandlerConfig::unit("rpc")]),
+        Some(parent),
+    )
+    .await
+    .expect("a block without callers is accepted");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
