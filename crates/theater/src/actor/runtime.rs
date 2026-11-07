@@ -306,6 +306,7 @@ impl ActorRuntime {
         // actor id) — the capture-based engine threads no store.
         let mut handler_ctx = HandlerContext::with_shutdown_controller(shutdown_controller.clone());
         handler_ctx.actor_id = Some(id);
+        handler_ctx.parent_id = handler_registry.parent_id();
         handler_ctx.theater_tx = Some(theater_tx.clone());
 
         // Build the actor's host-import registry by letting each handler register

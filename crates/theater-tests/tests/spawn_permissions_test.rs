@@ -25,6 +25,7 @@ use theater::SpawnError;
 use theater_handler_filesystem::FileSystemHandler;
 use theater_handler_http_client::HttpClientHandler;
 use theater_handler_process::{ProcessHandler, ProcessHandlerConfig};
+use theater_handler_rpc::{RpcHandler, RpcHandlerConfig};
 use theater_handler_self::{SelfHandler, SelfHostConfig};
 use theater_handler_store::{StoreHandler, StoreHandlerConfig};
 use tokio::sync::{mpsc, oneshot};
@@ -44,7 +45,8 @@ fn wasm() -> Vec<u8> {
     })
 }
 
-/// The host's handlers: filesystem rooted at `root`, two hosts, two programs.
+/// The host's handlers: filesystem rooted at `root`, two hosts, two programs,
+/// rpc callable by children.
 fn start_runtime(root: &Path) -> mpsc::UnboundedSender<TheaterCommand> {
     let (theater_tx, theater_rx) = mpsc::unbounded_channel::<TheaterCommand>();
     let tx_for_runtime = theater_tx.clone();
@@ -76,6 +78,12 @@ fn start_runtime(root: &Path) -> mpsc::UnboundedSender<TheaterCommand> {
         allowed_programs: Some(vec!["git".into(), "ls".into()]),
         ..Default::default()
     }));
+    registry.register(RpcHandler::with_config(
+        theater_tx.clone(),
+        RpcHandlerConfig {
+            callers: Some(vec!["children".into()]),
+        },
+    ));
     tokio::spawn(async move {
         let mut runtime = theater::theater_runtime::TheaterRuntime::new(
             tx_for_runtime,
@@ -416,6 +424,52 @@ async fn replay_chain_must_be_one_of_the_spawners_files() {
         err.to_string().contains("Failed to read replay chain file"),
         "{err}"
     );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_child_cannot_be_callable_by_more_than_its_spawner_allows() {
+    let (_base, root) = dirs();
+    let tx = start_runtime(&root);
+    let parent = spawn(&tx, manifest("parent", vec![]), None)
+        .await
+        .expect("host-started parent");
+    let callers = |c: &[&str]| {
+        HandlerConfig::new(
+            "rpc",
+            RpcHandlerConfig {
+                callers: Some(c.iter().map(|s| s.to_string()).collect()),
+            },
+        )
+    };
+
+    refused(
+        &tx,
+        manifest("rpc-any", vec![callers(&["any"])]),
+        parent,
+        "rpc",
+        "callers",
+    )
+    .await;
+    let child = spawn(
+        &tx,
+        manifest("rpc-narrow", vec![callers(&["spawner"])]),
+        Some(parent),
+    )
+    .await
+    .expect("narrowing to its spawner is allowed");
+    // The child's rule is now its spawner only; its children may not name
+    // "children" (the spawner's term) because the child's list lacks it.
+    refused(
+        &tx,
+        manifest("g-rpc", vec![callers(&["children"])]),
+        child,
+        "rpc",
+        "callers",
+    )
+    .await;
+    spawn(&tx, manifest("g-rpc-none", vec![callers(&[])]), Some(child))
+        .await
+        .expect("[] is narrower than anything");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

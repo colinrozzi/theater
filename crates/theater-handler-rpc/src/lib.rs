@@ -19,8 +19,10 @@
 //! ```
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tracing::{debug, info};
 
@@ -30,7 +32,87 @@ mod describe;
 /// Configuration for the RPC handler
 /// This handler enables direct actor-to-actor function calls
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
-pub struct RpcHandlerConfig {}
+pub struct RpcHandlerConfig {
+    /// Which actors may `call` this one: `"any"`, `"spawner"`, `"children"`
+    /// (actors it spawned) or an actor id. `None` = any actor; `[]` = no
+    /// actor, only the host. Its spawner may always call it. Calls from the
+    /// host (an `ActorHandle`, not rpc) are not checked.
+    #[serde(default)]
+    pub callers: Option<Vec<String>>,
+}
+
+impl RpcHandlerConfig {
+    /// A child's config may only narrow this (the spawner's): each caller
+    /// it names must be in the spawner's list, or be its spawner. Names are
+    /// compared as written ("children" means each actor's own children).
+    fn check_child(&self, child: &Self) -> Result<(), String> {
+        let Some(ref allowed) = self.callers else {
+            return Ok(());
+        };
+        if allowed.iter().any(|c| c == "any") {
+            return Ok(());
+        }
+        match child.callers {
+            None => Err(format!(
+                "callers is unset (any actor) but the spawner's is {allowed:?}"
+            )),
+            Some(ref asked) => match asked
+                .iter()
+                .find(|c| *c != "spawner" && !allowed.contains(c))
+            {
+                Some(c) => Err(format!(
+                    "callers entry {c:?} is not in the spawner's {allowed:?}"
+                )),
+                None => Ok(()),
+            },
+        }
+    }
+}
+
+/// An actor as an rpc callee: who spawned it and who may call it.
+#[derive(Debug, Clone)]
+struct Callee {
+    parent: Option<TheaterId>,
+    callers: Option<Vec<String>>,
+}
+
+/// Every actor with this handler, shared by all its instances in a runtime,
+/// so a `call` can check the target's rule. Written when an actor's host
+/// functions are registered, dropped at its shutdown.
+type Callees = Arc<Mutex<HashMap<TheaterId, Callee>>>;
+
+/// `caller` may call `target`. A target with no entry (it never registered
+/// this handler) takes calls from any actor, like one with no `callers`.
+fn check_call(callees: &Callees, caller: TheaterId, target: TheaterId) -> Result<(), String> {
+    let callees = callees.lock().unwrap();
+    let Some(callee) = callees.get(&target) else {
+        return Ok(());
+    };
+    let Some(ref callers) = callee.callers else {
+        return Ok(());
+    };
+    if callee.parent == Some(caller) {
+        return Ok(());
+    }
+    let caller_parent = callees.get(&caller).and_then(|c| c.parent);
+    let admitted = callers.iter().any(|c| match c.as_str() {
+        "any" => true,
+        "spawner" => false, // the spawner was admitted above
+        "children" => caller_parent == Some(target),
+        id => id.parse::<TheaterId>().ok() == Some(caller),
+    });
+    if admitted {
+        return Ok(());
+    }
+    let who = if callers.is_empty() {
+        "no actor (only the host)".to_string()
+    } else {
+        callers.join(", ")
+    };
+    Err(format!(
+        "rpc refused: {target} accepts calls from: {who} (not {caller})"
+    ))
+}
 
 use theater::actor::handle::ActorHandle;
 use theater::handler::{Handler, HandlerContext, SharedActorInstance};
@@ -116,11 +198,29 @@ impl CallOptions {
 #[derive(Clone)]
 pub struct RpcHandler {
     theater_tx: UnboundedSender<TheaterCommand>,
+    config: RpcHandlerConfig,
+    callees: Callees,
+    actor_id: Arc<Mutex<Option<TheaterId>>>,
 }
 
 impl RpcHandler {
+    /// A handler whose actors take calls from any actor.
     pub fn new(theater_tx: UnboundedSender<TheaterCommand>) -> Self {
-        Self { theater_tx }
+        Self::with_config(theater_tx, RpcHandlerConfig::default())
+    }
+
+    /// A handler whose actors take calls as `config.callers` says, unless
+    /// their manifest narrows it.
+    pub fn with_config(
+        theater_tx: UnboundedSender<TheaterCommand>,
+        config: RpcHandlerConfig,
+    ) -> Self {
+        Self {
+            theater_tx,
+            config,
+            callees: Arc::new(Mutex::new(HashMap::new())),
+            actor_id: Arc::new(Mutex::new(None)),
+        }
     }
 
     /// Get the interface declarations for this handler.
@@ -132,9 +232,31 @@ impl RpcHandler {
 impl Handler for RpcHandler {
     fn create_instance(
         &self,
-        _config: Option<&theater::config::actor_manifest::HandlerConfig>,
+        config: Option<&theater::config::actor_manifest::HandlerConfig>,
     ) -> Box<dyn Handler> {
-        Box::new(self.clone())
+        let config = match config {
+            Some(c) => c.parse::<RpcHandlerConfig>().unwrap_or_else(|e| {
+                tracing::warn!("invalid rpc handler config: {}; using default", e);
+                self.config.clone()
+            }),
+            None => self.config.clone(),
+        };
+        Box::new(RpcHandler {
+            theater_tx: self.theater_tx.clone(),
+            config,
+            callees: self.callees.clone(), // shared across instances
+            actor_id: Arc::new(Mutex::new(None)),
+        })
+    }
+
+    fn check_child_config(
+        &self,
+        config: &theater::config::actor_manifest::HandlerConfig,
+    ) -> Result<(), String> {
+        let child = config
+            .parse::<RpcHandlerConfig>()
+            .map_err(|e| format!("invalid config: {}", e))?;
+        self.config.check_child(&child)
     }
 
     fn setup(
@@ -145,11 +267,16 @@ impl Handler for RpcHandler {
         _event_rx: theater::handler::HandlerEventReceiver,
     ) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>> {
         info!("RPC handler setup");
+        let callees = self.callees.clone();
+        let actor_id = self.actor_id.clone();
 
         Box::pin(async move {
             // RPC handler doesn't need a background task
             shutdown_receiver.wait_for_shutdown().await;
             info!("RPC handler received shutdown signal");
+            if let Some(id) = *actor_id.lock().unwrap() {
+                callees.lock().unwrap().remove(&id);
+            }
             Ok(())
         })
     }
@@ -161,6 +288,20 @@ impl Handler for RpcHandler {
     ) -> anyhow::Result<()> {
         info!("Setting up RPC host functions");
 
+        // Record this actor's rule before anything else, so it is a callee
+        // with that rule even when another handler provides its imports.
+        let caller = ctx
+            .actor_id
+            .ok_or_else(|| anyhow::anyhow!("actor_id not set in HandlerContext"))?;
+        *self.actor_id.lock().unwrap() = Some(caller);
+        self.callees.lock().unwrap().insert(
+            caller,
+            Callee {
+                parent: ctx.parent_id,
+                callers: self.config.callers.clone(),
+            },
+        );
+
         // Check if the interface is already satisfied
         if ctx.is_satisfied("theater:simple/rpc") {
             info!("theater:simple/rpc already satisfied, skipping");
@@ -171,11 +312,13 @@ impl Handler for RpcHandler {
         // call: Call a function on another actor
         // ----------------------------------------------------------------
         let theater_tx = self.theater_tx.clone();
+        let callees = self.callees.clone();
         imports.define(
             "theater:simple/rpc",
             "call",
             pact_result_host_fn(move |input: Value| {
                 let theater_tx = theater_tx.clone();
+                let callees = callees.clone();
 
                 async move {
                     // Parse input: tuple of (actor-id, function, params, options)
@@ -207,6 +350,7 @@ impl Handler for RpcHandler {
                         Ok(id) => id,
                         Err(e) => return Err::<Value, Value>(Value::String(format!("Invalid actor ID: {}", e))),
                     };
+                    check_call(&callees, caller, target_id).map_err(Value::String)?;
 
                     // Get actor handle from theater runtime
                     let (response_tx, response_rx) = oneshot::channel();
@@ -588,6 +732,117 @@ mod tests {
 
         // Hash should be non-zero
         assert!(!hashes[0].1.as_bytes().iter().all(|&b| b == 0));
+    }
+
+    fn callees(entries: &[(TheaterId, Option<TheaterId>, Option<Vec<&str>>)]) -> Callees {
+        let map = entries
+            .iter()
+            .map(|(id, parent, callers)| {
+                (
+                    *id,
+                    Callee {
+                        parent: *parent,
+                        callers: callers
+                            .as_ref()
+                            .map(|c| c.iter().map(|s| s.to_string()).collect()),
+                    },
+                )
+            })
+            .collect();
+        Arc::new(Mutex::new(map))
+    }
+
+    #[test]
+    fn callers_rule_is_checked_on_the_target() {
+        let [parent, open, locked, kids, child, grandchild, stranger] =
+            std::array::from_fn(|_| TheaterId::generate());
+        let fixed = TheaterId::generate();
+        let fixed_s = fixed.to_string();
+        let c = callees(&[
+            (parent, None, Some(vec!["children"])),
+            (open, None, None),
+            (locked, Some(parent), Some(vec![])),
+            (kids, None, Some(vec!["children", fixed_s.as_str()])),
+            (child, Some(kids), Some(vec![])),
+            (grandchild, Some(child), Some(vec![])),
+            (stranger, None, None),
+        ]);
+        let ok = |from, to| check_call(&c, from, to).is_ok();
+
+        // No rule, or no entry at all: any actor.
+        assert!(ok(stranger, open));
+        assert!(ok(stranger, TheaterId::generate()));
+        // []: no actor but the spawner.
+        assert!(ok(parent, locked), "the spawner may always call");
+        assert!(!ok(stranger, locked));
+        let e = check_call(&c, stranger, locked).unwrap_err();
+        assert!(
+            e.contains("accepts calls from: no actor (only the host)"),
+            "{e}"
+        );
+        assert!(e.contains(&stranger.to_string()), "{e}");
+        // "children": direct children only, and a listed id.
+        assert!(ok(child, kids));
+        assert!(!ok(grandchild, kids));
+        assert!(ok(fixed, kids));
+        assert!(!ok(stranger, kids));
+        let e = check_call(&c, stranger, kids).unwrap_err();
+        assert!(
+            e.contains(&format!("accepts calls from: children, {fixed}")),
+            "{e}"
+        );
+        // A child calling its parent needs the parent to name "children".
+        assert!(ok(locked, parent));
+        assert!(!ok(grandchild, locked));
+    }
+
+    #[test]
+    fn child_rule_may_only_narrow_the_spawner_rule() {
+        let rule = |c: Option<Vec<&str>>| RpcHandlerConfig {
+            callers: c.map(|v| v.into_iter().map(String::from).collect()),
+        };
+        // An open spawner admits any child rule.
+        assert!(rule(None).check_child(&rule(None)).is_ok());
+        assert!(rule(Some(vec!["any"])).check_child(&rule(None)).is_ok());
+
+        let spawner = rule(Some(vec!["children"]));
+        assert!(spawner.check_child(&rule(Some(vec![]))).is_ok());
+        assert!(spawner.check_child(&rule(Some(vec!["children"]))).is_ok());
+        assert!(
+            spawner.check_child(&rule(Some(vec!["spawner"]))).is_ok(),
+            "its spawner may call it anyway"
+        );
+        let e = spawner.check_child(&rule(None)).unwrap_err();
+        assert!(e.contains("callers is unset"), "{e}");
+        let e = spawner.check_child(&rule(Some(vec!["any"]))).unwrap_err();
+        assert!(e.contains("callers entry \"any\""), "{e}");
+        let id = TheaterId::generate().to_string();
+        assert!(spawner.check_child(&rule(Some(vec![id.as_str()]))).is_err());
+    }
+
+    #[test]
+    fn registering_host_functions_records_the_rule_and_parent() {
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let template = RpcHandler::with_config(
+            tx,
+            RpcHandlerConfig {
+                callers: Some(vec![]),
+            },
+        );
+        let (parent, id, other) = (
+            TheaterId::generate(),
+            TheaterId::generate(),
+            TheaterId::generate(),
+        );
+        let mut instance = template.create_instance(None);
+        let mut ctx = HandlerContext::new();
+        ctx.actor_id = Some(id);
+        ctx.parent_id = Some(parent);
+        instance
+            .register_host_functions(&mut theater::pack_bridge::HostImports::new(), &mut ctx)
+            .unwrap();
+        assert!(check_call(&template.callees, parent, id).is_ok());
+        assert!(check_call(&template.callees, other, id).is_err());
     }
 
     #[test]
