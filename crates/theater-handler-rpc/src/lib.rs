@@ -851,6 +851,61 @@ mod tests {
         assert!(e.contains("no actor (only the host)"), "{e}");
     }
 
+    /// Register `instance` as actor `id` (with `parent`), as the runtime does.
+    fn register(instance: &mut Box<dyn Handler>, id: TheaterId, parent: Option<TheaterId>) {
+        let mut ctx = HandlerContext::new();
+        ctx.actor_id = Some(id);
+        ctx.parent_id = parent;
+        instance
+            .register_host_functions(&mut theater::pack_bridge::HostImports::new(), &mut ctx)
+            .unwrap();
+    }
+
+    #[test]
+    fn a_bare_block_under_a_host_with_no_rule_takes_any_caller() {
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let host = RpcHandler::new(tx);
+        let bare = theater::config::actor_manifest::HandlerConfig::unit("rpc");
+        let id = TheaterId::generate();
+        register(&mut host.create_instance(Some(&bare)), id, None);
+        assert!(check_call(&host.callees, TheaterId::generate(), id).is_ok());
+    }
+
+    #[test]
+    fn a_bare_block_under_a_locked_spawner_is_accepted_and_inherits_its_rule() {
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let host = RpcHandler::new(tx);
+        let bare = theater::config::actor_manifest::HandlerConfig::unit("rpc");
+        let (spawner_id, child_id, other) = (
+            TheaterId::generate(),
+            TheaterId::generate(),
+            TheaterId::generate(),
+        );
+        // The spawner's own instance has callers = []; a child starts from it.
+        let mut spawner =
+            host.create_instance(Some(&theater::config::actor_manifest::HandlerConfig::new(
+                "rpc",
+                RpcHandlerConfig {
+                    callers: Some(vec![]),
+                },
+            )));
+        register(&mut spawner, spawner_id, None);
+        spawner
+            .check_child_config(&bare)
+            .expect("a bare block is accepted under []");
+        register(
+            &mut spawner.create_instance(Some(&bare)),
+            child_id,
+            Some(spawner_id),
+        );
+        assert!(check_call(&host.callees, spawner_id, child_id).is_ok());
+        let e = check_call(&host.callees, other, child_id).unwrap_err();
+        assert!(
+            e.contains("no actor (only the host)"),
+            "the child inherits []: {e}"
+        );
+    }
+
     #[test]
     fn registering_host_functions_records_the_rule_and_parent() {
         let (tx, _rx) = mpsc::unbounded_channel();
