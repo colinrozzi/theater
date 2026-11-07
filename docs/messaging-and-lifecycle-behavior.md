@@ -282,9 +282,11 @@ Paths are under `crates/`; "rt" is `theater/src/theater_runtime.rs`.
   (`ConnOrigin`, `theater-handler-tcp/src/lib.rs:419`; check at :508,
   called at :986 and :1792). The error is returned to the sender as
   `transfer refused: target <id>: ...`, and the resource stays with it.
-  Every actor in a runtime gets every handler, so "no entry" mostly means
-  the target's process grant is missing (process) or a target outside this
-  handler's shared state.
+  Every actor in a runtime gets every handler, so a target almost always
+  has an entry: what refuses it is its grant (a policy that disallows
+  process leaves it with none) or its config. "No entry" means a target
+  that has stopped, is replaying (process skips registration when replay
+  already provides the interface), or belongs to another runtime.
 - **The set is fixed at spawn.** `set_permissions` is called once, when the
   actor's handlers are made (`theater/src/handler/mod.rs:188`). Nothing
   changes a running actor's set.
