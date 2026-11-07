@@ -79,6 +79,15 @@ use theater::shutdown::ShutdownReceiver;
 pub struct TcpHandlerConfig {
     #[serde(default)]
     pub listen: Option<String>,
+    /// Addresses `listen()` may bind, as `"host:port"` or `"host"` (any
+    /// port). `None` = any address.
+    #[serde(default)]
+    pub allowed_listen: Option<Vec<String>>,
+    /// Addresses `connect()` may reach, as `"host:port"` or `"host"` (any
+    /// port). Hosts are compared as written: a name does not admit its IP.
+    /// `None` = any address.
+    #[serde(default)]
+    pub allowed_connect: Option<Vec<String>>,
     #[serde(default)]
     pub max_connections: Option<u32>,
     /// TLS configuration for outbound client connections
@@ -99,15 +108,94 @@ pub struct TcpHandlerConfig {
     pub idle_timeout_secs: Option<u64>,
 }
 
+/// Split `"host:port"`, `"[v6]:port"`, `"host"` or `"[v6]"` into host and
+/// port. A bare IPv6 address (more than one `:`) is all host. `None` if a
+/// port is given but is not a number.
+fn split_host_port(addr: &str) -> Option<(&str, Option<u16>)> {
+    let (host, rest) = if addr.starts_with('[') {
+        match addr.find(']') {
+            Some(i) => (&addr[..=i], &addr[i + 1..]),
+            None => return None,
+        }
+    } else if addr.matches(':').count() == 1 {
+        let i = addr.find(':').unwrap();
+        (&addr[..i], &addr[i..])
+    } else {
+        (addr, "")
+    };
+    match rest.strip_prefix(':') {
+        Some(port) => port.parse().ok().map(|p| (host, Some(p))),
+        None if rest.is_empty() => Some((host, None)),
+        None => None,
+    }
+}
+
+/// `entry` (an allowlist item) admits `addr`: the same host, ignoring case,
+/// and the same port unless `entry` names none.
+fn address_admits(entry: &str, addr: &str) -> bool {
+    match (split_host_port(entry), split_host_port(addr)) {
+        (Some((eh, ep)), Some((ah, ap))) => {
+            eh.eq_ignore_ascii_case(ah) && (ep.is_none() || ep == ap)
+        }
+        _ => false,
+    }
+}
+
+/// `addr` is admitted by `allowed` (`None` = any address).
+fn check_address(allowed: &Option<Vec<String>>, op: &str, addr: &str) -> Result<(), Value> {
+    match allowed {
+        Some(list) if !list.iter().any(|e| address_admits(e, addr)) => Err(Value::String(format!(
+            "permission denied: {op} to {addr} not allowed"
+        ))),
+        _ => Ok(()),
+    }
+}
+
+/// Each entry of a child's list must be admitted by one of the spawner's
+/// (a child entry with no port needs a spawner entry with none).
+fn check_child_addresses(
+    key: &str,
+    spawner: &Option<Vec<String>>,
+    child: &Option<Vec<String>>,
+) -> Result<(), String> {
+    let Some(allowed) = spawner else {
+        return Ok(());
+    };
+    let Some(asked) = child else {
+        return Err(format!(
+            "{key} is unset (any address) but the spawner allows only {allowed:?}"
+        ));
+    };
+    match asked
+        .iter()
+        .find(|e| !allowed.iter().any(|a| address_admits(a, e)))
+    {
+        Some(e) => Err(format!(
+            "{key} entry {e:?} is not within the spawner's {allowed:?}"
+        )),
+        None => Ok(()),
+    }
+}
+
 impl TcpHandlerConfig {
-    /// A child's `[[handler]]` config may only narrow this (the spawner's).
-    /// tcp has no address allowlist yet (`listen` is not enforced), so what
-    /// is checked is: `max_connections` no higher; `listen` and
+    /// A child's `[[handler]]` config may only narrow this (the spawner's):
+    /// `allowed_listen` and `allowed_connect` within the spawner's;
+    /// `max_connections` no higher; `listen` (not enforced) and
     /// `idle_timeout_secs` (set on state every tcp actor shares) unset or the
     /// spawner's; TLS cert, key and ca_cert (host files) only the spawner's
     /// own; `skip_verify` only if the spawner skips too. A child may drop
     /// either TLS block.
     fn check_child(&self, child: &Self) -> Result<(), String> {
+        check_child_addresses(
+            "allowed_listen",
+            &self.allowed_listen,
+            &child.allowed_listen,
+        )?;
+        check_child_addresses(
+            "allowed_connect",
+            &self.allowed_connect,
+            &child.allowed_connect,
+        )?;
         if let Some(max) = self.max_connections {
             match child.max_connections {
                 Some(n) if n <= max => {}
@@ -1134,10 +1222,12 @@ impl Handler for TcpHandler {
 
         // Clone state and actor_id for each closure
         let st_connect = state.clone();
+        let allowed_connect_list = self.config.allowed_connect.clone();
         let aid_connect = actor_id_for_closures;
         let tls_for_connect = self.tls_context.clone();
 
         let st_listen = state.clone();
+        let allowed_listen_list = self.config.allowed_listen.clone();
         let aid_listen = actor_id_for_closures;
         let tls_for_listen = self.tls_context.clone();
 
@@ -1197,11 +1287,13 @@ impl Handler for TcpHandler {
             "connect",
             pact_result_host_fn(move |input: Value| {
                 let st = st_connect.clone();
+                let allowed_connect = allowed_connect_list.clone();
                 let actor_id = aid_connect;
                 let tls_ctx = tls_for_connect.clone();
                 async move {
                     let _ph = PhaseLog::new("tcp.connect");
                     let address = parse_string(&input)?;
+                    check_address(&allowed_connect, "connect", &address)?;
                     st.check_connection_limit().await?;
                     debug!("tcp connect to {}", address);
 
@@ -1278,6 +1370,7 @@ impl Handler for TcpHandler {
             "listen",
             pact_result_host_fn(move |input: Value| {
                 let st = st_listen.clone();
+                let allowed_listen = allowed_listen_list.clone();
                 let actor_id = aid_listen;
                 let actor_handle_arc = actor_handle_for_listen.clone();
                 let cancel_token = cancel_token_for_listen.clone();
@@ -1286,6 +1379,7 @@ impl Handler for TcpHandler {
                 async move {
                     let _ph = PhaseLog::new("tcp.listen");
                     let address = parse_string(&input)?;
+                    check_address(&allowed_listen, "listen", &address)?;
                     debug!("tcp listen on {}", address);
 
                     let listener = TcpListener::bind(&address)
@@ -3489,6 +3583,7 @@ mod child_config_tests {
                 auto_handshake: true,
             }),
             idle_timeout_secs: Some(30),
+            ..Default::default()
         }
     }
 
@@ -3504,6 +3599,7 @@ mod child_config_tests {
                 server_tls: None,
                 listen: None,
                 idle_timeout_secs: None,
+                ..Default::default()
             })
             .unwrap();
 
@@ -3580,6 +3676,87 @@ mod child_config_tests {
             })
             .expect_err("cert and key paths are refused");
         assert!(e.contains("server_tls"), "{e}");
+    }
+
+    #[test]
+    fn address_allowlists_match_host_and_port() {
+        let list = Some(vec![
+            "127.0.0.1:8080".to_string(),
+            "example.com".to_string(),
+            "[::1]:443".to_string(),
+        ]);
+        let ok = |a: &str| check_address(&list, "connect", a).is_ok();
+        assert!(ok("127.0.0.1:8080"));
+        assert!(!ok("127.0.0.1:8081"));
+        assert!(!ok("127.0.0.10:8080"), "not a prefix match");
+        assert!(ok("example.com:443") && ok("EXAMPLE.com:25"));
+        assert!(!ok("example.com.evil:443"));
+        assert!(ok("[::1]:443"));
+        assert!(!ok("[::1]:80"));
+        assert!(!ok("127.0.0.1:notaport"));
+        assert!(check_address(&None, "listen", "0.0.0.0:1").is_ok());
+        let e = check_address(&list, "listen", "0.0.0.0:80").unwrap_err();
+        assert_eq!(
+            e,
+            Value::String("permission denied: listen to 0.0.0.0:80 not allowed".into())
+        );
+        assert_eq!(split_host_port("::1"), Some(("::1", None)));
+        assert_eq!(split_host_port("[::1]"), Some(("[::1]", None)));
+    }
+
+    #[test]
+    fn child_address_lists_must_be_within_spawner() {
+        let spawner = TcpHandlerConfig {
+            allowed_listen: Some(vec!["127.0.0.1".into()]),
+            allowed_connect: Some(vec!["db.internal:5432".into()]),
+            ..Default::default()
+        };
+        spawner
+            .check_child(&TcpHandlerConfig {
+                allowed_listen: Some(vec!["127.0.0.1:9000".into()]),
+                allowed_connect: Some(vec![]),
+                ..Default::default()
+            })
+            .expect("narrowing is allowed");
+        let refused = |child: TcpHandlerConfig, key: &str| {
+            let e = spawner
+                .check_child(&child)
+                .expect_err("widening is refused");
+            assert!(e.contains(key), "{e}");
+        };
+        let narrow = || TcpHandlerConfig {
+            allowed_listen: Some(vec!["127.0.0.1:9000".into()]),
+            allowed_connect: Some(vec!["db.internal:5432".into()]),
+            ..Default::default()
+        };
+        refused(
+            TcpHandlerConfig {
+                allowed_listen: Some(vec!["0.0.0.0:9000".into()]),
+                ..narrow()
+            },
+            "allowed_listen",
+        );
+        refused(
+            TcpHandlerConfig {
+                allowed_listen: None,
+                ..narrow()
+            },
+            "allowed_listen",
+        );
+        refused(
+            TcpHandlerConfig {
+                allowed_connect: Some(vec!["db.internal".into()]),
+                ..narrow()
+            },
+            "allowed_connect",
+        );
+        refused(
+            TcpHandlerConfig {
+                allowed_connect: None,
+                ..narrow()
+            },
+            "allowed_connect",
+        );
     }
 
     #[test]
