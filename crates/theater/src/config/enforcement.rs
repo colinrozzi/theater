@@ -152,6 +152,58 @@ pub fn validate_manifest_permissions(
     Ok(())
 }
 
+/// Check that `path`, a child's config value for `key`, is inside the spawner's
+/// `root`. Both are resolved first ([`real_path`]), so a symlink out of the root
+/// or a `..` is refused. For handlers' `check_child_config`.
+pub fn check_path_within(
+    key: &str,
+    path: &std::path::Path,
+    root: &std::path::Path,
+) -> Result<(), String> {
+    // The root may not exist yet (a store makes its directory on first use).
+    let real_root = std::fs::canonicalize(root)
+        .or_else(|_| real_path(root))
+        .map_err(|e| format!("the spawner's {} {}", key, e))?;
+    let real = real_path(path).map_err(|e| format!("{} {}", key, e))?;
+    if !real.starts_with(&real_root) {
+        return Err(format!(
+            "{} {:?} is outside the spawner's {:?}",
+            key, path, real_root
+        ));
+    }
+    Ok(())
+}
+
+/// Where `path` really is: its longest existing ancestor with symlinks
+/// resolved, plus the components that don't exist yet. A `..` anywhere is
+/// refused, so the part that doesn't exist yet can't climb back out.
+fn real_path(path: &std::path::Path) -> Result<std::path::PathBuf, String> {
+    if path
+        .components()
+        .any(|c| matches!(c, std::path::Component::ParentDir))
+    {
+        return Err(format!("{:?} must not contain '..'", path));
+    }
+    let mut existing = path.to_path_buf();
+    let mut rest = Vec::new();
+    loop {
+        match std::fs::canonicalize(&existing) {
+            Ok(real) => return Ok(rest.iter().rev().fold(real, |p, c| p.join(c))),
+            Err(_) => match (existing.file_name(), existing.parent()) {
+                (Some(name), Some(parent)) => {
+                    rest.push(name.to_owned());
+                    existing = if parent.as_os_str().is_empty() {
+                        std::path::PathBuf::from(".")
+                    } else {
+                        parent.to_path_buf()
+                    };
+                }
+                _ => return Err(format!("{:?} cannot be resolved", path)),
+            },
+        }
+    }
+}
+
 /// Parse a handler's raw config; a malformed one is refused at spawn.
 fn typed<T: serde::de::DeserializeOwned>(hc: &HandlerConfig) -> PermissionResult<T> {
     hc.parse()

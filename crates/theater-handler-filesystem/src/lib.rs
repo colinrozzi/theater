@@ -60,6 +60,7 @@ use tracing::{debug, info, warn};
 
 use theater::actor::handle::ActorHandle;
 use theater::config::actor_manifest::FileSystemHandlerConfig;
+use theater::config::enforcement::check_path_within;
 use theater::config::permissions::{FileSystemPermissions, HandlerPermission};
 use theater::handler::{Handler, HandlerContext, SharedActorInstance};
 use theater::shutdown::ShutdownReceiver;
@@ -535,33 +536,6 @@ impl FileSystemHandler {
     }
 }
 
-/// Where `path` really is: its longest existing ancestor with symlinks
-/// resolved, plus the components that don't exist yet. A `..` anywhere is
-/// refused, so the part that doesn't exist yet can't climb back out.
-fn real_path(path: &Path) -> Result<PathBuf, String> {
-    if path.components().any(|c| matches!(c, Component::ParentDir)) {
-        return Err(format!("path {:?} must not contain '..'", path));
-    }
-    let mut existing = path.to_path_buf();
-    let mut rest = Vec::new();
-    loop {
-        match std::fs::canonicalize(&existing) {
-            Ok(real) => return Ok(rest.iter().rev().fold(real, |p, c| p.join(c))),
-            Err(_) => match (existing.file_name(), existing.parent()) {
-                (Some(name), Some(parent)) => {
-                    rest.push(name.to_owned());
-                    existing = if parent.as_os_str().is_empty() {
-                        PathBuf::from(".")
-                    } else {
-                        parent.to_path_buf()
-                    };
-                }
-                _ => return Err(format!("path {:?} cannot be resolved", path)),
-            },
-        }
-    }
-}
-
 /// A fresh, process-and-time-unique temp directory path (not yet created). The
 /// `theater-fs-<pid>-<nanos>` shape is what [`parse_sandbox_pid`] recognizes
 /// when sweeping orphans, so keep the two in sync.
@@ -683,24 +657,15 @@ impl Handler for FileSystemHandler {
             (_, Some(true)) | (None, _) => return Ok(()),
             (Some(p), _) => p,
         };
-        let root = match (&self.path, self.new_dir) {
-            (Some(p), new_dir) if new_dir != Some(true) => std::fs::canonicalize(p)
-                .map_err(|e| format!("spawner's root {:?} is unavailable: {}", p, e))?,
-            _ => {
-                return Err(format!(
-                    "path {:?} is not allowed: the spawner has only a temporary root",
-                    child_path
-                ))
+        match (&self.path, self.new_dir) {
+            (Some(root), new_dir) if new_dir != Some(true) => {
+                check_path_within("path", child_path, root)
             }
-        };
-        let real = real_path(child_path)?;
-        if !real.starts_with(&root) {
-            return Err(format!(
-                "path {:?} is outside the spawner's root {:?}",
-                child_path, root
-            ));
+            _ => Err(format!(
+                "path {:?} is not allowed: the spawner has only a temporary root",
+                child_path
+            )),
         }
-        Ok(())
     }
 
     fn setup(
@@ -1159,7 +1124,7 @@ mod tests {
         let err = parent
             .check_child_config(&child(&root.join("link")))
             .unwrap_err();
-        assert!(err.contains("outside the spawner's root"), "{}", err);
+        assert!(err.contains("outside the spawner's"), "{}", err);
         assert!(parent
             .check_child_config(&child(&root.join("link/new")))
             .is_err());

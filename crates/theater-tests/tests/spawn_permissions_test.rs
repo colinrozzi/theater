@@ -25,6 +25,7 @@ use theater_handler_filesystem::FileSystemHandler;
 use theater_handler_http_client::HttpClientHandler;
 use theater_handler_process::{ProcessHandler, ProcessHandlerConfig};
 use theater_handler_self::{SelfHandler, SelfHostConfig};
+use theater_handler_store::{StoreHandler, StoreHandlerConfig};
 use tokio::sync::{mpsc, oneshot};
 
 const SPAWN_TIMEOUT: Duration = Duration::from_secs(10);
@@ -63,6 +64,13 @@ fn start_runtime(root: &Path) -> mpsc::UnboundedSender<TheaterCommand> {
     registry.register(HttpClientHandler::new(HttpClientHandlerConfig {
         allowed_hosts: vec!["a.example".into(), "b.example".into()],
     }));
+    registry.register(StoreHandler::new(
+        StoreHandlerConfig {
+            base_path: Some(root.join("store")),
+            store_id: None,
+        },
+        None,
+    ));
     registry.register(ProcessHandler::new(ProcessHandlerConfig {
         allowed_programs: Some(vec!["git".into(), "ls".into()]),
         ..Default::default()
@@ -128,6 +136,16 @@ fn programs(programs: &[&str]) -> HandlerConfig {
     )
 }
 
+fn store(base_path: PathBuf) -> HandlerConfig {
+    HandlerConfig::new(
+        "store",
+        StoreHandlerConfig {
+            base_path: Some(base_path),
+            store_id: None,
+        },
+    )
+}
+
 async fn spawn(
     theater_tx: &mpsc::UnboundedSender<TheaterCommand>,
     manifest: ManifestConfig,
@@ -182,7 +200,7 @@ fn dirs() -> (tempfile::TempDir, PathBuf) {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn child_cannot_widen_fs_hosts_or_programs() {
+async fn child_cannot_widen_fs_store_hosts_or_programs() {
     let (base, root) = dirs();
     let tx = start_runtime(&root);
     let parent = spawn(&tx, manifest("parent", vec![]), None)
@@ -224,6 +242,14 @@ async fn child_cannot_widen_fs_hosts_or_programs() {
     .await;
     refused(
         &tx,
+        manifest("store-root", vec![store("/".into())]),
+        parent,
+        "store",
+        "base_path",
+    )
+    .await;
+    refused(
+        &tx,
         manifest("hosts", vec![hosts(&["a.example", "evil.example"])]),
         parent,
         "http-client",
@@ -254,6 +280,7 @@ async fn narrowing_works_and_grandchild_cannot_exceed_child() {
             "child",
             vec![
                 fs(root.join("sub")),
+                store(root.join("store/sub")),
                 hosts(&["a.example"]),
                 programs(&["git"]),
             ],
@@ -270,6 +297,14 @@ async fn narrowing_works_and_grandchild_cannot_exceed_child() {
         child,
         "filesystem",
         "path",
+    )
+    .await;
+    refused(
+        &tx,
+        manifest("g-store", vec![store(root.join("store"))]),
+        child,
+        "store",
+        "base_path",
     )
     .await;
     refused(
