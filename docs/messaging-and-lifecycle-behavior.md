@@ -228,12 +228,14 @@ Paths are under `crates/`; "rt" is `theater/src/theater_runtime.rs`.
   called at rt:1297), and against the spawner's own handler config by
   `Handler::check_child_config` (`theater/src/handler/mod.rs:203`). filesystem
   requires the path, with symlinks resolved and no `..`, to be inside the
-  spawner's root (`theater-handler-filesystem/src/lib.rs:674`); http-client
+  spawner's root, and store the same for `base_path` (both through
+  `check_path_within` in `theater/src/config/enforcement.rs`); http-client
   requires `allowed_hosts` to be a subset (`theater-handler-http-client/src/lib.rs:130`);
   process requires `allowed_programs` and `max_processes` within the
   spawner's, and no `inherit_env` the spawner lacks
-  (`theater-handler-process/src/lib.rs:134`). Other handlers accept any config
-  (the default `check_child_config`). A block that is left out inherits the
+  (`theater-handler-process/src/lib.rs:134`). Other handlers (tcp, udp,
+  random, timer, terminal, replay, ...) accept any config (the default
+  `check_child_config`). A block that is left out inherits the
   spawner's config.
 - **The set is fixed at spawn.** `set_permissions` is called once, when the
   actor's handlers are made (`theater/src/handler/mod.rs:188`). Nothing
