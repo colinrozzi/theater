@@ -861,6 +861,8 @@ enum DataMode {
 /// A tracked process with ownership + mode.
 struct ProcessEntry {
     owner: TheaterId,
+    /// The program it runs, checked against a `transfer` target's grant.
+    program: String,
     os_pid: u32,
     pty: Option<Arc<PtyMaster>>,
     /// Piped stdin; `None` inside once closed.
@@ -905,6 +907,39 @@ impl ProcessEntry {
 struct SharedProcessState {
     processes: Mutex<HashMap<u64, ProcessEntry>>,
     next_id: AtomicU64,
+    /// What each actor with this handler may hold, so `transfer` can refuse a
+    /// target that could not have spawned the process itself.
+    receivers: std::sync::Mutex<HashMap<TheaterId, Receiver>>,
+}
+
+/// An actor's process config and grant, as a `transfer` target.
+struct Receiver {
+    config: ProcessHandlerConfig,
+    permissions: Option<ProcessPermissions>,
+}
+
+impl SharedProcessState {
+    /// `target` may take a process running `program` while it owns `owned`:
+    /// it has this handler, and its config and grant admit the program.
+    fn check_receiver(&self, target: TheaterId, program: &str, owned: usize) -> Result<(), Value> {
+        let refused = |e: Value| match e {
+            Value::String(e) => Value::String(format!("transfer refused: target {target}: {e}")),
+            e => e,
+        };
+        let receivers = self.receivers.lock().unwrap();
+        let r = receivers
+            .get(&target)
+            .ok_or_else(|| refused(Value::String("has no process handler".into())))?;
+        r.config.check_program(program).map_err(refused)?;
+        if let Some(max) = r.config.max_processes {
+            if owned >= max as usize {
+                return Err(refused(Value::String(format!(
+                    "permission denied: max processes ({max}) reached"
+                ))));
+            }
+        }
+        check_grant(&r.permissions, program, owned).map_err(refused)
+    }
 }
 
 impl SharedProcessState {
@@ -912,6 +947,7 @@ impl SharedProcessState {
         Self {
             processes: Mutex::new(HashMap::new()),
             next_id: AtomicU64::new(1),
+            receivers: std::sync::Mutex::new(HashMap::new()),
         }
     }
     fn next_id(&self) -> u64 {
@@ -1189,6 +1225,9 @@ impl Handler for ProcessHandler {
             cancel_token.cancel();
 
             let actor_id_val = *actor_id_for_cleanup.lock().unwrap();
+            if let Some(id) = actor_id_val {
+                shared_state.receivers.lock().unwrap().remove(&id);
+            }
             let owned: Vec<ProcessEntry> = {
                 let mut procs = shared_state.processes.lock().await;
                 let ids: Vec<u64> = procs
@@ -1226,6 +1265,13 @@ impl Handler for ProcessHandler {
             let mut g = self.actor_id.lock().unwrap();
             *g = Some(actor_id);
         }
+        self.shared_state.receivers.lock().unwrap().insert(
+            actor_id,
+            Receiver {
+                config: self.config.clone(),
+                permissions: self.permissions.clone(),
+            },
+        );
         // Only `transfer` needs the theater command channel (to reach the
         // target actor); it errors at call time if absent.
         let theater_tx = ctx.theater_tx.clone();
@@ -1280,6 +1326,7 @@ impl Handler for ProcessHandler {
                             id,
                             ProcessEntry {
                                 owner: actor_id,
+                                program: spec.program.clone(),
                                 os_pid: sp.os_pid,
                                 pty: sp.pty,
                                 stdin: sp.stdin.map(|s| Arc::new(Mutex::new(Some(s)))),
@@ -1749,7 +1796,9 @@ impl Handler for ProcessHandler {
                         };
                         {
                             let mut procs = st.processes.lock().await;
+                            let theirs = procs.values().filter(|e| e.owner == target).count();
                             let (_, e) = owned(&mut procs, &pid_str, actor_id)?;
+                            st.check_receiver(target, &e.program, theirs)?;
                             e.stop_pump();
                             e.mode = DataMode::Passive;
                             e.owner = target;
