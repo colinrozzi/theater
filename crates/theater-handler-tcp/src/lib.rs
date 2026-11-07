@@ -407,14 +407,32 @@ impl StreamState {
 struct ConnectionEntry {
     stream: Arc<Mutex<StreamState>>,
     peer_addr: SocketAddr,
+    origin: ConnOrigin,
     owner: TheaterId,
     state: ConnectionState,
     data_mode: DataMode,
 }
 
+/// The address a connection was made against, as the actor wrote it:
+/// checked against a `transfer` target's allowlists.
+#[derive(Debug, Clone)]
+enum ConnOrigin {
+    /// `connect(address)`.
+    Connected(String),
+    /// Accepted on `listen(address)`.
+    Accepted(Arc<str>),
+}
+
+/// An actor's tcp allowlists, as a `transfer` target.
+struct TcpReceiver {
+    allowed_listen: Option<Vec<String>>,
+    allowed_connect: Option<Vec<String>>,
+}
+
 /// A tracked TCP listener with ownership
 struct ListenerEntry {
     listener: TcpListener,
+    address: Arc<str>,
     owner: TheaterId,
 }
 
@@ -464,6 +482,9 @@ struct SharedTcpState {
     /// Bumped after each insert into `tls_upgrades`, to wake read loops that
     /// are blocked in a read.
     tls_upgrades_changed: tokio::sync::watch::Sender<u64>,
+    /// Each actor with this handler and its allowlists, so `transfer` can
+    /// refuse a target that could not have made the connection itself.
+    receivers: std::sync::Mutex<HashMap<TheaterId, TcpReceiver>>,
 }
 
 impl SharedTcpState {
@@ -478,7 +499,25 @@ impl SharedTcpState {
             accept_tasks: Mutex::new(HashMap::new()),
             tls_upgrades: Mutex::new(HashMap::new()),
             tls_upgrades_changed: tokio::sync::watch::channel(0).0,
+            receivers: std::sync::Mutex::new(HashMap::new()),
         }
+    }
+
+    /// `target` may take a connection made against `origin`: it has this
+    /// handler, and its allowlist for that kind of address admits it.
+    fn check_receiver(&self, target: TheaterId, origin: &ConnOrigin) -> Result<(), Value> {
+        let receivers = self.receivers.lock().unwrap();
+        let checked = match receivers.get(&target) {
+            None => Err(Value::String("has no tcp handler".into())),
+            Some(r) => match origin {
+                ConnOrigin::Connected(a) => check_address(&r.allowed_connect, "connect", a),
+                ConnOrigin::Accepted(a) => check_address(&r.allowed_listen, "listen", a),
+            },
+        };
+        checked.map_err(|e| match e {
+            Value::String(e) => Value::String(format!("transfer refused: target {target}: {e}")),
+            e => e,
+        })
     }
 
     fn next_id(&self) -> u64 {
@@ -759,6 +798,7 @@ async fn close_and_remove_connection(st: &Arc<SharedTcpState>, conn_id: u64) {
 async fn run_accept_loop(
     listener: TcpListener,
     listener_id: u64,
+    listen_addr: Arc<str>,
     cancel_token: CancellationToken,
     tls_ctx: Arc<Option<TlsContext>>,
     st: Arc<SharedTcpState>,
@@ -791,6 +831,7 @@ async fn run_accept_loop(
                             conn_id,
                             tcp_stream,
                             peer_addr,
+                            listen_addr.clone(),
                             tls_ctx.clone(),
                             st.clone(),
                             actor_id,
@@ -823,6 +864,7 @@ async fn handle_accepted_connection(
     conn_id: u64,
     tcp_stream: TcpStream,
     peer_addr: SocketAddr,
+    listen_addr: Arc<str>,
     tls_ctx: Arc<Option<TlsContext>>,
     st: Arc<SharedTcpState>,
     actor_id: TheaterId,
@@ -865,6 +907,7 @@ async fn handle_accepted_connection(
         ConnectionEntry {
             stream: Arc::new(Mutex::new(StreamState::Full(Box::new(unified_stream)))),
             peer_addr,
+            origin: ConnOrigin::Accepted(listen_addr),
             owner: actor_id,
             state: ConnectionState::Pending,
             data_mode: DataMode::Passive,
@@ -940,6 +983,7 @@ async fn do_transfer_async(
                 conn_id_str
             )));
         }
+        st.check_receiver(target_actor, &entry.origin)?;
 
         let old_owner = entry.owner;
         entry.owner = target_actor;
@@ -1107,6 +1151,9 @@ impl Handler for TcpHandler {
             info!("TCP handler cancellation token cancelled");
 
             let actor_id_val = *actor_id_for_cleanup.lock().unwrap();
+            if let Some(id) = actor_id_val {
+                shared_state.receivers.lock().unwrap().remove(&id);
+            }
 
             // Join this actor's active-listen accept loops so their TcpListeners
             // are dropped (fds released) BEFORE we fall out of scope and ack
@@ -1208,6 +1255,13 @@ impl Handler for TcpHandler {
             let mut id_guard = self.actor_id.lock().unwrap();
             *id_guard = Some(actor_id);
         }
+        self.shared_state.receivers.lock().unwrap().insert(
+            actor_id,
+            TcpReceiver {
+                allowed_listen: self.config.allowed_listen.clone(),
+                allowed_connect: self.config.allowed_connect.clone(),
+            },
+        );
 
         // Update max_connections if configured
         // Note: We can't easily update the shared state's max_connections here
@@ -1351,6 +1405,7 @@ impl Handler for TcpHandler {
                                 unified_stream,
                             )))),
                             peer_addr,
+                            origin: ConnOrigin::Connected(address.clone()),
                             owner: actor_id,
                             state: ConnectionState::Active, // Outbound = active
                             data_mode: DataMode::Passive,
@@ -1418,6 +1473,7 @@ impl Handler for TcpHandler {
                     let accept_handle = tokio::spawn(run_accept_loop(
                         listener,
                         listener_id,
+                        Arc::from(address.as_str()),
                         cancel_token,
                         tls_ctx_for_task,
                         st_for_task,
@@ -1468,6 +1524,7 @@ impl Handler for TcpHandler {
                             listener_id_str
                         )));
                     }
+                    let listen_addr = entry.address.clone();
 
                     let (tcp_stream, peer_addr) = entry
                         .listener
@@ -1511,6 +1568,7 @@ impl Handler for TcpHandler {
                                 unified_stream,
                             )))),
                             peer_addr,
+                            origin: ConnOrigin::Accepted(listen_addr),
                             owner: actor_id,
                             state: ConnectionState::Pending, // Starts pending!
                             data_mode: DataMode::Passive,
@@ -1731,6 +1789,7 @@ impl Handler for TcpHandler {
                                 conn_id_str
                             )));
                         }
+                        st.check_receiver(target_actor, &entry.origin)?;
 
                         // Transfer ownership and activate
                         let old_owner = entry.owner;
@@ -2727,6 +2786,7 @@ mod tests {
                     UnifiedStream::Plain(server),
                 )))),
                 peer_addr,
+                origin: ConnOrigin::Accepted("127.0.0.1:0".into()),
                 owner: acceptor_id,
                 state: ConnectionState::Pending,
                 data_mode: DataMode::Passive,
@@ -2783,6 +2843,7 @@ mod tests {
             ConnectionEntry {
                 stream: Arc::new(Mutex::new(StreamState::WriteOnly(write_half))),
                 peer_addr,
+                origin: ConnOrigin::Accepted("127.0.0.1:0".into()),
                 owner,
                 state: ConnectionState::Active,
                 data_mode: DataMode::Active,
@@ -2919,6 +2980,7 @@ mod tests {
 
         let (theater_tx, theater_rx) = tokio::sync::mpsc::unbounded_channel::<TheaterCommand>();
         serve_theater_tx(theater_rx, target_id, target_handle);
+        admit(&st, target_id, None);
 
         // Client parks its request; the target reads it only after its stall.
         client.write_all(b"ping").await.unwrap();
@@ -2976,6 +3038,94 @@ mod tests {
     /// If the target's `handle-connection-transfer` traps (its operation
     /// channel drops the response without answering), the detached path must
     /// close and remove the connection from the shared map.
+    /// Register `id` as a tcp transfer target with `allowed_listen`, as its
+    /// handler's host-function registration does.
+    fn admit(st: &SharedTcpState, id: TheaterId, allowed_listen: Option<Vec<String>>) {
+        st.receivers.lock().unwrap().insert(
+            id,
+            TcpReceiver {
+                allowed_listen,
+                allowed_connect: None,
+            },
+        );
+    }
+
+    #[tokio::test]
+    async fn transfer_needs_the_capability_on_the_receiving_side() {
+        let (st, conn_id, acceptor_id, _client) = pending_conn().await;
+        let target_id = TheaterId::generate();
+        // A target that never answers: only the refusals are under test here,
+        // and they must come before anything is dispatched.
+        let (op_tx, _op_rx) = tokio::sync::mpsc::channel::<ActorOperation>(4);
+        let (info_tx, _info_rx) = tokio::sync::mpsc::channel(4);
+        let (ctrl_tx, _ctrl_rx) = tokio::sync::mpsc::channel(4);
+        let (theater_tx, theater_rx) = tokio::sync::mpsc::unbounded_channel::<TheaterCommand>();
+        serve_theater_tx(
+            theater_rx,
+            target_id,
+            ActorHandle::new(op_tx, info_tx, ctrl_tx),
+        );
+        let input = Value::Tuple(vec![
+            Value::String(conn_id.to_string()),
+            Value::String(target_id.to_string()),
+        ]);
+        let refused = |r: Result<Value, Value>, want: &str| {
+            let Err(Value::String(e)) = r else {
+                panic!("transfer should be refused: {r:?}")
+            };
+            assert!(
+                e.starts_with("transfer refused: target") && e.contains(want),
+                "{e}"
+            );
+        };
+
+        // No tcp handler on the target.
+        refused(
+            do_transfer_async(st.clone(), acceptor_id, theater_tx.clone(), &input).await,
+            "has no tcp handler",
+        );
+        // A target whose allowlist does not admit the listen address.
+        admit(&st, target_id, Some(vec!["127.0.0.1:9".into()]));
+        refused(
+            do_transfer_async(st.clone(), acceptor_id, theater_tx.clone(), &input).await,
+            "listen to 127.0.0.1:0 not allowed",
+        );
+        // Refusals leave the connection with its owner, still pending.
+        {
+            let conns = st.connections.lock().await;
+            let e = conns.get(&conn_id).expect("connection kept");
+            assert_eq!(e.owner, acceptor_id);
+            assert!(matches!(e.state, ConnectionState::Pending));
+        }
+        // An allowlist that admits it.
+        admit(&st, target_id, Some(vec!["127.0.0.1".into()]));
+        do_transfer_async(st.clone(), acceptor_id, theater_tx.clone(), &input)
+            .await
+            .expect("an admitted target takes the connection");
+        assert_eq!(st.connections.lock().await[&conn_id].owner, target_id);
+    }
+
+    #[test]
+    fn outbound_connections_are_checked_against_allowed_connect() {
+        let st = SharedTcpState::new(None, None);
+        let target = TheaterId::generate();
+        st.receivers.lock().unwrap().insert(
+            target,
+            TcpReceiver {
+                allowed_listen: Some(vec![]),
+                allowed_connect: Some(vec!["db.internal:5432".into()]),
+            },
+        );
+        st.check_receiver(target, &ConnOrigin::Connected("db.internal:5432".into()))
+            .unwrap();
+        assert!(st
+            .check_receiver(target, &ConnOrigin::Connected("10.0.0.5:5432".into()))
+            .is_err());
+        assert!(st
+            .check_receiver(target, &ConnOrigin::Accepted("127.0.0.1:80".into()))
+            .is_err());
+    }
+
     #[tokio::test]
     async fn transfer_async_cleans_up_on_target_crash() {
         let (st, conn_id, acceptor_id, _client) = pending_conn().await;
@@ -2996,6 +3146,7 @@ mod tests {
 
         let (theater_tx, theater_rx) = tokio::sync::mpsc::unbounded_channel::<TheaterCommand>();
         serve_theater_tx(theater_rx, target_id, target_handle);
+        admit(&st, target_id, None);
 
         let input = Value::Tuple(vec![
             Value::String(conn_id.to_string()),
@@ -3110,6 +3261,7 @@ mod tests {
         tokio::spawn(run_accept_loop(
             listener,
             1, // listener_id
+            "127.0.0.1:0".into(),
             cancel.clone(),
             tls_ctx.clone(),
             st.clone(),
@@ -3271,6 +3423,7 @@ mod tests {
         let handle = tokio::spawn(run_accept_loop(
             listener,
             1,
+            "127.0.0.1:0".into(),
             cancel.clone(),
             tls_ctx,
             st,

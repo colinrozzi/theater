@@ -628,6 +628,7 @@ async fn pending_remainder_is_returned_first() {
 fn entry_from(sp: Spawned, owner: TheaterId) -> ProcessEntry {
     ProcessEntry {
         owner,
+        program: "sh".into(),
         os_pid: sp.os_pid,
         pty: sp.pty,
         stdin: sp.stdin.map(|s| Arc::new(Mutex::new(Some(s)))),
@@ -753,4 +754,96 @@ async fn terminate_sigterms_then_sigkills_stragglers() {
         Some(libc::SIGKILL),
         "a TERM-ignoring process must be SIGKILLed after the grace"
     );
+}
+
+#[test]
+fn transfer_target_must_hold_the_capability() {
+    let st = SharedProcessState::new();
+    let receiver = |config, permissions| Receiver {
+        config,
+        permissions,
+    };
+    let grant = |programs: Option<Vec<&str>>| {
+        Some(ProcessPermissions {
+            max_processes: usize::MAX,
+            max_output_buffer: usize::MAX,
+            allowed_programs: programs.map(|p| p.into_iter().map(String::from).collect()),
+            allowed_paths: None,
+        })
+    };
+    let (open, narrow, ungranted, limited) = (
+        TheaterId::generate(),
+        TheaterId::generate(),
+        TheaterId::generate(),
+        TheaterId::generate(),
+    );
+    {
+        let mut r = st.receivers.lock().unwrap();
+        r.insert(open, receiver(cfg(), grant(None)));
+        r.insert(
+            narrow,
+            receiver(
+                ProcessHandlerConfig {
+                    allowed_programs: Some(vec!["git".into()]),
+                    ..cfg()
+                },
+                grant(None),
+            ),
+        );
+        r.insert(ungranted, receiver(cfg(), None));
+        r.insert(
+            limited,
+            receiver(
+                ProcessHandlerConfig {
+                    max_processes: Some(1),
+                    ..cfg()
+                },
+                grant(Some(vec!["sh"])),
+            ),
+        );
+    }
+    let refused = |target, program, owned, want: &str| {
+        let e = st
+            .check_receiver(target, program, owned)
+            .expect_err("transfer should be refused");
+        let Value::String(e) = e else { panic!("{e:?}") };
+        assert!(
+            e.starts_with("transfer refused: target") && e.contains(want),
+            "{e}"
+        );
+    };
+
+    st.check_receiver(open, "sh", 0)
+        .expect("a full grant takes anything");
+    st.check_receiver(narrow, "git", 0).expect("git is allowed");
+    st.check_receiver(limited, "sh", 0)
+        .expect("under its limit");
+    refused(TheaterId::generate(), "sh", 0, "has no process handler");
+    refused(narrow, "sh", 0, "program \"sh\" not allowed");
+    refused(ungranted, "sh", 0, "process capability not granted");
+    refused(limited, "sh", 1, "max processes (1) reached");
+    refused(limited, "git", 0, "not granted");
+}
+
+#[test]
+fn an_actor_is_a_transfer_target_once_its_host_functions_are_registered() {
+    let template = ProcessHandler::new(cfg());
+    let mut instance = template.create_instance(None);
+    instance.set_permissions(Some(&theater::config::permissions::HandlerPermission {
+        process: None,
+        ..theater::config::permissions::HandlerPermission::root()
+    }));
+    let id = TheaterId::generate();
+    assert!(template.shared_state.check_receiver(id, "sh", 0).is_err());
+    let mut ctx = theater::handler::HandlerContext::new();
+    ctx.actor_id = Some(id);
+    instance
+        .register_host_functions(&mut theater::pack_bridge::HostImports::new(), &mut ctx)
+        .unwrap();
+    // Registered with the grant it was given: present, but without the
+    // process capability.
+    let Err(Value::String(e)) = template.shared_state.check_receiver(id, "sh", 0) else {
+        panic!("should be refused for lack of a grant");
+    };
+    assert!(e.contains("capability not granted"), "{e}");
 }

@@ -266,6 +266,27 @@ Paths are under `crates/`; "rt" is `theater/src/theater_runtime.rs`.
   value is ignored (lib.rs:1212); the last manifest to set
   `idle_timeout_secs` sets it for all. udp's peer check is a string prefix,
   so `"10.0.0.1"` also admits `10.0.0.10` (`theater-handler-udp/src/lib.rs:505`).
+- **A transfer needs the capability on the receiving side** (ticket 0076,
+  2026-11-07). Each actor's process and tcp handler records what that actor
+  may hold in the state the handler shares across actors when its host
+  functions are registered, and drops it at shutdown
+  (`theater-handler-process/src/lib.rs:1268`,
+  `theater-handler-tcp/src/lib.rs:1258`). `process.transfer` refuses a
+  target with no entry, or whose config or grant does not admit the
+  process's program or is at its process limit
+  (`theater-handler-process/src/lib.rs:924`, checked at :1801). tcp
+  `transfer` and `transfer-async` refuse a target with no entry, or whose
+  `allowed_connect` (for a `connect()`ed connection) or `allowed_listen`
+  (for one accepted on `listen()`) does not admit the address the
+  connection was made against, as the actor wrote it
+  (`ConnOrigin`, `theater-handler-tcp/src/lib.rs:419`; check at :508,
+  called at :986 and :1792). The error is returned to the sender as
+  `transfer refused: target <id>: ...`, and the resource stays with it.
+  Every actor in a runtime gets every handler, so a target almost always
+  has an entry: what refuses it is its grant (a policy that disallows
+  process leaves it with none) or its config. "No entry" means a target
+  that has stopped, is replaying (process skips registration when replay
+  already provides the interface), or belongs to another runtime.
 - **The set is fixed at spawn.** `set_permissions` is called once, when the
   actor's handlers are made (`theater/src/handler/mod.rs:188`). Nothing
   changes a running actor's set.
