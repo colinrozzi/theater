@@ -287,6 +287,31 @@ impl Handler for StoreHandler {
         })
     }
 
+    fn check_child_config(
+        &self,
+        config: &theater::config::actor_manifest::HandlerConfig,
+    ) -> Result<(), String> {
+        let child = config
+            .parse::<StoreHandlerConfig>()
+            .map_err(|e| format!("invalid config: {}", e))?;
+        // Unset means the default store under the theater home, which is
+        // outside a spawner that was given its own base_path.
+        match (&self.base_path, &child.base_path) {
+            (None, None) => Ok(()),
+            (Some(root), Some(path)) => {
+                theater::config::enforcement::check_path_within("base_path", path, root)
+            }
+            (Some(root), None) => Err(format!(
+                "base_path is unset (the default store) but the spawner's is {:?}",
+                root
+            )),
+            (None, Some(path)) => Err(format!(
+                "base_path {:?} is not allowed: the spawner uses the default store",
+                path
+            )),
+        }
+    }
+
     fn name(&self) -> &str {
         "store"
     }
@@ -745,6 +770,71 @@ impl Handler for StoreHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn store(base_path: Option<&std::path::Path>) -> StoreHandler {
+        StoreHandler::new(
+            StoreHandlerConfig {
+                base_path: base_path.map(|p| p.to_path_buf()),
+                store_id: None,
+            },
+            None,
+        )
+    }
+
+    fn child(
+        base_path: Option<&std::path::Path>,
+    ) -> theater::config::actor_manifest::HandlerConfig {
+        theater::config::actor_manifest::HandlerConfig::new(
+            "store",
+            StoreHandlerConfig {
+                base_path: base_path.map(|p| p.to_path_buf()),
+                store_id: Some("shared".to_string()),
+            },
+        )
+    }
+
+    #[test]
+    fn child_base_path_must_stay_inside_spawner_base_path() {
+        let base = tempfile::tempdir().unwrap();
+        let root = base.path().join("root");
+        std::fs::create_dir_all(root.join("sub")).unwrap();
+        std::fs::create_dir_all(base.path().join("outside")).unwrap();
+        let parent = store(Some(&root));
+
+        assert!(parent.check_child_config(&child(Some(&root))).is_ok());
+        assert!(parent
+            .check_child_config(&child(Some(&root.join("sub"))))
+            .is_ok());
+        assert!(parent
+            .check_child_config(&child(Some(&root.join("new"))))
+            .is_ok());
+
+        for path in [
+            std::path::PathBuf::from("/"),
+            base.path().join("outside"),
+            root.join("sub/../../outside"),
+        ] {
+            let err = parent.check_child_config(&child(Some(&path))).unwrap_err();
+            assert!(err.contains("base_path"), "{}", err);
+        }
+        std::os::unix::fs::symlink(base.path().join("outside"), root.join("link")).unwrap();
+        assert!(parent
+            .check_child_config(&child(Some(&root.join("link"))))
+            .is_err());
+        // Unset is the default store under the theater home: outside the root.
+        let err = parent.check_child_config(&child(None)).unwrap_err();
+        assert!(err.contains("base_path is unset"), "{}", err);
+    }
+
+    #[test]
+    fn child_of_default_store_spawner_cannot_name_a_base_path() {
+        let parent = store(None);
+        assert!(parent.check_child_config(&child(None)).is_ok());
+        let err = parent
+            .check_child_config(&child(Some(std::path::Path::new("/"))))
+            .unwrap_err();
+        assert!(err.contains("base_path"), "{}", err);
+    }
 
     #[test]
     fn test_store_handler_creation() {

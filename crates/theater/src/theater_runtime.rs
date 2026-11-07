@@ -8,6 +8,8 @@ use crate::actor::handle::ActorHandle;
 use crate::actor::runtime::{ActorRuntime, ActorRuntimeError};
 use crate::actor::types::{ActorControl, ActorError, ActorInfo, ActorOperation};
 use crate::chain::ChainEvent;
+use crate::config::inheritance::HandlerPermissionPolicy;
+use crate::config::permissions::HandlerPermission;
 use crate::handler::HandlerRegistry;
 use crate::id::TheaterId;
 use crate::messages::{ActorMessage, ActorStatus, ActorTreeRow, SubscribeReply, TheaterCommand};
@@ -197,6 +199,22 @@ pub struct ActorProcess<E: crate::executor::Spawn> {
     /// actor's execution lock or routing through the info loop — which would
     /// deadlock a self-describe and stall the central command loop.
     pub metadata: std::sync::Arc<MetadataWithHashes>,
+    /// The actor's effective permissions: its spawner's set narrowed by its
+    /// manifest policy (root's for an actor the host started). An actor it
+    /// spawns starts from this set and can only narrow it.
+    pub permissions: HandlerPermission,
+    /// Fresh copies of the actor's own handlers, with its configs: the
+    /// templates for any actor it spawns, in place of the host's.
+    pub child_handlers: HandlerRegistry,
+}
+
+/// What [`TheaterRuntime::create_handler_registry_for_manifest`] builds for
+/// one actor: the handlers it runs with, copies for its children, and its
+/// effective permissions.
+struct ActorHandlers {
+    registry: HandlerRegistry,
+    child_handlers: HandlerRegistry,
+    permissions: HandlerPermission,
 }
 
 impl<E: crate::executor::Spawn> TheaterRuntime<E> {
@@ -862,17 +880,69 @@ impl<E: crate::executor::Spawn> TheaterRuntime<E> {
         // defaults, etc. live in the caller). The runtime no longer stores it:
         // state lives inside the module, so `init_state` is delivered to the
         // actor as the *argument* of its `init` export below (see the init-fire).
-        let handler_registry = if let Some(ref manifest) = manifest {
-            match self.create_handler_registry_for_manifest(manifest).await {
-                Ok(r) => r,
-                Err(e) => {
-                    error!("Failed to build handler registry: {}", e);
-                    let _ = response_tx.send(Err(SpawnError::HandlerRegistry(format!("{}", e))));
-                    return;
+        let built = match parent_id {
+            // Started by the host: root is the parent and the host's handlers
+            // are the templates.
+            None => match manifest {
+                Some(ref manifest) => {
+                    self.create_handler_registry_for_manifest(
+                        manifest,
+                        &HandlerPermission::root(),
+                        &self.handler_registry,
+                        None,
+                    )
+                    .await
                 }
+                None => Ok(ActorHandlers {
+                    registry: self.handler_registry.clone(),
+                    child_handlers: self.handler_registry.clone(),
+                    permissions: HandlerPermission::calculate_effective(
+                        &HandlerPermission::root(),
+                        &HandlerPermissionPolicy::default(),
+                    ),
+                }),
+            },
+            // Spawned by an actor: start from what the spawner has. If the
+            // spawner is gone there is nothing to narrow from, so refuse
+            // rather than fall back to root.
+            Some(parent) => match self.actors.get(&parent) {
+                Some(spawner) => {
+                    let manifest = manifest.clone().unwrap_or_else(|| ManifestConfig {
+                        name: actor_name.clone(),
+                        version: String::new(),
+                        package: String::new(),
+                        description: None,
+                        long_description: None,
+                        initial_state: None,
+                        static_package: false,
+                        permission_policy: HandlerPermissionPolicy::default(),
+                        handlers: Vec::new(),
+                    });
+                    self.create_handler_registry_for_manifest(
+                        &manifest,
+                        &spawner.permissions,
+                        &spawner.child_handlers,
+                        Some(parent),
+                    )
+                    .await
+                }
+                None => Err(anyhow::anyhow!(
+                    "spawner {} is not running; cannot compute the child's permissions",
+                    parent
+                )),
+            },
+        };
+        let ActorHandlers {
+            registry: handler_registry,
+            child_handlers,
+            permissions,
+        } = match built {
+            Ok(b) => b,
+            Err(e) => {
+                error!("Failed to build handler registry: {}", e);
+                let _ = response_tx.send(Err(SpawnError::HandlerRegistry(format!("{}", e))));
+                return;
             }
-        } else {
-            self.handler_registry.clone()
         };
 
         // Start the actor in a detached task. The pack runtime (and the
@@ -950,6 +1020,8 @@ impl<E: crate::executor::Spawn> TheaterRuntime<E> {
             manifest,
             shutdown_controller,
             metadata: actor_metadata,
+            permissions,
+            child_handlers,
         };
 
         self.register_actor(process);
@@ -1203,22 +1275,39 @@ impl<E: crate::executor::Spawn> TheaterRuntime<E> {
     ///
     /// Special handling for replay: If the manifest contains a replay handler
     /// configuration, this method will load the chain and prepend a ReplayHandler.
+    ///
+    /// `parent_permissions` and `templates` are the spawner's effective set and
+    /// handlers (root and the host's handlers for an actor the host started).
+    /// The actor's set is the parent's narrowed by its manifest policy. When
+    /// `spawner` is set, its `[[handler]]` configs must not exceed that set nor
+    /// the spawner's own handler configs, or the spawn is refused.
     async fn create_handler_registry_for_manifest(
         &self,
         manifest: &ManifestConfig,
-    ) -> Result<HandlerRegistry> {
-        // Compute this actor's effective permissions from its manifest policy
-        // against a root (fully-privileged) parent, then apply configs + grants.
-        // Control caps (runtime/supervisor) default-deny, so an actor gets them
-        // only by declaring an explicit restrict grant. (Full parent-chain
-        // inheritance — child cannot exceed its spawner — is a follow-up.)
-        let effective =
-            manifest.calculate_effective_permissions(
-                &crate::config::permissions::HandlerPermission::root(),
-            );
-        let mut registry = self
-            .handler_registry
-            .clone_with_configs(&manifest.handlers, Some(&effective));
+        parent_permissions: &HandlerPermission,
+        templates: &HandlerRegistry,
+        spawner: Option<TheaterId>,
+    ) -> Result<ActorHandlers> {
+        // Control caps (runtime) default-deny, so an actor gets them only by
+        // declaring an explicit restrict grant, and never beyond its parent's.
+        let effective = manifest.calculate_effective_permissions(parent_permissions);
+        let mut registry = match spawner {
+            None => templates.clone_with_configs(&manifest.handlers, Some(&effective)),
+            Some(spawner) => {
+                crate::config::enforcement::validate_manifest_permissions(manifest, &effective)
+                    .map_err(|e| {
+                        anyhow::anyhow!("manifest exceeds what spawner {} has: {}", spawner, e)
+                    })?;
+                templates
+                    .narrow_with_configs(&manifest.handlers, Some(&effective))
+                    .map_err(|e| {
+                        anyhow::anyhow!("manifest exceeds what spawner {} has: {}", spawner, e)
+                    })?
+            }
+        };
+        // Copies for this actor's own children, taken before any replay
+        // handler is prepended.
+        let child_handlers = registry.clone();
 
         // Special handling for replay handler - needs to load chain file
         for handler_config in &manifest.handlers {
@@ -1267,7 +1356,11 @@ impl<E: crate::executor::Spawn> TheaterRuntime<E> {
             }
         }
 
-        Ok(registry)
+        Ok(ActorHandlers {
+            registry,
+            child_handlers,
+            permissions: effective,
+        })
     }
 
     /// Stops the entire runtime and all actors gracefully.

@@ -194,6 +194,30 @@ impl HandlerRegistry {
         }
         new_registry
     }
+
+    /// Like [`Self::clone_with_configs`], for an actor spawned by another: `self`
+    /// is the spawner's own handlers, and every config must first pass the
+    /// matching handler's [`Handler::check_child_config`]. A handler with no
+    /// config is inherited from the spawner as is, so a child never gets more
+    /// than its spawner had.
+    pub fn narrow_with_configs(
+        &self,
+        configs: &[HandlerConfig],
+        permissions: Option<&crate::config::permissions::HandlerPermission>,
+    ) -> Result<Self, String> {
+        for config in configs {
+            if let Some(handler) = self
+                .handlers
+                .iter()
+                .find(|h| h.name() == config.type_name())
+            {
+                handler
+                    .check_child_config(config)
+                    .map_err(|e| format!("[[handler]] '{}': {}", config.type_name(), e))?;
+            }
+        }
+        Ok(self.clone_with_configs(configs, permissions))
+    }
 }
 
 /// Trait describing the lifecycle hooks every handler must implement.
@@ -234,6 +258,17 @@ pub trait Handler: Send + Sync + 'static {
         &mut self,
         _permissions: Option<&crate::config::permissions::HandlerPermission>,
     ) {
+    }
+
+    /// Check that `config`, a spawned child's `[[handler]]` block for this
+    /// handler, asks for no more than this instance has.
+    ///
+    /// `self` is the spawner's instance, so the child's config must stay inside
+    /// it: a filesystem path inside the spawner's root, hosts or programs from
+    /// the spawner's lists. Return `Err` naming the config key that exceeds it.
+    /// The default accepts everything (handlers that don't narrow yet).
+    fn check_child_config(&self, _config: &HandlerConfig) -> Result<(), String> {
+        Ok(())
     }
 
     /// Synchronous initialization called BEFORE the actor can receive any calls.

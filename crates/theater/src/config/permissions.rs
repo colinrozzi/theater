@@ -61,7 +61,9 @@ fn le_num<T: PartialOrd>(parent: &T, child: &T) -> bool {
     child <= parent
 }
 
-/// Helper: intersection of two optional vectors
+/// Helper: intersection of two optional vectors, where `None` means
+/// unrestricted (as in [`HandlerPermission::root`]): restricting `None` gives
+/// the restriction, and restricting by `None` keeps what was there.
 fn intersect_options<T: Clone + Eq + std::hash::Hash>(
     first: &Option<Vec<T>>,
     second: &Option<Vec<T>>,
@@ -77,13 +79,14 @@ fn intersect_options<T: Clone + Eq + std::hash::Hash>(
             Some(intersection)
         }
         (Some(first_list), None) => Some(first_list.clone()),
-        (None, Some(_)) => None, // First denies capability
+        (None, Some(second_list)) => Some(second_list.clone()),
         (None, None) => None,
     }
 }
 
 /// Helper: intersection of path lists with hierarchical logic
-/// A path is allowed if it's a subdirectory of any allowed parent path
+/// A path is allowed if it's a subdirectory of any allowed parent path.
+/// `None` means unrestricted, as in [`intersect_options`].
 fn intersect_path_options(
     parent_paths: &Option<Vec<String>>,
     child_paths: &Option<Vec<String>>,
@@ -107,7 +110,7 @@ fn intersect_path_options(
             Some(allowed_paths)
         }
         (Some(parent_list), None) => Some(parent_list.clone()),
-        (None, Some(_)) => None, // Parent denies all paths
+        (None, Some(child_list)) => Some(child_list.clone()),
         (None, None) => None,
     }
 }

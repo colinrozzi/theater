@@ -60,6 +60,7 @@ use tracing::{debug, info, warn};
 
 use theater::actor::handle::ActorHandle;
 use theater::config::actor_manifest::FileSystemHandlerConfig;
+use theater::config::enforcement::check_path_within;
 use theater::config::permissions::{FileSystemPermissions, HandlerPermission};
 use theater::handler::{Handler, HandlerContext, SharedActorInstance};
 use theater::shutdown::ShutdownReceiver;
@@ -644,6 +645,29 @@ impl Handler for FileSystemHandler {
         self.permissions = permissions.and_then(|p| p.file_system.clone());
     }
 
+    fn check_child_config(
+        &self,
+        config: &theater::config::actor_manifest::HandlerConfig,
+    ) -> Result<(), String> {
+        let child = config
+            .parse::<FileSystemHandlerConfig>()
+            .map_err(|e| format!("invalid config: {}", e))?;
+        // A fresh temp dir (new_dir, or no path) holds nothing of the spawner's.
+        let child_path = match (&child.path, child.new_dir) {
+            (_, Some(true)) | (None, _) => return Ok(()),
+            (Some(p), _) => p,
+        };
+        match (&self.path, self.new_dir) {
+            (Some(root), new_dir) if new_dir != Some(true) => {
+                check_path_within("path", child_path, root)
+            }
+            _ => Err(format!(
+                "path {:?} is not allowed: the spawner has only a temporary root",
+                child_path
+            )),
+        }
+    }
+
     fn setup(
         &mut self,
         _actor_handle: ActorHandle,
@@ -1048,6 +1072,79 @@ mod tests {
             Some(vec!["theater:simple/filesystem".to_string()])
         );
         assert_eq!(handler.exports(), None);
+    }
+
+    fn child(path: &Path) -> theater::config::actor_manifest::HandlerConfig {
+        theater::config::actor_manifest::HandlerConfig::new(
+            "filesystem",
+            FileSystemHandlerConfig {
+                path: Some(path.to_path_buf()),
+                new_dir: None,
+                allowed_commands: None,
+            },
+        )
+    }
+
+    fn spawner(root: &Path) -> FileSystemHandler {
+        FileSystemHandler::new(
+            FileSystemHandlerConfig {
+                path: Some(root.to_path_buf()),
+                new_dir: None,
+                allowed_commands: None,
+            },
+            None,
+        )
+    }
+
+    #[test]
+    fn child_path_must_stay_inside_spawner_root() {
+        let base = tempfile::tempdir().unwrap();
+        let root = base.path().join("root");
+        std::fs::create_dir_all(root.join("sub")).unwrap();
+        std::fs::create_dir_all(base.path().join("outside")).unwrap();
+        let parent = spawner(&root);
+
+        // Narrowing: the root itself, an existing subdir, one not made yet.
+        assert!(parent.check_child_config(&child(&root)).is_ok());
+        assert!(parent.check_child_config(&child(&root.join("sub"))).is_ok());
+        assert!(parent
+            .check_child_config(&child(&root.join("new/deeper")))
+            .is_ok());
+
+        // Widening: "/", a sibling, a `..` escape, a symlink out.
+        assert!(parent.check_child_config(&child(Path::new("/"))).is_err());
+        assert!(parent
+            .check_child_config(&child(&base.path().join("outside")))
+            .is_err());
+        let err = parent
+            .check_child_config(&child(&root.join("sub/../../outside")))
+            .unwrap_err();
+        assert!(err.contains(".."), "{}", err);
+        std::os::unix::fs::symlink(base.path().join("outside"), root.join("link")).unwrap();
+        let err = parent
+            .check_child_config(&child(&root.join("link")))
+            .unwrap_err();
+        assert!(err.contains("outside the spawner's"), "{}", err);
+        assert!(parent
+            .check_child_config(&child(&root.join("link/new")))
+            .is_err());
+    }
+
+    #[test]
+    fn child_of_temp_root_spawner_gets_only_temp_roots() {
+        let parent = FileSystemHandler::new(cfg(), None);
+        assert!(parent
+            .check_child_config(&child(&std::env::temp_dir()))
+            .is_err());
+        let fresh = theater::config::actor_manifest::HandlerConfig::new(
+            "filesystem",
+            FileSystemHandlerConfig {
+                path: None,
+                new_dir: Some(true),
+                allowed_commands: None,
+            },
+        );
+        assert!(parent.check_child_config(&fresh).is_ok());
     }
 
     #[test]

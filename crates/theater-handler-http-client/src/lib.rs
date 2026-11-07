@@ -20,6 +20,12 @@
 //! A request whose URL host is not in `allowed_hosts` is rejected before any
 //! network I/O happens, returning `Err("http-client: host '<h>' not in
 //! allowed_hosts")`. An empty allowlist rejects every host.
+//!
+//! The actor's granted `HttpClientPermissions` (set by the runtime through
+//! `set_permissions`) are checked too: its `allowed_hosts` and
+//! `allowed_methods`, when set, must also admit the request. Without the
+//! capability every request is refused. A spawned actor's `allowed_hosts` must
+//! be a subset of its spawner's (`check_child_config`).
 
 use std::future::Future;
 use std::pin::Pin;
@@ -29,6 +35,8 @@ use tracing::{debug, error, info};
 
 use theater::actor::handle::ActorHandle;
 use theater::config::actor_manifest::{HandlerConfig, HttpClientHandlerConfig};
+use theater::config::enforcement::PermissionChecker;
+use theater::config::permissions::{HandlerPermission, HttpClientPermissions};
 use theater::handler::{Handler, HandlerContext, SharedActorInstance};
 use theater::shutdown::ShutdownReceiver;
 
@@ -56,6 +64,9 @@ fn http_client_interface() -> InterfaceImpl {
 #[derive(Clone)]
 pub struct HttpClientHandler {
     config: HttpClientHandlerConfig,
+    /// The actor's granted capability. Unrestricted until the runtime sets the
+    /// actor's grant; `None` refuses every request.
+    permissions: Option<HttpClientPermissions>,
     /// Shared reqwest client (rustls). `reqwest::Client` is cheap to clone —
     /// it wraps an internal `Arc` over the connection pool.
     client: reqwest::Client,
@@ -70,8 +81,32 @@ impl HttpClientHandler {
                 error!("http-client: failed to build rustls client: {e}; using default client");
                 reqwest::Client::new()
             });
-        Self { config, client }
+        Self {
+            config,
+            permissions: Some(HttpClientPermissions {
+                allowed_methods: None,
+                allowed_hosts: None,
+                max_redirects: None,
+                timeout: None,
+            }),
+            client,
+        }
     }
+}
+
+/// The request's host must be in the config's allowlist and, when the grant
+/// lists hosts or methods, in those too.
+fn check_request(
+    allowed_hosts: &[String],
+    permissions: &Option<HttpClientPermissions>,
+    method: &str,
+    host: &str,
+) -> Result<(), String> {
+    if !allowed_hosts.iter().any(|h| h == host) {
+        return Err(format!("http-client: host '{}' not in allowed_hosts", host));
+    }
+    PermissionChecker::check_http_operation(permissions, &method.to_uppercase(), host)
+        .map_err(|e| format!("http-client: {}", e))
 }
 
 impl Handler for HttpClientHandler {
@@ -83,7 +118,30 @@ impl Handler for HttpClientHandler {
             }),
             None => self.config.clone(),
         };
-        Box::new(HttpClientHandler::new(cfg))
+        let mut handler = HttpClientHandler::new(cfg);
+        handler.permissions = self.permissions.clone();
+        Box::new(handler)
+    }
+
+    fn set_permissions(&mut self, permissions: Option<&HandlerPermission>) {
+        self.permissions = permissions.and_then(|p| p.http_client.clone());
+    }
+
+    fn check_child_config(&self, config: &HandlerConfig) -> Result<(), String> {
+        let child = config
+            .parse::<HttpClientHandlerConfig>()
+            .map_err(|e| format!("invalid config: {}", e))?;
+        match child
+            .allowed_hosts
+            .iter()
+            .find(|h| !self.config.allowed_hosts.contains(h))
+        {
+            Some(h) => Err(format!(
+                "allowed_hosts entry '{}' is not in the spawner's allowed_hosts {:?}",
+                h, self.config.allowed_hosts
+            )),
+            None => Ok(()),
+        }
     }
 
     fn name(&self) -> &str {
@@ -145,6 +203,7 @@ impl Handler for HttpClientHandler {
 
         let client = self.client.clone();
         let allowed_hosts = Arc::new(self.config.allowed_hosts.clone());
+        let permissions = Arc::new(self.permissions.clone());
 
         // request(req: http-request) -> result<http-response, string>
         imports.define(
@@ -153,6 +212,7 @@ impl Handler for HttpClientHandler {
             pact_result_host_fn(move |input: Value| {
                 let client = client.clone();
                 let allowed = allowed_hosts.clone();
+                let permissions = permissions.clone();
                 async move {
                     let parts = parse_http_request(&input)?;
 
@@ -163,12 +223,8 @@ impl Handler for HttpClientHandler {
                     let host = url.host_str().ok_or_else(|| {
                         Value::String(format!("http-client: url '{}' has no host", parts.url))
                     })?;
-                    if !allowed.iter().any(|h| h == host) {
-                        return Err(Value::String(format!(
-                            "http-client: host '{}' not in allowed_hosts",
-                            host
-                        )));
-                    }
+                    check_request(&allowed, &permissions, &parts.method, host)
+                        .map_err(Value::String)?;
 
                     debug!("http-client: {} {}", parts.method, parts.url);
                     do_request(&client, parts).await
@@ -389,4 +445,62 @@ async fn do_request(client: &reqwest::Client, parts: HttpRequestParts) -> Result
             ("body".to_string(), body),
         ],
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn handler(hosts: &[&str]) -> HttpClientHandler {
+        HttpClientHandler::new(HttpClientHandlerConfig {
+            allowed_hosts: hosts.iter().map(|h| h.to_string()).collect(),
+        })
+    }
+
+    fn child(hosts: &[&str]) -> HandlerConfig {
+        HandlerConfig::new("http-client", handler(hosts).config)
+    }
+
+    #[test]
+    fn child_hosts_must_be_spawner_hosts() {
+        let parent = handler(&["a.example", "b.example"]);
+        assert!(parent.check_child_config(&child(&["a.example"])).is_ok());
+        assert!(parent.check_child_config(&child(&[])).is_ok());
+        let err = parent
+            .check_child_config(&child(&["a.example", "evil.example"]))
+            .unwrap_err();
+        assert!(
+            err.contains("allowed_hosts entry 'evil.example'"),
+            "{}",
+            err
+        );
+    }
+
+    #[test]
+    fn granted_permissions_are_checked() {
+        let hosts = vec!["a.example".to_string(), "b.example".to_string()];
+        let mut h = handler(&["a.example", "b.example"]);
+        assert!(check_request(&hosts, &h.permissions, "GET", "b.example").is_ok());
+
+        // The grant narrows the config's list.
+        let mut grant = HandlerPermission::root();
+        grant.http_client = Some(HttpClientPermissions {
+            allowed_methods: Some(vec!["GET".to_string()]),
+            allowed_hosts: Some(vec!["a.example".to_string()]),
+            max_redirects: None,
+            timeout: None,
+        });
+        h.set_permissions(Some(&grant));
+        assert!(check_request(&hosts, &h.permissions, "get", "a.example").is_ok());
+        assert!(check_request(&hosts, &h.permissions, "GET", "b.example").is_err());
+        assert!(check_request(&hosts, &h.permissions, "POST", "a.example").is_err());
+        // Not in the config's list: refused whatever the grant says.
+        assert!(check_request(&hosts, &h.permissions, "GET", "c.example").is_err());
+
+        // No capability: nothing.
+        h.set_permissions(Some(&HandlerPermission::default()));
+        assert!(check_request(&hosts, &h.permissions, "GET", "a.example").is_err());
+        h.set_permissions(None);
+        assert!(check_request(&hosts, &h.permissions, "GET", "a.example").is_err());
+    }
 }

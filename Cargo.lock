@@ -2888,6 +2888,7 @@ name = "theater-handler-filesystem"
 version = "0.3.1"
 dependencies = [
  "anyhow",
+ "tempfile",
  "theater",
  "thiserror 2.0.18",
  "tokio",
@@ -3030,6 +3031,7 @@ dependencies = [
  "anyhow",
  "serde",
  "serde_json",
+ "tempfile",
  "theater",
  "theater-store",
  "thiserror 2.0.18",
@@ -3152,6 +3154,8 @@ dependencies = [
  "tempfile",
  "test-log",
  "theater",
+ "theater-handler-filesystem",
+ "theater-handler-http-client",
  "theater-handler-lifecycle",
  "theater-handler-loop",
  "theater-handler-message-server",
