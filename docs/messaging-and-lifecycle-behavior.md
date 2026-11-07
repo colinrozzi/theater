@@ -257,7 +257,9 @@ Paths are under `crates/`; "rt" is `theater/src/theater_runtime.rs`.
   are checked by `listen()` and `connect()` before any socket is made
   (lib.rs:1382, lib.rs:1296, `check_address` at lib.rs:145). An entry is
   `"host:port"` or `"host"` (any port); hosts compare as written, ignoring
-  case, so a name does not admit its IP. `None` admits any address, which is
+  case, and nothing is resolved: `"127.0.0.1:7800"` refuses
+  `localhost:7800`, and `"localhost:7800"` admits only `localhost:7800`
+  (checked on the name the actor passed, not on what it resolves to). `None` admits any address, which is
   the default. `TcpHandlerConfig::listen` is still never read.
   `idle_timeout_secs` and `max_connections` live on state shared by every
   tcp actor in the runtime: `max_connections` is the host's and a manifest's

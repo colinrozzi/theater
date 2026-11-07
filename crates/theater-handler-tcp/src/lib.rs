@@ -3700,6 +3700,14 @@ mod child_config_tests {
             e,
             Value::String("permission denied: listen to 0.0.0.0:80 not allowed".into())
         );
+        // Names and addresses are matched as the actor wrote them, never
+        // resolved: an address entry does not admit a name for it, and a
+        // name entry admits only that name.
+        let by_addr = Some(vec!["127.0.0.1:7800".to_string()]);
+        assert!(check_address(&by_addr, "connect", "localhost:7800").is_err());
+        let by_name = Some(vec!["localhost:7800".to_string()]);
+        assert!(check_address(&by_name, "connect", "localhost:7800").is_ok());
+        assert!(check_address(&by_name, "connect", "127.0.0.1:7800").is_err());
         assert_eq!(split_host_port("::1"), Some(("::1", None)));
         assert_eq!(split_host_port("[::1]"), Some(("[::1]", None)));
     }
