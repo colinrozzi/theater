@@ -321,3 +321,80 @@ fn interface_and_identity() {
     let h2 = udp_interface().hash();
     assert_eq!(h1, h2);
 }
+
+#[test]
+fn child_config_cannot_exceed_spawner() {
+    let spawner = UdpHandler::new(UdpHandlerConfig {
+        allowed_bind_ports: Some(vec![5000, 5001]),
+        allowed_peers: Some(vec!["10.0.0.".into()]),
+        allowed_multicast_groups: Some(vec!["239.1.1.1".into()]),
+        max_sockets: Some(4),
+    });
+    let child = |c: UdpHandlerConfig| spawner.check_child_config(&HandlerConfig::new("udp", c));
+    let narrow = UdpHandlerConfig {
+        allowed_bind_ports: Some(vec![0, 5000]),
+        allowed_peers: Some(vec!["10.0.0.7:53".into()]),
+        allowed_multicast_groups: Some(vec![]),
+        max_sockets: Some(1),
+    };
+    child(narrow.clone()).expect("narrowing is allowed");
+
+    let refused = |c: UdpHandlerConfig, key: &str| {
+        let e = child(c).expect_err("widening is refused");
+        assert!(e.contains(key), "{e}");
+    };
+    refused(
+        UdpHandlerConfig {
+            allowed_bind_ports: Some(vec![6000]),
+            ..narrow.clone()
+        },
+        "allowed_bind_ports",
+    );
+    refused(
+        UdpHandlerConfig {
+            allowed_bind_ports: None,
+            ..narrow.clone()
+        },
+        "allowed_bind_ports",
+    );
+    refused(
+        UdpHandlerConfig {
+            allowed_peers: Some(vec!["10.0.".into()]),
+            ..narrow.clone()
+        },
+        "allowed_peers",
+    );
+    refused(
+        UdpHandlerConfig {
+            allowed_peers: None,
+            ..narrow.clone()
+        },
+        "allowed_peers",
+    );
+    refused(
+        UdpHandlerConfig {
+            allowed_multicast_groups: Some(vec!["239.9.9.9".into()]),
+            ..narrow.clone()
+        },
+        "allowed_multicast_groups",
+    );
+    refused(
+        UdpHandlerConfig {
+            max_sockets: Some(5),
+            ..narrow.clone()
+        },
+        "max_sockets",
+    );
+    refused(
+        UdpHandlerConfig {
+            max_sockets: None,
+            ..narrow
+        },
+        "max_sockets",
+    );
+
+    // An unrestricted spawner admits any child config.
+    let open = UdpHandler::new(UdpHandlerConfig::default());
+    open.check_child_config(&HandlerConfig::new("udp", UdpHandlerConfig::default()))
+        .unwrap();
+}

@@ -1298,6 +1298,27 @@ impl<E: crate::executor::Spawn> TheaterRuntime<E> {
                     .map_err(|e| {
                         anyhow::anyhow!("manifest exceeds what spawner {} has: {}", spawner, e)
                     })?;
+                // The replay chain is read from the host below, so it must be
+                // one of the spawner's files, not any host path.
+                for config in manifest
+                    .handlers
+                    .iter()
+                    .filter(|c| c.type_name() == "replay")
+                {
+                    let replay: crate::config::actor_manifest::ReplayHandlerConfig =
+                        config.parse().map_err(|e| {
+                            anyhow::anyhow!("[[handler]] 'replay': invalid config: {}", e)
+                        })?;
+                    templates
+                        .check_child_path("filesystem", "chain", &replay.chain)
+                        .map_err(|e| {
+                            anyhow::anyhow!(
+                                "manifest exceeds what spawner {} has: [[handler]] 'replay': {}",
+                                spawner,
+                                e
+                            )
+                        })?;
+                }
                 templates
                     .narrow_with_configs(&manifest.handlers, Some(&effective))
                     .map_err(|e| {

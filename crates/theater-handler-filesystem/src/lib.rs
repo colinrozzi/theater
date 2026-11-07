@@ -668,6 +668,15 @@ impl Handler for FileSystemHandler {
         }
     }
 
+    fn check_child_path(&self, key: &str, path: &std::path::Path) -> Result<(), String> {
+        match (&self.path, self.new_dir) {
+            (Some(root), new_dir) if new_dir != Some(true) => check_path_within(key, path, root),
+            _ => Err(format!(
+                "{key} {path:?} is not allowed: the spawner has only a temporary root"
+            )),
+        }
+    }
+
     fn setup(
         &mut self,
         _actor_handle: ActorHandle,
@@ -1127,6 +1136,25 @@ mod tests {
         assert!(err.contains("outside the spawner's"), "{}", err);
         assert!(parent
             .check_child_config(&child(&root.join("link/new")))
+            .is_err());
+    }
+
+    #[test]
+    fn child_path_check_for_files_the_runtime_reads() {
+        let base = tempfile::tempdir().unwrap();
+        let root = base.path().join("root");
+        std::fs::create_dir_all(&root).unwrap();
+        let parent = spawner(&root);
+        assert!(parent
+            .check_child_path("chain", &root.join("a.chain.json"))
+            .is_ok());
+        let err = parent
+            .check_child_path("chain", Path::new("/etc/passwd"))
+            .unwrap_err();
+        assert!(err.contains("chain") && err.contains("outside"), "{}", err);
+        let temp = FileSystemHandler::new(cfg(), None);
+        assert!(temp
+            .check_child_path("chain", &std::env::temp_dir().join("x"))
             .is_err());
     }
 

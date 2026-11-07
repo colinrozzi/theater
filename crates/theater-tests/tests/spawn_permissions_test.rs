@@ -13,6 +13,7 @@ use std::time::Duration;
 
 use theater::config::actor_manifest::{
     FileSystemHandlerConfig, HandlerConfig, HttpClientHandlerConfig, ManifestConfig,
+    ReplayHandlerConfig,
 };
 use theater::config::inheritance::{HandlerInheritance, HandlerPermissionPolicy};
 use theater::config::permissions::HttpClientPermissions;
@@ -373,6 +374,48 @@ async fn policy_restriction_narrows_what_children_may_ask_for() {
     )
     .await
     .expect("within the grant");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn replay_chain_must_be_one_of_the_spawners_files() {
+    let (base, root) = dirs();
+    let tx = start_runtime(&root);
+    let parent = spawn(&tx, manifest("parent", vec![]), None)
+        .await
+        .expect("host-started parent");
+    let replay = |chain: PathBuf| HandlerConfig::new("replay", ReplayHandlerConfig { chain });
+
+    refused(
+        &tx,
+        manifest("replay-etc", vec![replay("/etc/passwd".into())]),
+        parent,
+        "replay",
+        "chain",
+    )
+    .await;
+    std::fs::write(base.path().join("outside/x.json"), "[]").unwrap();
+    std::os::unix::fs::symlink(base.path().join("outside/x.json"), root.join("x.json")).unwrap();
+    refused(
+        &tx,
+        manifest("replay-symlink", vec![replay(root.join("x.json"))]),
+        parent,
+        "replay",
+        "chain",
+    )
+    .await;
+
+    // A path inside the root passes the check and is then read.
+    let err = spawn(
+        &tx,
+        manifest("replay-inside", vec![replay(root.join("sub/none.json"))]),
+        Some(parent),
+    )
+    .await
+    .expect_err("the chain file does not exist");
+    assert!(
+        err.to_string().contains("Failed to read replay chain file"),
+        "{err}"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

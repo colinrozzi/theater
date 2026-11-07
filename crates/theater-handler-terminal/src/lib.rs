@@ -203,6 +203,24 @@ impl Handler for TerminalHandler {
         Box::new(TerminalHandler::new(terminal_config))
     }
 
+    /// raw_mode is not a grant that narrows: the host terminal is shared, so
+    /// a child must use its spawner's mode.
+    fn check_child_config(&self, config: &HandlerConfig) -> Result<(), String> {
+        let child = config
+            .parse::<TerminalHandlerConfig>()
+            .map_err(|e| format!("invalid config: {}", e))?;
+        let (theirs, mine) = (
+            self.config.raw_mode.unwrap_or(false),
+            child.raw_mode.unwrap_or(false),
+        );
+        if mine != theirs {
+            return Err(format!(
+                "raw_mode = {mine} differs from the spawner's {theirs}"
+            ));
+        }
+        Ok(())
+    }
+
     fn name(&self) -> &str {
         "terminal"
     }
@@ -658,5 +676,20 @@ mod tests {
     fn test_handler_name() {
         let handler = TerminalHandler::new(TerminalHandlerConfig::default());
         assert_eq!(handler.name(), "terminal");
+    }
+
+    #[test]
+    fn child_config_must_match_spawner_mode() {
+        let spawner = TerminalHandler::new(TerminalHandlerConfig::default());
+        let child = |raw_mode| {
+            spawner.check_child_config(&HandlerConfig::new(
+                "terminal",
+                TerminalHandlerConfig { raw_mode },
+            ))
+        };
+        child(None).unwrap();
+        child(Some(false)).unwrap();
+        let e = child(Some(true)).expect_err("a different mode is refused");
+        assert!(e.contains("raw_mode"), "{e}");
     }
 }

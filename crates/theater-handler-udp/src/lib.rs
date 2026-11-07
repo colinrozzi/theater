@@ -417,6 +417,75 @@ async fn recv_from_bounded(
 // ============================================================================
 
 impl UdpHandlerConfig {
+    /// A child's `[[handler]]` config may only narrow this (the spawner's):
+    /// each list a subset (a peer entry must start with one of the spawner's,
+    /// so it admits fewer peers), `max_sockets` no higher. An unset list or
+    /// limit means unrestricted, so it is refused against a restricted spawner.
+    fn check_child(&self, child: &Self) -> Result<(), String> {
+        if let Some(ref allowed) = self.allowed_bind_ports {
+            match child.allowed_bind_ports {
+                None => {
+                    return Err(format!(
+                        "allowed_bind_ports is unset (any port) but the spawner allows only {allowed:?}"
+                    ))
+                }
+                Some(ref asked) => {
+                    if let Some(p) = asked.iter().find(|p| **p != 0 && !allowed.contains(p)) {
+                        return Err(format!(
+                            "allowed_bind_ports entry {p} is not in the spawner's {allowed:?}"
+                        ));
+                    }
+                }
+            }
+        }
+        if let Some(ref allowed) = self.allowed_peers {
+            match child.allowed_peers {
+                None => {
+                    return Err(format!(
+                        "allowed_peers is unset (any peer) but the spawner allows only {allowed:?}"
+                    ))
+                }
+                Some(ref asked) => {
+                    if let Some(p) = asked
+                        .iter()
+                        .find(|p| !allowed.iter().any(|a| p.starts_with(a.as_str())))
+                    {
+                        return Err(format!(
+                            "allowed_peers entry {p:?} is not within the spawner's {allowed:?}"
+                        ));
+                    }
+                }
+            }
+        }
+        if let Some(ref allowed) = self.allowed_multicast_groups {
+            match child.allowed_multicast_groups {
+                None => {
+                    return Err(format!(
+                        "allowed_multicast_groups is unset (any group) but the spawner allows only {allowed:?}"
+                    ))
+                }
+                Some(ref asked) => {
+                    if let Some(g) = asked.iter().find(|g| !allowed.contains(g)) {
+                        return Err(format!(
+                            "allowed_multicast_groups entry {g:?} is not in the spawner's {allowed:?}"
+                        ));
+                    }
+                }
+            }
+        }
+        if let Some(max) = self.max_sockets {
+            match child.max_sockets {
+                Some(n) if n <= max => {}
+                Some(n) => return Err(format!("max_sockets {n} exceeds the spawner's {max}")),
+                None => {
+                    return Err(format!(
+                        "max_sockets is unset (unlimited) but the spawner's is {max}"
+                    ))
+                }
+            }
+        }
+        Ok(())
+    }
     fn check_bind_port(&self, addr: &SocketAddr) -> Result<(), Value> {
         if addr.port() == 0 {
             return Ok(()); // ephemeral always allowed
@@ -473,6 +542,13 @@ impl Handler for UdpHandler {
             actor_handle: Arc::new(std::sync::Mutex::new(None)),
             cancellation_token: CancellationToken::new(),
         })
+    }
+
+    fn check_child_config(&self, config: &HandlerConfig) -> Result<(), String> {
+        let child = config
+            .parse::<UdpHandlerConfig>()
+            .map_err(|e| format!("invalid config: {}", e))?;
+        self.config.check_child(&child)
     }
 
     fn name(&self) -> &str {

@@ -218,6 +218,23 @@ impl HandlerRegistry {
         }
         Ok(self.clone_with_configs(configs, permissions))
     }
+
+    /// Check a host path a child's config names against this registry's
+    /// (the spawner's) `handler`, which must be present and admit it.
+    pub fn check_child_path(
+        &self,
+        handler: &str,
+        key: &str,
+        path: &std::path::Path,
+    ) -> Result<(), String> {
+        self.handlers
+            .iter()
+            .find(|h| h.name() == handler)
+            .ok_or_else(|| {
+                format!("{key} {path:?} is not allowed: the spawner has no {handler} handler")
+            })?
+            .check_child_path(key, path)
+    }
 }
 
 /// Trait describing the lifecycle hooks every handler must implement.
@@ -269,6 +286,17 @@ pub trait Handler: Send + Sync + 'static {
     /// The default accepts everything (handlers that don't narrow yet).
     fn check_child_config(&self, _config: &HandlerConfig) -> Result<(), String> {
         Ok(())
+    }
+
+    /// Check that a spawned child may read the host file at `path` (named by
+    /// config `key`), as one of the spawner's host paths. Used for the replay
+    /// chain, which the runtime reads at spawn. Only a handler that grants
+    /// host paths (filesystem) admits any; the default refuses.
+    fn check_child_path(&self, key: &str, path: &std::path::Path) -> Result<(), String> {
+        Err(format!(
+            "{key} {path:?} is not allowed: '{}' grants no host paths",
+            self.name()
+        ))
     }
 
     /// Synchronous initialization called BEFORE the actor can receive any calls.
