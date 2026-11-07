@@ -45,6 +45,7 @@ use tracing::{debug, info, warn};
 
 use theater::actor::handle::ActorHandle;
 use theater::config::actor_manifest::HandlerConfig;
+use theater::config::permissions::{HandlerPermission, ProcessPermissions};
 use theater::handler::{Handler, HandlerContext, SharedActorInstance};
 use theater::id::TheaterId;
 use theater::messages::TheaterCommand;
@@ -127,6 +128,44 @@ impl ProcessHandlerConfig {
         }
         Ok(())
     }
+    /// `child`, a spawned actor's config, asks for no more than this one (the
+    /// spawner's): its programs and process limit inside these, and no host
+    /// environment if this one has none.
+    fn check_child(&self, child: &Self) -> Result<(), String> {
+        if let Some(ref allowed) = self.allowed_programs {
+            if !allowed.iter().any(|a| a == "*") {
+                match child.allowed_programs {
+                    None => {
+                        return Err(format!(
+                            "allowed_programs is unset (any program) but the spawner allows only {allowed:?}"
+                        ))
+                    }
+                    Some(ref asked) => {
+                        if let Some(p) = asked.iter().find(|p| !allowed.contains(p)) {
+                            return Err(format!(
+                                "allowed_programs entry {p:?} is not in the spawner's {allowed:?}"
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+        if let Some(max) = self.max_processes {
+            match child.max_processes {
+                Some(n) if n <= max => {}
+                Some(n) => return Err(format!("max_processes {n} exceeds the spawner's {max}")),
+                None => {
+                    return Err(format!(
+                        "max_processes is unset (unlimited) but the spawner's is {max}"
+                    ))
+                }
+            }
+        }
+        if child.inherit_env && !self.inherit_env {
+            return Err("inherit_env = true but the spawner's is false".to_string());
+        }
+        Ok(())
+    }
     fn kill_grace(&self) -> Duration {
         Duration::from_millis(self.kill_grace_ms.unwrap_or(DEFAULT_KILL_GRACE_MS))
     }
@@ -134,6 +173,32 @@ impl ProcessHandlerConfig {
         self.max_run_output_bytes
             .unwrap_or(DEFAULT_MAX_RUN_OUTPUT_BYTES) as usize
     }
+}
+
+/// The actor's granted `ProcessPermissions` must admit spawning `program` while
+/// it owns `owned` processes. `None` (no capability) refuses every spawn.
+fn check_grant(
+    permissions: &Option<ProcessPermissions>,
+    program: &str,
+    owned: usize,
+) -> Result<(), Value> {
+    let perms = permissions.as_ref().ok_or_else(|| {
+        Value::String("permission denied: process capability not granted".to_string())
+    })?;
+    if owned >= perms.max_processes {
+        return Err(Value::String(format!(
+            "permission denied: granted max processes ({}) reached",
+            perms.max_processes
+        )));
+    }
+    if let Some(ref allowed) = perms.allowed_programs {
+        if !allowed.iter().any(|a| a == "*" || a == program) {
+            return Err(Value::String(format!(
+                "permission denied: program {program:?} not granted"
+            )));
+        }
+    }
+    Ok(())
 }
 
 // ============================================================================
@@ -1013,6 +1078,9 @@ fn start_pump(
 #[derive(Clone)]
 pub struct ProcessHandler {
     config: ProcessHandlerConfig,
+    /// The actor's granted capability. Unrestricted until the runtime sets the
+    /// actor's grant; `None` refuses every spawn.
+    permissions: Option<ProcessPermissions>,
     shared_state: Arc<SharedProcessState>,
     actor_id: Arc<std::sync::Mutex<Option<TheaterId>>>,
     actor_handle: Arc<std::sync::Mutex<Option<ActorHandle>>>,
@@ -1023,6 +1091,12 @@ impl ProcessHandler {
     pub fn new(config: ProcessHandlerConfig) -> Self {
         Self {
             config,
+            permissions: Some(ProcessPermissions {
+                max_processes: usize::MAX,
+                max_output_buffer: usize::MAX,
+                allowed_programs: None,
+                allowed_paths: None,
+            }),
             shared_state: Arc::new(SharedProcessState::new()),
             actor_id: Arc::new(std::sync::Mutex::new(None)),
             actor_handle: Arc::new(std::sync::Mutex::new(None)),
@@ -1046,11 +1120,23 @@ impl Handler for ProcessHandler {
         };
         Box::new(ProcessHandler {
             config: cfg,
+            permissions: self.permissions.clone(),
             shared_state: self.shared_state.clone(), // shared Arc across instances
             actor_id: Arc::new(std::sync::Mutex::new(None)),
             actor_handle: Arc::new(std::sync::Mutex::new(None)),
             cancellation_token: CancellationToken::new(),
         })
+    }
+
+    fn set_permissions(&mut self, permissions: Option<&HandlerPermission>) {
+        self.permissions = permissions.and_then(|p| p.process.clone());
+    }
+
+    fn check_child_config(&self, config: &HandlerConfig) -> Result<(), String> {
+        let child = config
+            .parse::<ProcessHandlerConfig>()
+            .map_err(|e| format!("invalid config: {}", e))?;
+        self.config.check_child(&child)
     }
 
     fn name(&self) -> &str {
@@ -1146,6 +1232,7 @@ impl Handler for ProcessHandler {
 
         let st = self.shared_state.clone();
         let cfg = self.config.clone();
+        let permissions = Arc::new(self.permissions.clone());
         let actor_handle_arc = self.actor_handle.clone();
         let cancel = self.cancellation_token.clone();
 
@@ -1153,24 +1240,27 @@ impl Handler for ProcessHandler {
         {
             let st = st.clone();
             let cfg = cfg.clone();
+            let permissions = permissions.clone();
             imports.define(
                 "theater:simple/process",
                 "spawn",
                 pact_result_host_fn(move |input: Value| {
                     let st = st.clone();
                     let cfg = cfg.clone();
+                    let permissions = permissions.clone();
                     async move {
                         let _ph = PhaseLog::new("process.spawn");
                         let spec = parse_spawn_spec(&input)?;
                         cfg.check_program(&spec.program)?;
+                        let n = st
+                            .processes
+                            .lock()
+                            .await
+                            .values()
+                            .filter(|e| e.owner == actor_id)
+                            .count();
+                        check_grant(&permissions, &spec.program, n)?;
                         if let Some(max) = cfg.max_processes {
-                            let n = st
-                                .processes
-                                .lock()
-                                .await
-                                .values()
-                                .filter(|e| e.owner == actor_id)
-                                .count();
                             if n >= max as usize {
                                 return Err(Value::String(format!(
                                     "permission denied: max processes ({max}) reached"

@@ -535,6 +535,33 @@ impl FileSystemHandler {
     }
 }
 
+/// Where `path` really is: its longest existing ancestor with symlinks
+/// resolved, plus the components that don't exist yet. A `..` anywhere is
+/// refused, so the part that doesn't exist yet can't climb back out.
+fn real_path(path: &Path) -> Result<PathBuf, String> {
+    if path.components().any(|c| matches!(c, Component::ParentDir)) {
+        return Err(format!("path {:?} must not contain '..'", path));
+    }
+    let mut existing = path.to_path_buf();
+    let mut rest = Vec::new();
+    loop {
+        match std::fs::canonicalize(&existing) {
+            Ok(real) => return Ok(rest.iter().rev().fold(real, |p, c| p.join(c))),
+            Err(_) => match (existing.file_name(), existing.parent()) {
+                (Some(name), Some(parent)) => {
+                    rest.push(name.to_owned());
+                    existing = if parent.as_os_str().is_empty() {
+                        PathBuf::from(".")
+                    } else {
+                        parent.to_path_buf()
+                    };
+                }
+                _ => return Err(format!("path {:?} cannot be resolved", path)),
+            },
+        }
+    }
+}
+
 /// A fresh, process-and-time-unique temp directory path (not yet created). The
 /// `theater-fs-<pid>-<nanos>` shape is what [`parse_sandbox_pid`] recognizes
 /// when sweeping orphans, so keep the two in sync.
@@ -642,6 +669,38 @@ impl Handler for FileSystemHandler {
     fn set_permissions(&mut self, permissions: Option<&HandlerPermission>) {
         // Bake in this actor's granted filesystem capability. `None` → default-deny.
         self.permissions = permissions.and_then(|p| p.file_system.clone());
+    }
+
+    fn check_child_config(
+        &self,
+        config: &theater::config::actor_manifest::HandlerConfig,
+    ) -> Result<(), String> {
+        let child = config
+            .parse::<FileSystemHandlerConfig>()
+            .map_err(|e| format!("invalid config: {}", e))?;
+        // A fresh temp dir (new_dir, or no path) holds nothing of the spawner's.
+        let child_path = match (&child.path, child.new_dir) {
+            (_, Some(true)) | (None, _) => return Ok(()),
+            (Some(p), _) => p,
+        };
+        let root = match (&self.path, self.new_dir) {
+            (Some(p), new_dir) if new_dir != Some(true) => std::fs::canonicalize(p)
+                .map_err(|e| format!("spawner's root {:?} is unavailable: {}", p, e))?,
+            _ => {
+                return Err(format!(
+                    "path {:?} is not allowed: the spawner has only a temporary root",
+                    child_path
+                ))
+            }
+        };
+        let real = real_path(child_path)?;
+        if !real.starts_with(&root) {
+            return Err(format!(
+                "path {:?} is outside the spawner's root {:?}",
+                child_path, root
+            ));
+        }
+        Ok(())
     }
 
     fn setup(
@@ -1048,6 +1107,79 @@ mod tests {
             Some(vec!["theater:simple/filesystem".to_string()])
         );
         assert_eq!(handler.exports(), None);
+    }
+
+    fn child(path: &Path) -> theater::config::actor_manifest::HandlerConfig {
+        theater::config::actor_manifest::HandlerConfig::new(
+            "filesystem",
+            FileSystemHandlerConfig {
+                path: Some(path.to_path_buf()),
+                new_dir: None,
+                allowed_commands: None,
+            },
+        )
+    }
+
+    fn spawner(root: &Path) -> FileSystemHandler {
+        FileSystemHandler::new(
+            FileSystemHandlerConfig {
+                path: Some(root.to_path_buf()),
+                new_dir: None,
+                allowed_commands: None,
+            },
+            None,
+        )
+    }
+
+    #[test]
+    fn child_path_must_stay_inside_spawner_root() {
+        let base = tempfile::tempdir().unwrap();
+        let root = base.path().join("root");
+        std::fs::create_dir_all(root.join("sub")).unwrap();
+        std::fs::create_dir_all(base.path().join("outside")).unwrap();
+        let parent = spawner(&root);
+
+        // Narrowing: the root itself, an existing subdir, one not made yet.
+        assert!(parent.check_child_config(&child(&root)).is_ok());
+        assert!(parent.check_child_config(&child(&root.join("sub"))).is_ok());
+        assert!(parent
+            .check_child_config(&child(&root.join("new/deeper")))
+            .is_ok());
+
+        // Widening: "/", a sibling, a `..` escape, a symlink out.
+        assert!(parent.check_child_config(&child(Path::new("/"))).is_err());
+        assert!(parent
+            .check_child_config(&child(&base.path().join("outside")))
+            .is_err());
+        let err = parent
+            .check_child_config(&child(&root.join("sub/../../outside")))
+            .unwrap_err();
+        assert!(err.contains(".."), "{}", err);
+        std::os::unix::fs::symlink(base.path().join("outside"), root.join("link")).unwrap();
+        let err = parent
+            .check_child_config(&child(&root.join("link")))
+            .unwrap_err();
+        assert!(err.contains("outside the spawner's root"), "{}", err);
+        assert!(parent
+            .check_child_config(&child(&root.join("link/new")))
+            .is_err());
+    }
+
+    #[test]
+    fn child_of_temp_root_spawner_gets_only_temp_roots() {
+        let parent = FileSystemHandler::new(cfg(), None);
+        assert!(parent
+            .check_child_config(&child(&std::env::temp_dir()))
+            .is_err());
+        let fresh = theater::config::actor_manifest::HandlerConfig::new(
+            "filesystem",
+            FileSystemHandlerConfig {
+                path: None,
+                new_dir: Some(true),
+                allowed_commands: None,
+            },
+        );
+        assert!(parent.check_child_config(&fresh).is_ok());
     }
 
     #[test]

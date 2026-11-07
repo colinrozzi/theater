@@ -53,309 +53,121 @@ pub enum PermissionError {
 
 pub type PermissionResult<T> = Result<T, PermissionError>;
 
-/// Validates that handler configurations don't exceed effective permissions
+/// Validates that a spawned actor's `[[handler]]` configs don't exceed its
+/// effective permissions (its spawner's set narrowed by its own policy).
+///
+/// Only the configs that can widen what an actor reaches are checked here:
+/// `filesystem`, `http-client` and `process`. Containment in the spawner's own
+/// config (a filesystem path inside the spawner's root, and so on) is checked by
+/// each handler's `check_child_config`; this checks against the permission set.
+/// Every error names the handler and the config key.
 pub fn validate_manifest_permissions(
     manifest: &ManifestConfig,
     effective_permissions: &HandlerPermission,
 ) -> PermissionResult<()> {
-    // Handler configs are raw tables now; key on the `type` and parse the typed
-    // config only for the capability handlers that validate against a grant.
-    // A malformed typed config surfaces as a config error here (spawn-time).
-    fn typed<T: serde::de::DeserializeOwned>(hc: &HandlerConfig) -> PermissionResult<T> {
-        hc.parse()
-            .map_err(|e| PermissionError::ConfigExceedsPermissions {
-                reason: format!("invalid '{}' handler config: {}", hc.type_name(), e),
-            })
-    }
-    let deny = |handler_type: &str| PermissionError::HandlerNotPermitted {
-        handler_type: handler_type.to_string(),
-    };
-
     for handler_config in &manifest.handlers {
-        match handler_config.type_name() {
+        let handler = handler_config.type_name();
+        let exceeds = |reason: String| PermissionError::ConfigExceedsPermissions {
+            reason: format!("[[handler]] '{}': {}", handler, reason),
+        };
+        match handler {
             "filesystem" => {
-                validate_filesystem_config(
-                    &typed(handler_config)?,
-                    &effective_permissions.file_system,
-                )?;
+                let config: FileSystemHandlerConfig = typed(handler_config)?;
+                let perms = effective_permissions
+                    .file_system
+                    .as_ref()
+                    .ok_or_else(|| exceeds("filesystem is not granted".to_string()))?;
+                if config.new_dir == Some(true) && perms.new_dir != Some(true) {
+                    return Err(exceeds("new_dir = true is not granted".to_string()));
+                }
+                if let (Some(asked), Some(granted)) =
+                    (&config.allowed_commands, &perms.allowed_commands)
+                {
+                    if let Some(c) = asked.iter().find(|c| !granted.contains(c)) {
+                        return Err(exceeds(format!(
+                            "allowed_commands entry '{}' is not granted (granted: {:?})",
+                            c, granted
+                        )));
+                    }
+                }
             }
             "http-client" => {
-                validate_http_client_config(
-                    &typed(handler_config)?,
-                    &effective_permissions.http_client,
-                )?;
-            }
-            "http-framework" => {
-                validate_http_framework_config(
-                    &typed(handler_config)?,
-                    &effective_permissions.http_framework,
-                )?;
+                let config: HttpClientHandlerConfig = typed(handler_config)?;
+                let perms = effective_permissions
+                    .http_client
+                    .as_ref()
+                    .ok_or_else(|| exceeds("http-client is not granted".to_string()))?;
+                if let Some(granted) = &perms.allowed_hosts {
+                    if let Some(h) = config.allowed_hosts.iter().find(|h| !granted.contains(h)) {
+                        return Err(exceeds(format!(
+                            "allowed_hosts entry '{}' is not granted (granted: {:?})",
+                            h, granted
+                        )));
+                    }
+                }
             }
             "process" => {
-                validate_process_config(&typed(handler_config)?, &effective_permissions.process)?;
+                let config: ProcessLimits = typed(handler_config)?;
+                let perms = effective_permissions
+                    .process
+                    .as_ref()
+                    .ok_or_else(|| exceeds("process is not granted".to_string()))?;
+                if let Some(granted) = &perms.allowed_programs {
+                    match &config.allowed_programs {
+                        None => {
+                            return Err(exceeds(format!(
+                                "allowed_programs is unset (any program) but only {:?} is granted",
+                                granted
+                            )))
+                        }
+                        Some(asked) => {
+                            let granted_any = granted.iter().any(|g| g == "*");
+                            if let Some(p) =
+                                asked.iter().find(|p| !granted_any && !granted.contains(p))
+                            {
+                                return Err(exceeds(format!(
+                                    "allowed_programs entry '{}' is not granted (granted: {:?})",
+                                    p, granted
+                                )));
+                            }
+                        }
+                    }
+                }
+                if perms.max_processes != usize::MAX {
+                    match config.max_processes {
+                        Some(n) if n <= perms.max_processes => {}
+                        asked => {
+                            return Err(exceeds(format!(
+                                "max_processes {} exceeds the granted {}",
+                                asked.map_or("unset (unlimited)".to_string(), |n| n.to_string()),
+                                perms.max_processes
+                            )))
+                        }
+                    }
+                }
             }
-            "environment" => {
-                validate_environment_config(
-                    &typed(handler_config)?,
-                    &effective_permissions.environment,
-                )?;
-            }
-            "random" => {
-                validate_random_config(&typed(handler_config)?, &effective_permissions.random)?;
-            }
-            "timing" => {
-                validate_timing_config(&typed(handler_config)?, &effective_permissions.timing)?;
-            }
-            "message-server" if effective_permissions.message_server.is_none() => {
-                return Err(deny("message-server"));
-            }
-            // The `self` and runtime-wide CONTROL interfaces both require the
-            // RuntimePermissions capability (inspect/mutate enforced per-op).
-            "self" | "runtime" if effective_permissions.runtime.is_none() => {
-                return Err(deny("runtime"));
-            }
-            "store" if effective_permissions.store.is_none() => {
-                return Err(deny("store"));
-            }
-            // replay, tcp, rpc, terminal, timer, loop, podman — allowed by default;
-            // the granted ones above that pass their `is_none()` guard fall here too.
             _ => {}
         }
     }
     Ok(())
 }
 
-fn validate_filesystem_config(
-    config: &FileSystemHandlerConfig,
-    permissions: &Option<FileSystemPermissions>,
-) -> PermissionResult<()> {
-    let perms = permissions
-        .as_ref()
-        .ok_or_else(|| PermissionError::HandlerNotPermitted {
-            handler_type: "filesystem".to_string(),
-        })?;
-
-    // Check if requested path is allowed
-    if let Some(config_path) = &config.path {
-        if let Some(allowed_paths) = &perms.allowed_paths {
-            let path_allowed = allowed_paths
-                .iter()
-                .any(|allowed| config_path.starts_with(allowed));
-            if !path_allowed {
-                return Err(PermissionError::PathNotAllowed {
-                    path: config_path.to_string_lossy().to_string(),
-                    allowed_paths: allowed_paths.clone(),
-                });
-            }
-        }
-    }
-
-    // Check if new_dir is allowed
-    if config.new_dir == Some(true) && perms.new_dir != Some(true) {
-        return Err(PermissionError::ConfigExceedsPermissions {
-            reason: "new_dir capability not granted".to_string(),
-        });
-    }
-
-    // Check allowed commands
-    if let Some(config_commands) = &config.allowed_commands {
-        if let Some(allowed_commands) = &perms.allowed_commands {
-            for command in config_commands {
-                if !allowed_commands.contains(command) {
-                    return Err(PermissionError::CommandNotAllowed {
-                        command: command.clone(),
-                        allowed_commands: allowed_commands.clone(),
-                    });
-                }
-            }
-        }
-    }
-
-    Ok(())
+/// Parse a handler's raw config; a malformed one is refused at spawn.
+fn typed<T: serde::de::DeserializeOwned>(hc: &HandlerConfig) -> PermissionResult<T> {
+    hc.parse()
+        .map_err(|e| PermissionError::ConfigExceedsPermissions {
+            reason: format!("[[handler]] '{}': invalid config: {}", hc.type_name(), e),
+        })
 }
 
-fn validate_http_client_config(
-    _config: &HttpClientHandlerConfig,
-    permissions: &Option<HttpClientPermissions>,
-) -> PermissionResult<()> {
-    if permissions.is_none() {
-        return Err(PermissionError::HandlerNotPermitted {
-            handler_type: "http-client".to_string(),
-        });
-    }
-    // HTTP client config is currently empty, but we validate that the capability exists
-    Ok(())
-}
-
-fn validate_http_framework_config(
-    _config: &HttpFrameworkHandlerConfig,
-    permissions: &Option<HttpFrameworkPermissions>,
-) -> PermissionResult<()> {
-    if permissions.is_none() {
-        return Err(PermissionError::HandlerNotPermitted {
-            handler_type: "http-framework".to_string(),
-        });
-    }
-    Ok(())
-}
-
-fn validate_process_config(
-    config: &ProcessHostConfig,
-    permissions: &Option<ProcessPermissions>,
-) -> PermissionResult<()> {
-    let perms = permissions
-        .as_ref()
-        .ok_or_else(|| PermissionError::HandlerNotPermitted {
-            handler_type: "process".to_string(),
-        })?;
-
-    // Check max_processes limit
-    if config.max_processes > perms.max_processes {
-        return Err(PermissionError::ResourceLimitExceeded {
-            resource: "max_processes".to_string(),
-            requested: config.max_processes,
-            limit: perms.max_processes,
-        });
-    }
-
-    // Check max_output_buffer limit
-    if config.max_output_buffer > perms.max_output_buffer {
-        return Err(PermissionError::ResourceLimitExceeded {
-            resource: "max_output_buffer".to_string(),
-            requested: config.max_output_buffer,
-            limit: perms.max_output_buffer,
-        });
-    }
-
-    // Check allowed programs
-    if let Some(config_programs) = &config.allowed_programs {
-        if let Some(allowed_programs) = &perms.allowed_programs {
-            for program in config_programs {
-                if !allowed_programs.contains(program) {
-                    return Err(PermissionError::ConfigExceedsPermissions {
-                        reason: format!("Program '{}' not in allowed programs", program),
-                    });
-                }
-            }
-        }
-    }
-
-    // Check allowed paths
-    if let Some(config_paths) = &config.allowed_paths {
-        if let Some(allowed_paths) = &perms.allowed_paths {
-            for path in config_paths {
-                if !allowed_paths.contains(path) {
-                    return Err(PermissionError::PathNotAllowed {
-                        path: path.clone(),
-                        allowed_paths: allowed_paths.clone(),
-                    });
-                }
-            }
-        }
-    }
-
-    Ok(())
-}
-
-fn validate_environment_config(
-    config: &EnvironmentHandlerConfig,
-    permissions: &Option<EnvironmentPermissions>,
-) -> PermissionResult<()> {
-    let perms = permissions
-        .as_ref()
-        .ok_or_else(|| PermissionError::HandlerNotPermitted {
-            handler_type: "environment".to_string(),
-        })?;
-
-    // Check if allow_list_all is permitted
-    if config.allow_list_all && !perms.allow_list_all {
-        return Err(PermissionError::ConfigExceedsPermissions {
-            reason: "allow_list_all not permitted".to_string(),
-        });
-    }
-
-    // Check allowed vars are subset of permissions
-    if let Some(config_vars) = &config.allowed_vars {
-        if let Some(allowed_vars) = &perms.allowed_vars {
-            for var in config_vars {
-                if !allowed_vars.contains(var) {
-                    return Err(PermissionError::EnvVarDenied { var: var.clone() });
-                }
-            }
-        }
-    }
-
-    Ok(())
-}
-
-fn validate_random_config(
-    config: &RandomHandlerConfig,
-    permissions: &Option<RandomPermissions>,
-) -> PermissionResult<()> {
-    let perms = permissions
-        .as_ref()
-        .ok_or_else(|| PermissionError::HandlerNotPermitted {
-            handler_type: "random".to_string(),
-        })?;
-
-    // Check max_bytes limit
-    if config.max_bytes > perms.max_bytes {
-        return Err(PermissionError::ResourceLimitExceeded {
-            resource: "max_bytes".to_string(),
-            requested: config.max_bytes,
-            limit: perms.max_bytes,
-        });
-    }
-
-    // Check max_int limit
-    if config.max_int > perms.max_int {
-        return Err(PermissionError::ResourceLimitExceeded {
-            resource: "max_int".to_string(),
-            requested: config.max_int as usize,
-            limit: perms.max_int as usize,
-        });
-    }
-
-    // Check crypto_secure capability
-    if config.allow_crypto_secure && !perms.allow_crypto_secure {
-        return Err(PermissionError::ConfigExceedsPermissions {
-            reason: "crypto_secure random generation not permitted".to_string(),
-        });
-    }
-
-    Ok(())
-}
-
-fn validate_timing_config(
-    config: &TimingHostConfig,
-    permissions: &Option<TimingPermissions>,
-) -> PermissionResult<()> {
-    let perms = permissions
-        .as_ref()
-        .ok_or_else(|| PermissionError::HandlerNotPermitted {
-            handler_type: "timing".to_string(),
-        })?;
-
-    // Check max_sleep_duration limit
-    if config.max_sleep_duration > perms.max_sleep_duration {
-        return Err(PermissionError::ResourceLimitExceeded {
-            resource: "max_sleep_duration".to_string(),
-            requested: config.max_sleep_duration as usize,
-            limit: perms.max_sleep_duration as usize,
-        });
-    }
-
-    // Check min_sleep_duration requirement
-    if config.min_sleep_duration < perms.min_sleep_duration {
-        return Err(PermissionError::ConfigExceedsPermissions {
-            reason: format!(
-                "min_sleep_duration {} below required minimum {}",
-                config.min_sleep_duration, perms.min_sleep_duration
-            ),
-        });
-    }
-
-    Ok(())
+/// The limits in a `process` handler config (the full config lives in
+/// theater-handler-process; the other keys don't widen anything).
+#[derive(serde::Deserialize)]
+struct ProcessLimits {
+    #[serde(default)]
+    allowed_programs: Option<Vec<String>>,
+    #[serde(default)]
+    max_processes: Option<usize>,
 }
 
 /// Runtime permission checking utilities

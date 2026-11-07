@@ -276,6 +276,81 @@ fn config_defaults_and_program_policy() {
     assert!(c.check_program("bash").is_ok());
 }
 
+#[test]
+fn child_config_cannot_exceed_spawner() {
+    let parent = ProcessHandlerConfig {
+        allowed_programs: Some(vec!["git".into(), "ls".into()]),
+        max_processes: Some(4),
+        inherit_env: false,
+        ..Default::default()
+    };
+    let narrower = ProcessHandlerConfig {
+        allowed_programs: Some(vec!["git".into()]),
+        max_processes: Some(2),
+        inherit_env: false,
+        ..Default::default()
+    };
+    assert!(parent.check_child(&narrower).is_ok());
+
+    let wider = ProcessHandlerConfig {
+        allowed_programs: Some(vec!["git".into(), "bash".into()]),
+        ..narrower.clone()
+    };
+    let err = parent.check_child(&wider).unwrap_err();
+    assert!(err.contains("allowed_programs entry \"bash\""), "{err}");
+    let any = ProcessHandlerConfig {
+        allowed_programs: None,
+        ..narrower.clone()
+    };
+    assert!(parent.check_child(&any).is_err());
+    let star = ProcessHandlerConfig {
+        allowed_programs: Some(vec!["*".into()]),
+        ..narrower.clone()
+    };
+    assert!(parent.check_child(&star).is_err());
+    let more = ProcessHandlerConfig {
+        max_processes: Some(5),
+        ..narrower.clone()
+    };
+    assert!(parent
+        .check_child(&more)
+        .unwrap_err()
+        .contains("max_processes"));
+    let env = ProcessHandlerConfig {
+        inherit_env: true,
+        ..narrower.clone()
+    };
+    assert!(parent
+        .check_child(&env)
+        .unwrap_err()
+        .contains("inherit_env"));
+
+    // An unrestricted spawner admits anything.
+    assert!(ProcessHandlerConfig::default().check_child(&any).is_ok());
+}
+
+#[test]
+fn granted_permissions_are_checked() {
+    let unrestricted = ProcessHandler::new(cfg()).permissions;
+    assert!(check_grant(&unrestricted, "bash", 1000).is_ok());
+
+    let granted = Some(ProcessPermissions {
+        max_processes: 2,
+        max_output_buffer: usize::MAX,
+        allowed_programs: Some(vec!["git".into()]),
+        allowed_paths: None,
+    });
+    assert!(check_grant(&granted, "git", 1).is_ok());
+    assert!(check_grant(&granted, "bash", 0).is_err());
+    assert!(check_grant(&granted, "git", 2).is_err());
+    assert!(check_grant(&None, "git", 0).is_err());
+
+    // set_permissions takes the actor's process slice; no slice -> no spawns.
+    let mut h = ProcessHandler::new(cfg());
+    h.set_permissions(Some(&HandlerPermission::default()));
+    assert!(h.permissions.is_none());
+}
+
 // ---- pipes -----------------------------------------------------------------
 
 #[tokio::test]

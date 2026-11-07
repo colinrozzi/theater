@@ -18,3 +18,6 @@ anyhow.workspace = true
 tracing.workspace = true
 thiserror = "2.0"
 tokio = { workspace = true, features = ["fs", "io-util"] }
+
+[dev-dependencies]
+tempfile = "3.8.1"
