@@ -287,6 +287,23 @@ Paths are under `crates/`; "rt" is `theater/src/theater_runtime.rs`.
   process leaves it with none) or its config. "No entry" means a target
   that has stopped, is replaying (process skips registration when replay
   already provides the interface), or belongs to another runtime.
+- **Who may call an actor over rpc** (ticket 0078, 2026-11-07). An actor's
+  rpc config `callers` (`theater-handler-rpc/src/lib.rs:41`) says which actors
+  may `rpc.call` it: `"any"`, `"spawner"`, `"children"` (actors it spawned
+  directly) or an actor id. Unset means any actor (the default); `[]` means no
+  actor, only the host. Its spawner may always call it. The caller's rpc
+  handler checks the target's rule before calling (lib.rs:86, called at
+  lib.rs:353) and returns `rpc refused: <target> accepts calls from: <rule>
+  (not <caller>)`. Each actor's rule and parent are recorded in state shared
+  by every rpc instance when its host functions are registered (lib.rs:297)
+  and dropped at shutdown; a target with no record takes any caller. The
+  parent reaches handlers as `HandlerContext::parent_id`, set from the spawn's
+  `parent_id` (rt:947, `theater/src/actor/runtime.rs:309`). A child's
+  `callers` may only name its spawner or what its spawner's list names
+  (compared as written; lib.rs:48), and a child with no rpc block inherits its
+  spawner's rule. Calls from the host through an `ActorHandle` (the
+  theater-repl daemon's evaluate) are not rpc and are not checked;
+  message-server send/request is not covered yet.
 - **The set is fixed at spawn.** `set_permissions` is called once, when the
   actor's handlers are made (`theater/src/handler/mod.rs:188`). Nothing
   changes a running actor's set.

@@ -30,6 +30,8 @@ pub struct HandlerContext {
     pub satisfied_imports: HashSet<String>,
     /// The actor ID for the actor being set up
     pub actor_id: Option<TheaterId>,
+    /// The actor that spawned it; `None` for an actor the host started.
+    pub parent_id: Option<TheaterId>,
     /// The theater command channel — captured by host functions that need to
     /// talk to the runtime (spawn, shutdown, message routing, …). The runtime
     /// sets this before invoking `register_host_functions`.
@@ -49,6 +51,7 @@ impl HandlerContext {
         Self {
             satisfied_imports: HashSet::new(),
             actor_id: None,
+            parent_id: None,
             theater_tx: None,
             shutdown_controller: None,
         }
@@ -59,6 +62,7 @@ impl HandlerContext {
         Self {
             satisfied_imports: HashSet::new(),
             actor_id: None,
+            parent_id: None,
             theater_tx: None,
             shutdown_controller: Some(shutdown_controller),
         }
@@ -92,6 +96,9 @@ pub struct HandlerRegistry {
     /// Optional replay chain events - set when in replay mode.
     /// Handlers can use this to replay recorded events instead of running normally.
     replay_chain: Option<Vec<ChainEvent>>,
+    /// The actor that spawned the actor these handlers belong to, passed to
+    /// handlers as [`HandlerContext::parent_id`].
+    parent_id: Option<TheaterId>,
 }
 
 impl Default for HandlerRegistry {
@@ -105,6 +112,7 @@ impl HandlerRegistry {
         Self {
             handlers: Vec::new(),
             replay_chain: None,
+            parent_id: None,
         }
     }
 
@@ -115,6 +123,16 @@ impl HandlerRegistry {
     }
 
     /// Get the replay chain if set.
+    /// Record the spawner of the actor these handlers are for.
+    pub fn set_parent_id(&mut self, parent_id: Option<TheaterId>) {
+        self.parent_id = parent_id;
+    }
+
+    /// The spawner of the actor these handlers are for.
+    pub fn parent_id(&self) -> Option<TheaterId> {
+        self.parent_id
+    }
+
     pub fn replay_chain(&self) -> Option<&Vec<ChainEvent>> {
         self.replay_chain.as_ref()
     }

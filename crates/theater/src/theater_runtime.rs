@@ -933,7 +933,7 @@ impl<E: crate::executor::Spawn> TheaterRuntime<E> {
             },
         };
         let ActorHandlers {
-            registry: handler_registry,
+            registry: mut handler_registry,
             child_handlers,
             permissions,
         } = match built {
@@ -944,6 +944,7 @@ impl<E: crate::executor::Spawn> TheaterRuntime<E> {
                 return;
             }
         };
+        handler_registry.set_parent_id(parent_id);
 
         // Start the actor in a detached task. The pack runtime (and the
         // wasmtime Engine inside it) is shared across every spawn —
