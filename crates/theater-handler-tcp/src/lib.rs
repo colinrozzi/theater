@@ -99,6 +99,74 @@ pub struct TcpHandlerConfig {
     pub idle_timeout_secs: Option<u64>,
 }
 
+impl TcpHandlerConfig {
+    /// A child's `[[handler]]` config may only narrow this (the spawner's).
+    /// tcp has no address allowlist yet (`listen` is not enforced), so what
+    /// is checked is: `max_connections` no higher; `listen` and
+    /// `idle_timeout_secs` (set on state every tcp actor shares) unset or the
+    /// spawner's; TLS cert, key and ca_cert (host files) only the spawner's
+    /// own; `skip_verify` only if the spawner skips too. A child may drop
+    /// either TLS block.
+    fn check_child(&self, child: &Self) -> Result<(), String> {
+        if let Some(max) = self.max_connections {
+            match child.max_connections {
+                Some(n) if n <= max => {}
+                Some(n) => return Err(format!("max_connections {n} exceeds the spawner's {max}")),
+                None => {
+                    return Err(format!(
+                        "max_connections is unset (unlimited) but the spawner's is {max}"
+                    ))
+                }
+            }
+        }
+        if let Some(ref listen) = child.listen {
+            if self.listen.as_ref() != Some(listen) {
+                return Err(format!(
+                    "listen {listen:?} differs from the spawner's {:?}",
+                    self.listen
+                ));
+            }
+        }
+        if let Some(secs) = child.idle_timeout_secs {
+            if self.idle_timeout_secs != Some(secs) {
+                return Err(format!(
+                    "idle_timeout_secs {secs} differs from the spawner's {:?} (it applies to every tcp actor)",
+                    self.idle_timeout_secs
+                ));
+            }
+        }
+        if let Some(ref tls) = child.client_tls {
+            let theirs = self.client_tls.as_ref();
+            if let Some(ref ca) = tls.ca_cert {
+                if theirs.and_then(|t| t.ca_cert.as_ref()) != Some(ca) {
+                    return Err(format!(
+                        "client_tls.ca_cert {ca:?} is not the spawner's {:?}",
+                        theirs.and_then(|t| t.ca_cert.as_ref())
+                    ));
+                }
+            }
+            if tls.skip_verify && !theirs.is_some_and(|t| t.skip_verify) {
+                return Err(
+                    "client_tls.skip_verify = true but the spawner verifies certificates"
+                        .to_string(),
+                );
+            }
+        }
+        if let Some(ref tls) = child.server_tls {
+            let theirs = self.server_tls.as_ref();
+            if theirs.map(|t| (&t.cert, &t.key)) != Some((&tls.cert, &tls.key)) {
+                return Err(format!(
+                    "server_tls cert {:?} and key {:?} are not the spawner's {:?}",
+                    tls.cert,
+                    tls.key,
+                    theirs.map(|t| (&t.cert, &t.key))
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
 /// TLS configuration for outbound client connections
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ClientTlsConfig {
@@ -869,6 +937,13 @@ impl Handler for TcpHandler {
             cancellation_token: CancellationToken::new(),
             tls_context,
         })
+    }
+
+    fn check_child_config(&self, config: &HandlerConfig) -> Result<(), String> {
+        let child = config
+            .parse::<TcpHandlerConfig>()
+            .map_err(|e| format!("invalid config: {}", e))?;
+        self.config.check_child(&child)
     }
 
     fn name(&self) -> &str {
@@ -3390,5 +3465,138 @@ mod tls_upgrade_tests {
             .err()
             .unwrap();
         assert!(err.contains("handshake failed"), "{}", err);
+    }
+}
+
+#[cfg(test)]
+mod child_config_tests {
+    use super::*;
+
+    fn spawner_config() -> TcpHandlerConfig {
+        TcpHandlerConfig {
+            listen: Some("127.0.0.1:8080".into()),
+            max_connections: Some(10),
+            client_tls: Some(ClientTlsConfig {
+                enabled: true,
+                ca_cert: Some("/etc/spawner/ca.pem".into()),
+                skip_verify: false,
+                auto_handshake: true,
+            }),
+            server_tls: Some(ServerTlsConfig {
+                enabled: true,
+                cert: "/etc/spawner/cert.pem".into(),
+                key: "/etc/spawner/key.pem".into(),
+                auto_handshake: true,
+            }),
+            idle_timeout_secs: Some(30),
+        }
+    }
+
+    #[test]
+    fn child_config_cannot_exceed_spawner() {
+        let spawner = spawner_config();
+        // The spawner's own config, a lower limit, and dropping TLS all pass.
+        spawner.check_child(&spawner).unwrap();
+        spawner
+            .check_child(&TcpHandlerConfig {
+                max_connections: Some(2),
+                client_tls: None,
+                server_tls: None,
+                listen: None,
+                idle_timeout_secs: None,
+            })
+            .unwrap();
+
+        let refused = |child: TcpHandlerConfig, key: &str| {
+            let e = spawner
+                .check_child(&child)
+                .expect_err("widening is refused");
+            assert!(e.contains(key), "{e}");
+        };
+        let s = spawner_config;
+        refused(
+            TcpHandlerConfig {
+                max_connections: Some(11),
+                ..s()
+            },
+            "max_connections",
+        );
+        refused(
+            TcpHandlerConfig {
+                max_connections: None,
+                ..s()
+            },
+            "max_connections",
+        );
+        refused(
+            TcpHandlerConfig {
+                listen: Some("0.0.0.0:80".into()),
+                ..s()
+            },
+            "listen",
+        );
+        refused(
+            TcpHandlerConfig {
+                idle_timeout_secs: Some(1),
+                ..s()
+            },
+            "idle_timeout_secs",
+        );
+        let mut c = s();
+        c.client_tls.as_mut().unwrap().ca_cert = Some("/home/other/ca.pem".into());
+        refused(c, "client_tls.ca_cert");
+        let mut c = s();
+        c.client_tls.as_mut().unwrap().skip_verify = true;
+        refused(c, "client_tls.skip_verify");
+        let mut c = s();
+        c.server_tls.as_mut().unwrap().key = "/etc/ssh/ssh_host_ed25519_key".into();
+        refused(c, "server_tls");
+
+        // A spawner without TLS: a child may verify with system roots, but
+        // may not name a host file.
+        let plain = TcpHandlerConfig::default();
+        plain
+            .check_child(&TcpHandlerConfig {
+                client_tls: Some(ClientTlsConfig {
+                    enabled: true,
+                    ca_cert: None,
+                    skip_verify: false,
+                    auto_handshake: true,
+                }),
+                ..Default::default()
+            })
+            .unwrap();
+        let e = plain
+            .check_child(&TcpHandlerConfig {
+                client_tls: s().client_tls,
+                ..Default::default()
+            })
+            .expect_err("a ca_cert path is refused");
+        assert!(e.contains("client_tls.ca_cert"), "{e}");
+        let e = plain
+            .check_child(&TcpHandlerConfig {
+                server_tls: s().server_tls,
+                ..Default::default()
+            })
+            .expect_err("cert and key paths are refused");
+        assert!(e.contains("server_tls"), "{e}");
+    }
+
+    #[test]
+    fn check_child_config_parses_the_block() {
+        let h = TcpHandler::new(TcpHandlerConfig {
+            max_connections: Some(1),
+            ..Default::default()
+        });
+        let e = h
+            .check_child_config(&HandlerConfig::new(
+                "tcp",
+                TcpHandlerConfig {
+                    max_connections: Some(2),
+                    ..Default::default()
+                },
+            ))
+            .expect_err("refused");
+        assert!(e.contains("max_connections"), "{e}");
     }
 }

@@ -68,6 +68,20 @@ impl Handler for PodmanHandler {
         Box::new(PodmanHandler::new(cfg))
     }
 
+    /// podman has no settings to narrow (it is all of the host's podman), so a
+    /// child's block may only be the same empty config as its spawner's.
+    fn check_child_config(&self, config: &HandlerConfig) -> Result<(), String> {
+        let table = config
+            .parse::<serde_json::Map<String, serde_json::Value>>()
+            .map_err(|e| format!("invalid config: {}", e))?;
+        match table.keys().next() {
+            Some(key) => Err(format!(
+                "{key} is not a podman setting; podman takes no config"
+            )),
+            None => Ok(()),
+        }
+    }
+
     fn name(&self) -> &str {
         "podman"
     }
@@ -455,5 +469,23 @@ fn build_container_info(id: &str, name: &str, image: &str, status: &str, exit_co
             ("status".to_string(), Value::String(status.to_string())),
             ("exit-code".to_string(), Value::S32(exit_code)),
         ],
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn child_config_must_be_empty() {
+        let spawner = PodmanHandler::new(PodmanHandlerConfig::default());
+        spawner
+            .check_child_config(&HandlerConfig::unit("podman"))
+            .expect("the empty config is the spawner's");
+        let raw = serde_json::json!({ "socket": "/run/x" });
+        let e = spawner
+            .check_child_config(&HandlerConfig::new("podman", raw))
+            .expect_err("any setting differs from the spawner's");
+        assert!(e.contains("socket"), "{e}");
     }
 }

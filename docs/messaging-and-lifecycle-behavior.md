@@ -233,10 +233,32 @@ Paths are under `crates/`; "rt" is `theater/src/theater_runtime.rs`.
   requires `allowed_hosts` to be a subset (`theater-handler-http-client/src/lib.rs:130`);
   process requires `allowed_programs` and `max_processes` within the
   spawner's, and no `inherit_env` the spawner lacks
-  (`theater-handler-process/src/lib.rs:134`). Other handlers (tcp, udp,
-  random, timer, terminal, replay, ...) accept any config (the default
-  `check_child_config`). A block that is left out inherits the
-  spawner's config.
+  (`theater-handler-process/src/lib.rs:134`). Since ticket 0075
+  (2026-11-07): udp requires `allowed_bind_ports`, `allowed_peers` (each
+  entry starting with one of the spawner's prefixes) and
+  `allowed_multicast_groups` within the spawner's and `max_sockets` no
+  higher (`theater-handler-udp/src/lib.rs:424`); tcp requires
+  `max_connections` no higher, `listen` and `idle_timeout_secs` unset or the
+  spawner's, TLS `cert`/`key`/`ca_cert` only the spawner's own files and
+  `skip_verify` only if the spawner skips (`theater-handler-tcp/src/lib.rs:110`);
+  podman refuses any setting (`theater-handler-podman/src/lib.rs:73`);
+  terminal requires the spawner's `raw_mode`
+  (`theater-handler-terminal/src/lib.rs:208`). A replay block's `chain`
+  must be a file inside the spawner's filesystem root, checked by
+  `HandlerRegistry::check_child_path` before the runtime reads it
+  (rt:1301, `theater/src/handler/mod.rs:224`); a spawner with no
+  filesystem handler, or only a temporary root, admits none. Other
+  handlers (random, timer, and the config-less ones) accept any config
+  (the default `check_child_config`). A block that is left out inherits
+  the spawner's config.
+- **tcp has no address allowlist.** `TcpHandlerConfig::listen` is never
+  read (`theater-handler-tcp/src/lib.rs:81`): `listen()` and `connect()` use
+  whatever address the actor passes. `idle_timeout_secs` and
+  `max_connections` live on state shared by every tcp actor in the runtime:
+  `max_connections` is the host's and a manifest's value is ignored
+  (`theater-handler-tcp/src/lib.rs:1124`); the last manifest to set
+  `idle_timeout_secs` sets it for all. udp's peer check is a string prefix,
+  so `"10.0.0.1"` also admits `10.0.0.10` (`theater-handler-udp/src/lib.rs:505`).
 - **The set is fixed at spawn.** `set_permissions` is called once, when the
   actor's handlers are made (`theater/src/handler/mod.rs:188`). Nothing
   changes a running actor's set.
@@ -244,7 +266,8 @@ Paths are under `crates/`; "rt" is `theater/src/theater_runtime.rs`.
   `allowed_hosts`/`allowed_methods` on top of the config's allowlist,
   `theater-handler-http-client/src/lib.rs:99`), process (grant's
   `allowed_programs`/`max_processes`, `theater-handler-process/src/lib.rs:180`)
-  and runtime. message-server, store, tcp, udp and rpc check nothing yet.
+  and runtime; udp checks its config's lists. message-server, store, tcp
+  and rpc check no grant yet.
 - **Restricting a list that is unrestricted** (`None`) gives the restriction
   (`intersect_options` in `theater/src/config/permissions.rs`). Before
   0069 it gave `None` (unrestricted), so a policy that limited hosts did nothing.
