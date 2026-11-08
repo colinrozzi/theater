@@ -304,8 +304,19 @@ Paths are under `crates/`; "rt" is `theater/src/theater_runtime.rs`.
   `callers` may only name its spawner or what its spawner's list names
   (compared as written; lib.rs:48), and a child with no rpc block inherits its
   spawner's rule. Calls from the host through an `ActorHandle` (the
-  theater-repl daemon's evaluate) are not rpc and are not checked;
-  message-server send/request is not covered yet.
+  theater-repl daemon's evaluate) are not rpc and are not checked.
+- **Who may message an actor** (ticket 0085, 2026-11-08). The same rule for
+  message-server: its config `senders`
+  (`theater-handler-message-server/src/lib.rs:58`) takes the same values as
+  rpc `callers`, with the same defaults, inheritance and narrowing
+  (lib.rs:65). The sender's handler checks the target's rule (lib.rs:102) on
+  `send`, `request` and `open-channel` (lib.rs:1076, 1115, 1232) and returns
+  `message refused: <target> accepts messages from: <rule> (not <sender>)`.
+  Rules are recorded when host functions are registered (lib.rs:895) in state
+  shared by every message-server instance, and dropped when the actor stops
+  (lib.rs:865, 1050). Messages on a channel that is already open are not
+  checked (the target accepted the channel), and neither are messages the
+  host puts on the router directly (`MessageRouter::route_message`).
 - **The set is fixed at spawn.** `set_permissions` is called once, when the
   actor's handlers are made (`theater/src/handler/mod.rs:188`). Nothing
   changes a running actor's set.
@@ -313,8 +324,9 @@ Paths are under `crates/`; "rt" is `theater/src/theater_runtime.rs`.
   `allowed_hosts`/`allowed_methods` on top of the config's allowlist,
   `theater-handler-http-client/src/lib.rs:99`), process (grant's
   `allowed_programs`/`max_processes`, `theater-handler-process/src/lib.rs:180`)
-  and runtime; udp and tcp check their config's lists. message-server,
-  store, tcp and rpc check no grant yet.
+  and runtime; udp and tcp check their config's lists, and rpc and
+  message-server their `callers`/`senders` rule. store, tcp, rpc and
+  message-server check no grant yet.
 - **Restricting a list that is unrestricted** (`None`) gives the restriction
   (`intersect_options` in `theater/src/config/permissions.rs`). Before
   0069 it gave `None` (unrestricted), so a policy that limited hosts did nothing.
