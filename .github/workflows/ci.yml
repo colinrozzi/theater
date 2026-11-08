@@ -47,7 +47,7 @@ jobs:
       - uses: DeterminateSystems/magic-nix-cache-action@main
 
       - name: Unit tests
-        run: nix develop --command cargo test -p theater --lib
+        run: nix develop --command cargo test --workspace --lib
 
       - name: Build test actors
         run: |
@@ -65,7 +65,7 @@ jobs:
         run: nix develop --command cargo test -p theater --test contract_enforcement_test --test pact_contract_test --test golden_chain_test --test composite_integration_test --test self_contained_replay_test
 
       - name: Handler integration tests
-        run: nix develop --command cargo test -p theater-tests
+        run: nix develop --command cargo test -p theater-tests -p theater-handler-tcp --tests
 
   coverage:
     name: Coverage
@@ -98,7 +98,8 @@ jobs:
               --test pact_contract_test \
               --test golden_chain_test \
               --test composite_integration_test
-            cargo llvm-cov --no-report -p theater-tests --tests
+            cargo llvm-cov --no-report -p theater-tests -p theater-handler-tcp --tests
+            cargo llvm-cov --no-report --workspace --lib --exclude theater
             cargo llvm-cov report --lcov --output-path lcov.info
             echo "=== Coverage summary ==="
             cargo llvm-cov report --summary-only
