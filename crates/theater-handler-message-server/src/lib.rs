@@ -43,8 +43,92 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct MessageServerConfig {}
+/// Configuration for the message-server handler.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct MessageServerConfig {
+    /// Which actors may `send`, `request` or `open-channel` to this one:
+    /// `"any"`, `"spawner"`, `"children"` (actors it spawned) or an actor id;
+    /// `[]` = no actor, only the host. Its spawner may always. Messages the
+    /// host routes directly, and messages on a channel already open, are not
+    /// checked. Unset in a manifest block keeps the rule the actor would get
+    /// without the block (the host's, or its spawner's); a handler with no
+    /// rule anywhere takes messages from any actor. The same rule as rpc's
+    /// `callers`.
+    #[serde(default)]
+    pub senders: Option<Vec<String>>,
+}
+
+impl MessageServerConfig {
+    /// A child's config may only narrow this (the spawner's): each sender
+    /// it names must be in the spawner's list, or be its spawner. Names are
+    /// compared as written. Unset keeps the spawner's rule, so it always passes.
+    fn check_child(&self, child: &Self) -> Result<(), String> {
+        let Some(ref allowed) = self.senders else {
+            return Ok(());
+        };
+        if allowed.iter().any(|s| s == "any") {
+            return Ok(());
+        }
+        match child.senders {
+            None => Ok(()),
+            Some(ref asked) => match asked
+                .iter()
+                .find(|s| *s != "spawner" && !allowed.contains(s))
+            {
+                Some(s) => Err(format!(
+                    "senders entry {s:?} is not in the spawner's {allowed:?}"
+                )),
+                None => Ok(()),
+            },
+        }
+    }
+}
+
+/// An actor as a message recipient: who spawned it and who may message it.
+#[derive(Debug, Clone)]
+struct Recipient {
+    parent: Option<TheaterId>,
+    senders: Option<Vec<String>>,
+}
+
+/// Every actor with this handler, shared by all its instances in a runtime,
+/// so a send can check the target's rule. Written when an actor's host
+/// functions are registered, dropped at its shutdown.
+type Recipients = Arc<Mutex<HashMap<TheaterId, Recipient>>>;
+
+/// `sender` may message `target`. A target with no entry (it never
+/// registered this handler) takes messages from any actor, like one with no
+/// `senders`.
+fn check_send(recipients: &Recipients, sender: TheaterId, target: TheaterId) -> Result<(), String> {
+    let recipients = recipients.lock().unwrap();
+    let Some(recipient) = recipients.get(&target) else {
+        return Ok(());
+    };
+    let Some(ref senders) = recipient.senders else {
+        return Ok(());
+    };
+    if recipient.parent == Some(sender) {
+        return Ok(());
+    }
+    let sender_parent = recipients.get(&sender).and_then(|r| r.parent);
+    let admitted = senders.iter().any(|s| match s.as_str() {
+        "any" => true,
+        "spawner" => false, // the spawner was admitted above
+        "children" => sender_parent == Some(target),
+        id => id.parse::<TheaterId>().ok() == Some(sender),
+    });
+    if admitted {
+        return Ok(());
+    }
+    let who = if senders.is_empty() {
+        "no actor (only the host)".to_string()
+    } else {
+        senders.join(", ")
+    };
+    Err(format!(
+        "message refused: {target} accepts messages from: {who} (not {sender})"
+    ))
+}
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
@@ -505,6 +589,12 @@ pub struct MessageServerHandler {
     outstanding_requests: Arc<Mutex<HashMap<String, tokio::sync::oneshot::Sender<Vec<u8>>>>>,
 
     permissions: Option<MessageServerPermissions>,
+
+    // Who may message this actor
+    config: MessageServerConfig,
+
+    // Every actor's rule, shared by all instances (see `check_send`)
+    recipients: Recipients,
 }
 
 impl MessageServerHandler {
@@ -514,6 +604,16 @@ impl MessageServerHandler {
     /// * `permissions` - Optional permission restrictions
     /// * `router` - Reference to the global MessageRouter
     pub fn new(permissions: Option<MessageServerPermissions>, router: MessageRouter) -> Self {
+        Self::with_config(permissions, router, MessageServerConfig::default())
+    }
+
+    /// A handler whose actors take messages as `config.senders` says, unless
+    /// their manifest narrows it.
+    pub fn with_config(
+        permissions: Option<MessageServerPermissions>,
+        router: MessageRouter,
+        config: MessageServerConfig,
+    ) -> Self {
         Self {
             router,
             actor_id: None,
@@ -524,6 +624,8 @@ impl MessageServerHandler {
             registered_notify: Arc::new(Notify::new()),
             outstanding_requests: Arc::new(Mutex::new(HashMap::new())),
             permissions,
+            config,
+            recipients: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -634,8 +736,22 @@ impl MessageServerHandler {
 impl Handler for MessageServerHandler {
     fn create_instance(
         &self,
-        _config: Option<&theater::config::actor_manifest::HandlerConfig>,
+        config: Option<&theater::config::actor_manifest::HandlerConfig>,
     ) -> Box<dyn Handler> {
+        let mut config = match config {
+            Some(c) => c.parse::<MessageServerConfig>().unwrap_or_else(|e| {
+                tracing::warn!(
+                    "invalid message-server handler config: {}; using default",
+                    e
+                );
+                self.config.clone()
+            }),
+            None => self.config.clone(),
+        };
+        // A block without `senders` keeps this handler's rule.
+        if config.senders.is_none() {
+            config.senders = self.config.senders.clone();
+        }
         // Mint fresh per-actor state; only the router (a Sender to the shared
         // router task) is copied across actors. Cloning `self` here would share
         // `is_registered` / `actor_handle` / `outstanding_requests` between
@@ -643,10 +759,23 @@ impl Handler for MessageServerHandler {
         // the only one ever inserted into the router's actors map and every
         // later actor would short-circuit as "Already registered" and be
         // unreachable.
-        Box::new(MessageServerHandler::new(
+        let mut instance = MessageServerHandler::with_config(
             self.permissions.clone(),
             self.router.clone(),
-        ))
+            config,
+        );
+        instance.recipients = self.recipients.clone(); // shared across instances
+        Box::new(instance)
+    }
+
+    fn check_child_config(
+        &self,
+        config: &theater::config::actor_manifest::HandlerConfig,
+    ) -> Result<(), String> {
+        let child = config
+            .parse::<MessageServerConfig>()
+            .map_err(|e| format!("invalid config: {}", e))?;
+        self.config.check_child(&child)
     }
 
     fn name(&self) -> &str {
@@ -720,6 +849,8 @@ impl Handler for MessageServerHandler {
         // We also need access to the shutdown_receiver stored for register(),
         // so we can consume it if register() is never called and we get shutdown.
         let shutdown_receiver_for_register = self.shutdown_receiver.clone();
+        let recipients = self.recipients.clone();
+        let actor_id = self.actor_id;
 
         // Wait for register() to be called OR shutdown signal.
         // This ensures setup() can exit cleanly even if register() is never called.
@@ -730,6 +861,9 @@ impl Handler for MessageServerHandler {
                 }
                 _ = &mut receiver_for_setup.receiver => {
                     info!("Message server handler: shutdown before register, exiting setup");
+                    if let Some(id) = actor_id {
+                        recipients.lock().unwrap().remove(&id);
+                    }
                     // IMPORTANT: Also consume the shutdown_receiver that was stored for register()
                     // to avoid blocking signal_shutdown(). If register() was never called,
                     // this receiver is sitting unconsumed and will block shutdown.
@@ -758,6 +892,16 @@ impl Handler for MessageServerHandler {
         // Store the actor_id from context for use in start()
         if let Some(ref actor_id) = ctx.actor_id {
             self.actor_id = Some(*actor_id);
+            // Record this actor's rule before anything else, so it is a
+            // recipient with that rule even when another handler provides
+            // its imports.
+            self.recipients.lock().unwrap().insert(
+                *actor_id,
+                Recipient {
+                    parent: ctx.parent_id,
+                    senders: self.config.senders.clone(),
+                },
+            );
         }
 
         // Get shutdown receivers early - this is needed by register() which may be
@@ -795,6 +939,10 @@ impl Handler for MessageServerHandler {
         let outstanding_requests = self.outstanding_requests.clone();
         let outstanding_requests2 = self.outstanding_requests.clone();
         let outstanding_requests3 = self.outstanding_requests.clone();
+        let recipients = self.recipients.clone();
+        let recipients2 = self.recipients.clone();
+        let recipients3 = self.recipients.clone();
+        let recipients_for_register = self.recipients.clone();
 
         // For register() host function
         let actor_id_for_register = self.actor_id;
@@ -823,6 +971,7 @@ impl Handler for MessageServerHandler {
                 let shutdown_receiver_arc = shutdown_receiver_for_register.clone();
                 let registered_notify = registered_notify_for_register.clone();
                 let outstanding_requests = outstanding_requests_for_register.clone();
+                let recipients = recipients_for_register.clone();
 
                 async move {
                     let _ph = PhaseLog::new("message_server.register");
@@ -898,6 +1047,7 @@ impl Handler for MessageServerHandler {
                         // Unregister from router on shutdown
                         info!("Unregistering actor {} from message router", actor_id_for_task);
                         router_for_task.unregister_actor(actor_id_for_task).await;
+                        recipients.lock().unwrap().remove(&actor_id_for_task);
                         info!("Message consumption task shutdown complete for actor {}", actor_id_for_task);
                     });
 
@@ -912,6 +1062,7 @@ impl Handler for MessageServerHandler {
             "send",
             pact_result_host_fn(move |input: Value| {
                 let router = router.clone();
+                let recipients = recipients.clone();
                 async move {
                     let _ph = PhaseLog::new("message_server.send");
                     let (address, msg) = parse_address_and_message(&input)?;
@@ -922,6 +1073,7 @@ impl Handler for MessageServerHandler {
                             return Err(Value::String(format!("Failed to parse actor ID: {}", e)))
                         }
                     };
+                    check_send(&recipients, id, target_id).map_err(Value::String)?;
 
                     let (response_tx, response_rx) = tokio::sync::oneshot::channel();
                     let command = MessageCommand::SendMessage {
@@ -949,6 +1101,7 @@ impl Handler for MessageServerHandler {
             "request",
             pact_result_host_fn(move |input: Value| {
                 let router = router2.clone();
+                let recipients = recipients2.clone();
                 async move {
                     let _ph = PhaseLog::new("message_server.request");
                     let (address, msg) = parse_address_and_message(&input)?;
@@ -959,6 +1112,7 @@ impl Handler for MessageServerHandler {
                             return Err(Value::String(format!("Failed to parse actor ID: {}", e)))
                         }
                     };
+                    check_send(&recipients, id, target_id).map_err(Value::String)?;
 
                     let (response_tx, response_rx) = tokio::sync::oneshot::channel();
                     let (cmd_response_tx, cmd_response_rx) = tokio::sync::oneshot::channel();
@@ -1067,13 +1221,18 @@ impl Handler for MessageServerHandler {
             "open-channel",
             pact_result_host_fn(move |input: Value| {
                 let router = router3.clone();
+                let recipients = recipients3.clone();
                 async move {
                     let _ph = PhaseLog::new("message_server.open_channel");
                     let (address, initial_msg) = parse_address_and_message(&input)?;
                     let current_actor_id = id;
 
                     let target_id = match TheaterId::parse(&address) {
-                        Ok(id) => ChannelParticipant::Actor(id),
+                        Ok(target) => {
+                            check_send(&recipients, current_actor_id, target)
+                                .map_err(Value::String)?;
+                            ChannelParticipant::Actor(target)
+                        }
                         Err(e) => {
                             return Err(Value::String(format!("Failed to parse actor ID: {}", e)))
                         }
@@ -1514,5 +1673,156 @@ mod tests {
 
         // Hash should be non-zero
         assert!(!hashes[0].1.as_bytes().iter().all(|&b| b == 0));
+    }
+
+    fn recipients(entries: &[(TheaterId, Option<TheaterId>, Option<Vec<&str>>)]) -> Recipients {
+        let map = entries
+            .iter()
+            .map(|(id, parent, senders)| {
+                (
+                    *id,
+                    Recipient {
+                        parent: *parent,
+                        senders: senders
+                            .as_ref()
+                            .map(|v| v.iter().map(|s| s.to_string()).collect()),
+                    },
+                )
+            })
+            .collect();
+        Arc::new(Mutex::new(map))
+    }
+
+    #[test]
+    fn senders_rule_is_checked_on_the_target() {
+        let [parent, open, locked, kids, child, grandchild, stranger] =
+            std::array::from_fn(|_| TheaterId::generate());
+        let fixed = TheaterId::generate();
+        let fixed_s = fixed.to_string();
+        let r = recipients(&[
+            (parent, None, Some(vec!["children"])),
+            (open, None, None),
+            (locked, Some(parent), Some(vec![])),
+            (kids, None, Some(vec!["children", fixed_s.as_str()])),
+            (child, Some(kids), Some(vec![])),
+            (grandchild, Some(child), Some(vec![])),
+            (stranger, None, None),
+        ]);
+        let ok = |from, to| check_send(&r, from, to).is_ok();
+
+        // No rule, or no entry at all: any actor.
+        assert!(ok(stranger, open));
+        assert!(ok(stranger, TheaterId::generate()));
+        // []: no actor but the spawner.
+        assert!(ok(parent, locked), "the spawner may always send");
+        let e = check_send(&r, stranger, locked).unwrap_err();
+        assert!(
+            e.contains("accepts messages from: no actor (only the host)"),
+            "{e}"
+        );
+        assert!(e.contains(&stranger.to_string()), "{e}");
+        // "children": direct children only, and a listed id.
+        assert!(ok(child, kids));
+        assert!(!ok(grandchild, kids));
+        assert!(ok(fixed, kids));
+        let e = check_send(&r, stranger, kids).unwrap_err();
+        assert!(
+            e.contains(&format!("accepts messages from: children, {fixed}")),
+            "{e}"
+        );
+        assert!(ok(locked, parent));
+        assert!(!ok(grandchild, locked));
+    }
+
+    #[test]
+    fn child_senders_may_only_narrow_the_spawner_rule() {
+        let rule = |v: Option<Vec<&str>>| MessageServerConfig {
+            senders: v.map(|v| v.into_iter().map(String::from).collect()),
+        };
+        assert!(rule(None).check_child(&rule(Some(vec!["any"]))).is_ok());
+        assert!(rule(Some(vec!["any"])).check_child(&rule(None)).is_ok());
+
+        let spawner = rule(Some(vec!["children"]));
+        assert!(spawner.check_child(&rule(Some(vec![]))).is_ok());
+        assert!(spawner.check_child(&rule(Some(vec!["children"]))).is_ok());
+        assert!(spawner.check_child(&rule(Some(vec!["spawner"]))).is_ok());
+        assert!(
+            spawner.check_child(&rule(None)).is_ok(),
+            "unset keeps the spawner's rule"
+        );
+        let e = spawner.check_child(&rule(Some(vec!["any"]))).unwrap_err();
+        assert!(e.contains("senders entry \"any\""), "{e}");
+    }
+
+    /// Register `instance` as actor `id` (with `parent`), as the runtime does.
+    fn register(instance: &mut Box<dyn Handler>, id: TheaterId, parent: Option<TheaterId>) {
+        let mut ctx = HandlerContext::new();
+        ctx.actor_id = Some(id);
+        ctx.parent_id = parent;
+        instance
+            .register_host_functions(&mut theater::pack_bridge::HostImports::new(), &mut ctx)
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_block_without_senders_keeps_the_host_rule() {
+        let host = MessageServerHandler::with_config(
+            None,
+            MessageRouter::new(),
+            MessageServerConfig {
+                senders: Some(vec![]),
+            },
+        );
+        let bare = theater::config::actor_manifest::HandlerConfig::unit("message-server");
+        let (id, other) = (TheaterId::generate(), TheaterId::generate());
+        register(&mut host.create_instance(Some(&bare)), id, None);
+        let e = check_send(&host.recipients, other, id).unwrap_err();
+        assert!(e.contains("no actor (only the host)"), "{e}");
+    }
+
+    #[tokio::test]
+    async fn a_bare_block_under_a_host_with_no_rule_takes_any_sender() {
+        let host = MessageServerHandler::new(None, MessageRouter::new());
+        let bare = theater::config::actor_manifest::HandlerConfig::unit("message-server");
+        let id = TheaterId::generate();
+        register(&mut host.create_instance(Some(&bare)), id, None);
+        assert!(check_send(&host.recipients, TheaterId::generate(), id).is_ok());
+    }
+
+    #[tokio::test]
+    async fn a_bare_block_under_a_locked_spawner_inherits_its_rule() {
+        let host = MessageServerHandler::new(None, MessageRouter::new());
+        let bare = theater::config::actor_manifest::HandlerConfig::unit("message-server");
+        let (spawner_id, child_id, other) = (
+            TheaterId::generate(),
+            TheaterId::generate(),
+            TheaterId::generate(),
+        );
+        let mut spawner =
+            host.create_instance(Some(&theater::config::actor_manifest::HandlerConfig::new(
+                "message-server",
+                MessageServerConfig {
+                    senders: Some(vec![]),
+                },
+            )));
+        register(&mut spawner, spawner_id, None);
+        spawner
+            .check_child_config(&bare)
+            .expect("a bare block is accepted under []");
+        register(
+            &mut spawner.create_instance(Some(&bare)),
+            child_id,
+            Some(spawner_id),
+        );
+        assert!(check_send(&host.recipients, spawner_id, child_id).is_ok());
+        let e = check_send(&host.recipients, other, child_id).unwrap_err();
+        assert!(e.contains("no actor (only the host)"), "{e}");
+        let wider = theater::config::actor_manifest::HandlerConfig::new(
+            "message-server",
+            MessageServerConfig {
+                senders: Some(vec!["any".to_string()]),
+            },
+        );
+        assert!(spawner.check_child_config(&wider).is_err());
     }
 }

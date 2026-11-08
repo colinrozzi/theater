@@ -24,6 +24,7 @@ use theater::utils::ResourceCache;
 use theater::SpawnError;
 use theater_handler_filesystem::FileSystemHandler;
 use theater_handler_http_client::HttpClientHandler;
+use theater_handler_message_server::{MessageRouter, MessageServerConfig, MessageServerHandler};
 use theater_handler_process::{ProcessHandler, ProcessHandlerConfig};
 use theater_handler_rpc::{RpcHandler, RpcHandlerConfig};
 use theater_handler_self::{SelfHandler, SelfHostConfig};
@@ -46,7 +47,7 @@ fn wasm() -> Vec<u8> {
 }
 
 /// The host's handlers: filesystem rooted at `root`, two hosts, two programs,
-/// rpc callable by children.
+/// rpc callable and message-server reachable by children.
 fn start_runtime(root: &Path) -> mpsc::UnboundedSender<TheaterCommand> {
     let (theater_tx, theater_rx) = mpsc::unbounded_channel::<TheaterCommand>();
     let tx_for_runtime = theater_tx.clone();
@@ -82,6 +83,13 @@ fn start_runtime(root: &Path) -> mpsc::UnboundedSender<TheaterCommand> {
         theater_tx.clone(),
         RpcHandlerConfig {
             callers: Some(vec!["children".into()]),
+        },
+    ));
+    registry.register(MessageServerHandler::with_config(
+        None,
+        MessageRouter::new(),
+        MessageServerConfig {
+            senders: Some(vec!["children".into()]),
         },
     ));
     tokio::spawn(async move {
@@ -478,6 +486,57 @@ async fn a_child_cannot_be_callable_by_more_than_its_spawner_allows() {
     )
     .await
     .expect("a block without callers is accepted");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_child_cannot_take_messages_from_more_than_its_spawner_allows() {
+    let (_base, root) = dirs();
+    let tx = start_runtime(&root);
+    let parent = spawn(&tx, manifest("parent", vec![]), None)
+        .await
+        .expect("host-started parent");
+    let senders = |v: &[&str]| {
+        HandlerConfig::new(
+            "message-server",
+            MessageServerConfig {
+                senders: Some(v.iter().map(|s| s.to_string()).collect()),
+            },
+        )
+    };
+
+    refused(
+        &tx,
+        manifest("ms-any", vec![senders(&["any"])]),
+        parent,
+        "message-server",
+        "senders",
+    )
+    .await;
+    let child = spawn(
+        &tx,
+        manifest("ms-narrow", vec![senders(&["spawner"])]),
+        Some(parent),
+    )
+    .await
+    .expect("narrowing to its spawner is allowed");
+    refused(
+        &tx,
+        manifest("g-ms", vec![senders(&["children"])]),
+        child,
+        "message-server",
+        "senders",
+    )
+    .await;
+    spawn(&tx, manifest("g-ms-none", vec![senders(&[])]), Some(child))
+        .await
+        .expect("[] is narrower than anything");
+    spawn(
+        &tx,
+        manifest("ms-bare", vec![HandlerConfig::unit("message-server")]),
+        Some(parent),
+    )
+    .await
+    .expect("a block without senders is accepted");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
