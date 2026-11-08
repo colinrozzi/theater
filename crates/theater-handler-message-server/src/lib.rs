@@ -1537,28 +1537,18 @@ mod tests {
         ])
     }
 
-    /// The real shape from a state-threaded actor:
-    /// result<tuple<actor-state, tuple<channel-accept>>, string>.
+    /// The real shape since client interfaces stopped threading state (#196):
+    /// handle-channel-open returns result<channel-accept, string>.
     #[test]
-    fn channel_accept_state_threaded_accepted() {
-        let state = Value::Option {
-            inner_type: ValueType::List(Box::new(ValueType::U8)),
-            value: None,
-        };
-        let v = ok_result(Value::Tuple(vec![
-            state,
-            Value::Tuple(vec![channel_accept_tuple(true)]),
-        ]));
-        assert!(parse_channel_accept(&v));
+    fn channel_accept_accepted() {
+        assert!(parse_channel_accept(&ok_result(channel_accept_tuple(true))));
     }
 
     #[test]
-    fn channel_accept_state_threaded_rejected() {
-        let v = ok_result(Value::Tuple(vec![
-            Value::Tuple(vec![]), // state placeholder
-            Value::Tuple(vec![channel_accept_tuple(false)]),
-        ]));
-        assert!(!parse_channel_accept(&v));
+    fn channel_accept_rejected() {
+        assert!(!parse_channel_accept(&ok_result(channel_accept_tuple(
+            false
+        ))));
     }
 
     #[test]
@@ -1576,11 +1566,7 @@ mod tests {
                 ),
             ],
         };
-        let v = ok_result(Value::Tuple(vec![
-            Value::Tuple(vec![]),
-            Value::Tuple(vec![accept]),
-        ]));
-        assert!(parse_channel_accept(&v));
+        assert!(parse_channel_accept(&ok_result(accept)));
     }
 
     #[test]
@@ -1594,10 +1580,10 @@ mod tests {
     }
 
     #[test]
-    fn channel_accept_legacy_bare_tuple() {
-        // Backward-compat: a bare tuple<channel-accept> (no Result, no state).
-        let v = Value::Tuple(vec![channel_accept_tuple(true)]);
-        assert!(parse_channel_accept(&v));
+    fn channel_accept_bare_value() {
+        // Some internal paths hand back the channel-accept without a Result.
+        assert!(parse_channel_accept(&channel_accept_tuple(true)));
+        assert!(!parse_channel_accept(&channel_accept_tuple(false)));
     }
 
     #[test]
