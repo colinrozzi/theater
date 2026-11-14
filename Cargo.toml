@@ -111,10 +111,10 @@ theater-handler-http-client = { version = "0.3.0", path = "crates/theater-handle
 # graph — the two-Value hazard. `packr` (umbrella, old AsyncRuntime/AsyncCtx API)
 # is kept transitionally for the incremental migration and dropped once
 # pack_bridge + every handler move to packr-core (the clean end state).
-packr = "0.24.0"
-packr-abi = "0.24.0"
-packr-core = "0.24.0"
-packr-wasmtime = "0.24.0"
+packr = "0.24.2"
+packr-abi = "0.24.2"
+packr-core = "0.24.2"
+packr-wasmtime = "0.24.2"
 
 # Metadata for Nix crane builds
 [workspace.metadata.crane]
