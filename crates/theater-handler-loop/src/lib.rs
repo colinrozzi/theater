@@ -272,6 +272,7 @@ impl Handler for LoopHandler {
                     async move {
                         // Parse initial state
                         let initial_state = match &input {
+                            Value::Bytes(b) => b.clone(),
                             Value::List { items, .. } => items
                                 .iter()
                                 .filter_map(|v| match v {
@@ -280,6 +281,7 @@ impl Handler for LoopHandler {
                                 })
                                 .collect::<Vec<u8>>(),
                             Value::Tuple(items) if items.len() == 1 => match &items[0] {
+                                Value::Bytes(b) => b.clone(),
                                 Value::List { items, .. } => items
                                     .iter()
                                     .filter_map(|v| match v {
@@ -456,6 +458,7 @@ fn extract_loop_result(value: &Value) -> Result<Vec<u8>, String> {
                 // Extract the list<u8> from the ok payload
                 if let Some(inner) = payload.first() {
                     match inner {
+                        Value::Bytes(b) => Ok(b.clone()),
                         Value::List { items, .. } => {
                             let bytes: Vec<u8> = items
                                 .iter()

@@ -40,6 +40,7 @@ fn mock_actor(respond: bool) -> (ActorHandle, Recorded) {
                             _ => String::new(),
                         };
                         let data: Vec<u8> = match v.get(2) {
+                            Some(Value::Bytes(b)) => b.clone(),
                             Some(Value::List { items, .. }) => items
                                 .iter()
                                 .filter_map(|x| if let Value::U8(b) = x { Some(*b) } else { None })

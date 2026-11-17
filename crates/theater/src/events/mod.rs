@@ -224,8 +224,17 @@ mod encode_tests {
                 ours,
                 derived("theater:simple/filesystem", "read-file", input, output)
             );
+            // decoding may give a list<u8> back as Value::Bytes, so compare
+            // what the decoded call encodes to, not the Value trees
             let call = decode_host_function_call(&ours).expect("decodes");
-            assert_eq!((&call.input, &call.output), (input, output));
+            let again = encode_host_function_call(
+                "theater:simple/filesystem",
+                "read-file",
+                &call.input,
+                &call.output,
+            )
+            .unwrap();
+            assert_eq!(again, ours);
         }
     }
 }

@@ -232,6 +232,7 @@ fn bool_at(fields: &[Value], i: usize) -> Result<bool, Value> {
 }
 fn bytes_at(fields: &[Value], i: usize) -> Result<Vec<u8>, Value> {
     match fields.get(i) {
+        Some(Value::Bytes(b)) => Ok(b.clone()),
         Some(Value::List { items, .. }) => Ok(items
             .iter()
             .filter_map(|v| if let Value::U8(b) = v { Some(*b) } else { None })

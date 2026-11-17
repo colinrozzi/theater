@@ -641,6 +641,7 @@ async fn run_input_loop(
 
 fn parse_bytes(input: &Value) -> Result<Vec<u8>, Value> {
     match input {
+        Value::Bytes(b) => Ok(b.clone()),
         Value::List { items, .. } => {
             let bytes: Result<Vec<u8>, _> = items
                 .iter()

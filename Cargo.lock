@@ -1748,8 +1748,7 @@ checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 [[package]]
 name = "packr"
 version = "0.24.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bf42ef412dda5fee304c56e51368ec3a53df0e17b39ecb16366280c501a9109e"
+source = "git+https://github.com/colinrozzi/pack?branch=value-bytes#dd8b52da3a3ad45a3e50a47951afadbc9215c67c"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1769,8 +1768,7 @@ dependencies = [
 [[package]]
 name = "packr-abi"
 version = "0.24.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "82c9499faec8ce74ea4f264e7a504920124d9c6199b863957a1a38e754a75a78"
+source = "git+https://github.com/colinrozzi/pack?branch=value-bytes#dd8b52da3a3ad45a3e50a47951afadbc9215c67c"
 dependencies = [
  "hashbrown 0.14.5",
  "packr-derive",
@@ -1781,8 +1779,7 @@ dependencies = [
 [[package]]
 name = "packr-core"
 version = "0.24.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "52a0b15d368f01f09d4cd28745c040b481dac563d04fac0593312c54af8850d9"
+source = "git+https://github.com/colinrozzi/pack?branch=value-bytes#dd8b52da3a3ad45a3e50a47951afadbc9215c67c"
 dependencies = [
  "async-trait",
  "packr-abi",
@@ -1794,8 +1791,7 @@ dependencies = [
 [[package]]
 name = "packr-derive"
 version = "0.24.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dcfac1b691c57f777cbc76ff7b9568a16adaeed762e05159af7eeff498a4212b"
+source = "git+https://github.com/colinrozzi/pack?branch=value-bytes#dd8b52da3a3ad45a3e50a47951afadbc9215c67c"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1829,8 +1825,7 @@ dependencies = [
 [[package]]
 name = "packr-wasmtime"
 version = "0.24.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e9757122418be4d23533a9435826a098d20ef655cf938342501d69aba296a4c7"
+source = "git+https://github.com/colinrozzi/pack?branch=value-bytes#dd8b52da3a3ad45a3e50a47951afadbc9215c67c"
 dependencies = [
  "async-trait",
  "packr-core",

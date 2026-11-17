@@ -119,3 +119,12 @@ packr-wasmtime = "0.24.2"
 # Metadata for Nix crane builds
 [workspace.metadata.crane]
 name = "theater"
+
+# DRAFT: pack#135 (Value::Bytes), until it is released as packr 0.25; then
+# this section goes and the versions above become 0.25.
+[patch.crates-io]
+packr = { git = "https://github.com/colinrozzi/pack", branch = "value-bytes" }
+packr-abi = { git = "https://github.com/colinrozzi/pack", branch = "value-bytes" }
+packr-core = { git = "https://github.com/colinrozzi/pack", branch = "value-bytes" }
+packr-wasmtime = { git = "https://github.com/colinrozzi/pack", branch = "value-bytes" }
+packr-derive = { git = "https://github.com/colinrozzi/pack", branch = "value-bytes" }

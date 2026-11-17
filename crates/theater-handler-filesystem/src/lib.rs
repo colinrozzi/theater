@@ -444,6 +444,7 @@ fn parse_path_and_content(input: &Value) -> Result<(String, Vec<u8>), FsError> {
                 _ => return Err(FsError::InvalidPath("expected string for path".to_string())),
             };
             let content = match &fields[1] {
+                Value::Bytes(b) => b.clone(),
                 Value::List { items, .. } => items
                     .iter()
                     .filter_map(|v| match v {
@@ -783,10 +784,9 @@ impl Handler for FileSystemHandler {
                     let resolved =
                         prepare(&perms, &root, &path, false).map_err(|e| e.to_value())?;
                     match tokio::fs::read(&resolved).await {
-                        Ok(bytes) => Ok(Value::List {
-                            elem_type: ValueType::U8,
-                            items: bytes.into_iter().map(Value::U8).collect(),
-                        }),
+                        // one buffer, not a Value per byte: the same list<u8> on the
+                        // wire (packr Value::Bytes, wisp ticket 0157)
+                        Ok(bytes) => Ok(Value::Bytes(bytes)),
                         Err(e) => Err(map_io_error(e, &path).to_value()),
                     }
                 }

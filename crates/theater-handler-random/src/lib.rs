@@ -23,7 +23,7 @@ use theater::actor::handle::ActorHandle;
 use theater::config::actor_manifest::HandlerConfig;
 use theater::handler::{Handler, HandlerContext, SharedActorInstance};
 use theater::pack_bridge::{
-    pact_result_host_fn, parse_pact, plain_host_fn, InterfaceImpl, TypeHash, Value, ValueType,
+    pact_result_host_fn, parse_pact, plain_host_fn, InterfaceImpl, TypeHash, Value,
 };
 use theater::shutdown::ShutdownReceiver;
 
@@ -132,10 +132,8 @@ fn uniform_in(min: u64, max: u64) -> u64 {
 }
 
 fn bytes_value(buf: Vec<u8>) -> Value {
-    Value::List {
-        elem_type: ValueType::U8,
-        items: buf.into_iter().map(Value::U8).collect(),
-    }
+    // one buffer, not a Value per byte; the same list<u8> on the wire (packr Value::Bytes, wisp 0157)
+    Value::Bytes(buf)
 }
 
 impl Handler for RandomHandler {

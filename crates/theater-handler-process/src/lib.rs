@@ -408,6 +408,7 @@ fn opt_u64_at(fields: &[Value], i: usize) -> Result<Option<u64>, Value> {
 }
 fn bytes_at(fields: &[Value], i: usize) -> Result<Vec<u8>, Value> {
     match fields.get(i) {
+        Some(Value::Bytes(b)) => Ok(b.clone()),
         Some(Value::List { items, .. }) => Ok(items
             .iter()
             .filter_map(|v| if let Value::U8(b) = v { Some(*b) } else { None })
@@ -430,10 +431,8 @@ fn ok_unit() -> Value {
     Value::Tuple(vec![])
 }
 fn bytes_value(data: Vec<u8>) -> Value {
-    Value::List {
-        elem_type: ValueType::U8,
-        items: data.into_iter().map(Value::U8).collect(),
-    }
+    // one buffer, not a Value per byte; the same list<u8> on the wire (packr Value::Bytes, wisp 0157)
+    Value::Bytes(data)
 }
 fn opt_s32(v: Option<i32>) -> Value {
     Value::Option {
