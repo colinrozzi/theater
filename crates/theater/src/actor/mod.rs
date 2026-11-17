@@ -11,6 +11,7 @@ pub mod handle;
 pub mod runtime;
 pub mod store;
 pub mod types;
+pub mod usage;
 
 // Public re-exports
 pub use handle::ActorHandle;

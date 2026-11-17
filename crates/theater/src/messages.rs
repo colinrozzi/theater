@@ -295,6 +295,18 @@ pub enum TheaterCommand {
         response_tx: oneshot::Sender<Result<ActorStatus>>,
     },
 
+    /// # Get what an actor uses
+    ///
+    /// Its linear memory size and the calls made into it with their time
+    /// ([`crate::actor::usage`]), as of its latest call. Answered from the
+    /// runtime's own record, like `GetActorStatus`: nothing is asked of the
+    /// actor, so a busy actor answers too. `None` for an actor that isn't
+    /// running.
+    GetActorUsage {
+        actor_id: TheaterId,
+        response_tx: oneshot::Sender<Option<crate::actor::usage::ActorUsage>>,
+    },
+
     /// # Restart an actor
     ///
     /// # Get actor state
@@ -485,6 +497,9 @@ impl TheaterCommand {
             }
             TheaterCommand::PeerTerminated { actor_id, peer } => {
                 format!("PeerTerminated: {:?} (peer {:?})", actor_id, peer)
+            }
+            TheaterCommand::GetActorUsage { actor_id, .. } => {
+                format!("GetActorUsage: {:?}", actor_id)
             }
             TheaterCommand::SubscribeToSpawns { .. } => "SubscribeToSpawns".to_string(),
             TheaterCommand::UnsubscribeFromSpawns { .. } => "UnsubscribeFromSpawns".to_string(),

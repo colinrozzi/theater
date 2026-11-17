@@ -206,6 +206,9 @@ pub struct ActorProcess<E: crate::executor::Spawn> {
     /// Fresh copies of the actor's own handlers, with its configs: the
     /// templates for any actor it spawns, in place of the host's.
     pub child_handlers: HandlerRegistry,
+    /// What the actor uses, written by its runtime after each call and read
+    /// here for `GetActorUsage` (see [`crate::actor::usage`]).
+    pub usage: Arc<crate::actor::usage::UsageCounters>,
 }
 
 /// What [`TheaterRuntime::create_handler_registry_for_manifest`] builds for
@@ -569,6 +572,13 @@ impl<E: crate::executor::Spawn> TheaterRuntime<E> {
                     if let Err(e) = response_tx.send(Ok(status)) {
                         error!("Failed to send actor status: {:?}", e);
                     }
+                }
+                TheaterCommand::GetActorUsage {
+                    actor_id,
+                    response_tx,
+                } => {
+                    let usage = self.actors.get(&actor_id).map(|proc| proc.usage.snapshot());
+                    let _ = response_tx.send(usage);
                 }
                 TheaterCommand::SubscribeToActor {
                     actor_id,
@@ -959,6 +969,8 @@ impl<E: crate::executor::Spawn> TheaterRuntime<E> {
             tokio::sync::oneshot::channel::<Result<MetadataWithHashes, ActorRuntimeError>>();
 
         let executor_for_actor = self.executor.clone();
+        let usage = Arc::new(crate::actor::usage::UsageCounters::default());
+        let usage_for_actor = usage.clone();
         let actor_runtime_process = self.executor.spawn(Box::pin(async move {
             let _actor_runtime = ActorRuntime::start(
                 actor_id_for_task,
@@ -975,6 +987,7 @@ impl<E: crate::executor::Spawn> TheaterRuntime<E> {
                 control_rx,
                 actor_control_tx,
                 executor_for_actor,
+                usage_for_actor,
                 Some(setup_tx),
             )
             .await;
@@ -1023,6 +1036,7 @@ impl<E: crate::executor::Spawn> TheaterRuntime<E> {
             metadata: actor_metadata,
             permissions,
             child_handlers,
+            usage,
         };
 
         self.register_actor(process);

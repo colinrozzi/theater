@@ -285,6 +285,9 @@ pub struct PackInstance {
     pub actor_store: ActorStore,
     /// The raw wasm bytes, kept so metadata can be served statically.
     wasm_bytes: Arc<Vec<u8>>,
+    /// What the actor uses (calls, their time, its memory), shared with the
+    /// runtime (see [`crate::actor::usage`]).
+    pub usage: Arc<crate::actor::usage::UsageCounters>,
 }
 
 impl PackInstance {
@@ -300,7 +303,13 @@ impl PackInstance {
             instance,
             actor_store,
             wasm_bytes,
+            usage: Arc::default(),
         }
+    }
+
+    /// The guest's linear memory, in bytes.
+    pub fn memory_size(&self) -> usize {
+        self.instance.memory_size()
     }
 
     /// Get the actor ID from the store.

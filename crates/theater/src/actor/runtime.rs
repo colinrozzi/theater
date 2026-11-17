@@ -198,6 +198,7 @@ impl ActorRuntime {
         actor_phase_manager: ActorPhaseManager,
         actor_instance_wrapper: Arc<RwLock<Option<PackInstance>>>,
         executor: E,
+        usage: Arc<crate::actor::usage::UsageCounters>,
     ) -> Result<(ShutdownController, Vec<E::Handle>, MetadataWithHashes), ActorRuntimeError> {
         // ---------------- Checkpoint Setup Initial ----------------
 
@@ -371,6 +372,8 @@ impl ActorRuntime {
             })?;
         let mut actor_instance =
             PackInstance::new(name.clone(), instance, actor_store, wasm_bytes.clone());
+        usage.set_memory(actor_instance.memory_size());
+        actor_instance.usage = usage;
 
         debug!("PackInstance created successfully");
         debug!(
@@ -583,6 +586,7 @@ impl ActorRuntime {
         control_rx: Receiver<ActorControl>,
         control_tx: Sender<ActorControl>,
         executor: E,
+        usage: Arc<crate::actor::usage::UsageCounters>,
         setup_result_tx: Option<
             tokio::sync::oneshot::Sender<Result<MetadataWithHashes, ActorRuntimeError>>,
         >,
@@ -623,6 +627,7 @@ impl ActorRuntime {
                     actor_phase_manager.clone(),
                     actor_instance_wrapper,
                     executor_for_build,
+                    usage,
                 )
                 .await
                 {
@@ -1071,9 +1076,13 @@ impl ActorRuntime {
             })
             .await;
 
+        let started = std::time::Instant::now();
         let call_result = actor_instance
             .call_function_with_value(name, params_value)
             .await;
+        actor_instance
+            .usage
+            .record_call(started.elapsed(), actor_instance.memory_size());
 
         let results = match call_result {
             Ok(result) => {
