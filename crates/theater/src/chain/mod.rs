@@ -107,8 +107,29 @@ impl StateChain {
         &mut self,
         event_data: ChainEventData,
     ) -> Result<ChainEvent, serde_json::Error> {
-        let mut event = event_data.to_chain_event(self.current_hash.clone());
+        let event = event_data.to_chain_event(self.current_hash.clone());
+        self.add_event(event).await
+    }
 
+    /// Adds an event whose data is already pack-encoded (for example by
+    /// [`crate::events::encode_host_function_call`], which encodes a host
+    /// call without cloning its input and output). Hashing, the head and the
+    /// subscribers are as for [`Self::add_typed_event`].
+    pub async fn add_encoded_event(
+        &mut self,
+        event_type: String,
+        data: Vec<u8>,
+    ) -> Result<ChainEvent, serde_json::Error> {
+        let event = ChainEvent {
+            parent_hash: self.current_hash.clone(),
+            hash: vec![],
+            event_type,
+            data,
+        };
+        self.add_event(event).await
+    }
+
+    async fn add_event(&mut self, mut event: ChainEvent) -> Result<ChainEvent, serde_json::Error> {
         let serialized_event = serde_json::to_vec(&event)?;
         let content_ref = ContentRef::from_content(&serialized_event);
         let hash_bytes = hex::decode(content_ref.hash()).unwrap();
