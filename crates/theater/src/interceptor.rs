@@ -22,7 +22,7 @@ use packr_core::abi::Value;
 use packr_core::CallInterceptor;
 
 use crate::chain::StateChain;
-use crate::events::{ChainEventData, ChainEventPayload};
+
 use crate::replay::HostFunctionCall;
 
 /// Interceptor that records all host function calls to the actor's chain.
@@ -53,14 +53,13 @@ impl CallInterceptor for RecordingInterceptor {
     }
 
     async fn after_import(&self, interface: &str, function: &str, input: &Value, output: &Value) {
-        let call = HostFunctionCall::new(interface, function, input.clone(), output.clone());
-
+        // Encoded from references: no clone of input or output (a large
+        // list<u8> is a large tree; wisp ticket 0157).
+        let data = crate::events::encode_host_function_call(interface, function, input, output)
+            .unwrap_or_default();
         let mut chain = self.chain.write().await;
         let _ = chain
-            .add_typed_event(ChainEventData {
-                event_type: format!("{}/{}", interface, function),
-                data: ChainEventPayload::HostFunction(call),
-            })
+            .add_encoded_event(format!("{}/{}", interface, function), data)
             .await;
     }
 
@@ -144,15 +143,13 @@ impl CallInterceptor for ReplayRecordingInterceptor {
     }
 
     async fn after_import(&self, interface: &str, function: &str, input: &Value, output: &Value) {
-        // Record to the new chain (same as RecordingInterceptor)
-        let call = HostFunctionCall::new(interface, function, input.clone(), output.clone());
-
+        // Record to the new chain (same as RecordingInterceptor): the same
+        // bytes, so the hashes compare, without cloning input or output.
+        let data = crate::events::encode_host_function_call(interface, function, input, output)
+            .unwrap_or_default();
         let mut chain = self.chain.write().await;
         let _ = chain
-            .add_typed_event(ChainEventData {
-                event_type: format!("{}/{}", interface, function),
-                data: ChainEventPayload::HostFunction(call),
-            })
+            .add_encoded_event(format!("{}/{}", interface, function), data)
             .await;
     }
 

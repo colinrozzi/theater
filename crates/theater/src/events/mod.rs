@@ -108,6 +108,60 @@ impl ChainEventData {
     }
 }
 
+/// Pack-encode a host function call as a chain event's data, from references.
+///
+/// The bytes are exactly those of
+/// `encode(&Value::from(ChainEventPayload::HostFunction(call)))`, but the
+/// input and output trees are encoded where they are, not cloned into a
+/// `HostFunctionCall` first. A `Value` is 88 bytes, so a 10 MB `list<u8>`
+/// (a file read) is an 880 MB tree, and each clone of it was another 880 MB
+/// (wisp ticket 0157). The test below checks the bytes against the derived
+/// encoding.
+pub fn encode_host_function_call(
+    interface: &str,
+    function: &str,
+    input: &Value,
+    output: &Value,
+) -> Result<Vec<u8>, packr_abi::AbiError> {
+    use packr_abi::{Encoder, GraphCodec, Node, NodeKind};
+    fn name(payload: &mut Vec<u8>, s: &str) {
+        payload.extend_from_slice(&(s.len() as u32).to_le_bytes());
+        payload.extend_from_slice(s.as_bytes());
+    }
+    let mut enc = Encoder::new();
+    // children first, in field order, as Value::Record's encode_graph does
+    let children = [
+        Value::String(interface.to_string()).encode_graph(&mut enc)?,
+        Value::String(function.to_string()).encode_graph(&mut enc)?,
+        input.encode_graph(&mut enc)?,
+        output.encode_graph(&mut enc)?,
+    ];
+    let mut rec = Vec::new();
+    name(&mut rec, "HostFunctionCall");
+    rec.extend_from_slice(&4u32.to_le_bytes());
+    for field in ["interface", "function", "input", "output"] {
+        name(&mut rec, field);
+    }
+    for c in children {
+        rec.extend_from_slice(&c.to_le_bytes());
+    }
+    let rec = enc.push_node(Node {
+        kind: NodeKind::Record,
+        payload: rec,
+    });
+    let mut var = Vec::new();
+    name(&mut var, "ChainEventPayload");
+    name(&mut var, "HostFunction");
+    var.extend_from_slice(&0u32.to_le_bytes()); // tag of HostFunction
+    var.extend_from_slice(&1u32.to_le_bytes());
+    var.extend_from_slice(&rec.to_le_bytes());
+    let root = enc.push_node(Node {
+        kind: NodeKind::Variant,
+        payload: var,
+    });
+    Ok(enc.finish(root).to_bytes())
+}
+
 /// Decode chain event data from pack-encoded bytes.
 pub fn decode_chain_event_payload(data: &[u8]) -> Option<ChainEventPayload> {
     let value = packr_core::abi::decode(data).ok()?;
@@ -120,6 +174,59 @@ pub fn decode_host_function_call(data: &[u8]) -> Option<HostFunctionCall> {
     match payload {
         ChainEventPayload::HostFunction(call) => Some(call),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod encode_tests {
+    use super::*;
+
+    fn derived(interface: &str, function: &str, input: &Value, output: &Value) -> Vec<u8> {
+        let call = HostFunctionCall::new(interface, function, input.clone(), output.clone());
+        packr_core::abi::encode(&Value::from(ChainEventPayload::HostFunction(call))).unwrap()
+    }
+
+    #[test]
+    fn host_call_bytes_match_the_derived_encoding() {
+        let bytes = Value::List {
+            elem_type: crate::pack_bridge::ValueType::U8,
+            items: (0..=255u8).map(Value::U8).collect(),
+        };
+        let cases = [
+            (
+                Value::String("big.txt".into()),
+                Value::Result {
+                    ok_type: crate::pack_bridge::ValueType::List(Box::new(
+                        crate::pack_bridge::ValueType::U8,
+                    )),
+                    err_type: crate::pack_bridge::ValueType::String,
+                    value: Ok(Box::new(bytes.clone())),
+                },
+            ),
+            (Value::Tuple(vec![]), Value::U64(42)),
+            (
+                Value::Tuple(vec![
+                    Value::S32(-1),
+                    bytes,
+                    Value::Option {
+                        inner_type: crate::pack_bridge::ValueType::String,
+                        value: None,
+                    },
+                ]),
+                Value::Bool(true),
+            ),
+        ];
+        for (input, output) in &cases {
+            let ours =
+                encode_host_function_call("theater:simple/filesystem", "read-file", input, output)
+                    .unwrap();
+            assert_eq!(
+                ours,
+                derived("theater:simple/filesystem", "read-file", input, output)
+            );
+            let call = decode_host_function_call(&ours).expect("decodes");
+            assert_eq!((&call.input, &call.output), (input, output));
+        }
     }
 }
 
