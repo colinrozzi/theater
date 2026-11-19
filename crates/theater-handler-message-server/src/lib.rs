@@ -1361,10 +1361,8 @@ impl Handler for MessageServerHandler {
 
 /// Convert a Vec<u8> to a Value::List of U8
 fn bytes_to_value(data: Vec<u8>) -> Value {
-    Value::List {
-        elem_type: ValueType::U8,
-        items: data.into_iter().map(Value::U8).collect(),
-    }
+    // one buffer, not a Value per byte; the same list<u8> on the wire (packr Value::Bytes, wisp 0157)
+    Value::Bytes(data)
 }
 
 /// Parse the optional response bytes from a `handle-request` return.
@@ -1392,6 +1390,7 @@ fn parse_option_bytes(value: &Value) -> Option<Vec<u8>> {
         Value::Option {
             value: Some(inner), ..
         } => match inner.as_ref() {
+            Value::Bytes(b) => Some(b.clone()),
             Value::List { items, .. } => Some(
                 items
                     .iter()
@@ -1469,6 +1468,7 @@ fn parse_address_and_message(input: &Value) -> Result<(String, Vec<u8>), Value> 
                 _ => return Err(Value::String("Expected string for address".to_string())),
             };
             let msg = match &fields[1] {
+                Value::Bytes(b) => b.clone(),
                 Value::List { items, .. } => items
                     .iter()
                     .filter_map(|v| match v {
@@ -1494,6 +1494,7 @@ fn parse_request_id_and_data(input: &Value) -> Result<(String, Vec<u8>), Value> 
                 _ => return Err(Value::String("Expected string for request_id".to_string())),
             };
             let data = match &fields[1] {
+                Value::Bytes(b) => b.clone(),
                 Value::List { items, .. } => items
                     .iter()
                     .filter_map(|v| match v {

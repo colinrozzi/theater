@@ -663,6 +663,7 @@ fn parse_string_and_bytes(input: &Value) -> Result<(String, Vec<u8>), Value> {
                 _ => return Err(Value::String("Expected string for id".to_string())),
             };
             let data = match &fields[1] {
+                Value::Bytes(b) => b.clone(),
                 Value::List { items, .. } => items
                     .iter()
                     .filter_map(|v| match v {

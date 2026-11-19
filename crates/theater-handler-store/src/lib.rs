@@ -235,6 +235,7 @@ fn parse_store_label_content(input: &Value) -> Result<(String, String, Vec<u8>),
                 _ => return Err(Value::String("Expected string for label".to_string())),
             };
             let content = match &fields[2] {
+                Value::Bytes(b) => b.clone(),
                 Value::List { items, .. } => items
                     .iter()
                     .filter_map(|v| match v {
@@ -434,6 +435,7 @@ impl Handler for StoreHandler {
                                 }
                             };
                             let content = match &fields[1] {
+                                Value::Bytes(b) => b.clone(),
                                 Value::List { items, .. } => items
                                     .iter()
                                     .filter_map(|v| match v {

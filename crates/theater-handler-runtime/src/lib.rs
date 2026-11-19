@@ -1007,7 +1007,9 @@ fn parse_optional_bytes(value: &Value) -> Option<Vec<u8>> {
         Value::Option {
             value: Some(inner), ..
         } => {
-            if let Value::List { items, .. } = inner.as_ref() {
+            if let Value::Bytes(b) = inner.as_ref() {
+                Some(b.clone())
+            } else if let Value::List { items, .. } = inner.as_ref() {
                 Some(
                     items
                         .iter()

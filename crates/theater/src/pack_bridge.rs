@@ -640,10 +640,8 @@ impl InterfaceImpl {
 
 /// Convert bytes to a Value (as a list of u8).
 fn bytes_to_value(bytes: &[u8]) -> Value {
-    Value::List {
-        elem_type: ValueType::U8,
-        items: bytes.iter().copied().map(Value::U8).collect(),
-    }
+    // one buffer, not a Value per byte; the same list<u8> on the wire (packr Value::Bytes, wisp 0157)
+    Value::Bytes(bytes.to_vec())
 }
 
 /// Encode a Value to bytes using the Graph ABI.

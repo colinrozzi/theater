@@ -350,6 +350,9 @@ fn parse_body(v: &Value) -> Option<Vec<u8>> {
 }
 
 fn bytes_from_list(v: &Value) -> Option<Vec<u8>> {
+    if let Value::Bytes(b) = v {
+        return Some(b.clone());
+    }
     if let Value::List { items, .. } = v {
         Some(
             items

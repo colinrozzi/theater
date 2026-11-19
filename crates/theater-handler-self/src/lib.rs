@@ -161,6 +161,7 @@ impl Handler for SelfHandler {
                         Value::Option {
                             value: Some(inner), ..
                         } => match *inner {
+                            Value::Bytes(b) => Some(b),
                             Value::List { items, .. } => {
                                 let result: Result<Vec<u8>, _> = items
                                     .into_iter()

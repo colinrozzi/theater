@@ -75,12 +75,9 @@ fn secure_u64_varies() {
 
 #[test]
 fn random_bytes_value_shape() {
+    // a list<u8> as one buffer (packr Value::Bytes): the same type and wire form
     let v = bytes_value(vec![1, 2, 3]);
-    match v {
-        Value::List { elem_type, items } => {
-            assert_eq!(elem_type, ValueType::U8);
-            assert_eq!(items.len(), 3);
-        }
-        _ => panic!("expected a list"),
-    }
+    assert_eq!(v, Value::Bytes(vec![1, 2, 3]));
+    assert_eq!(v.as_bytes().unwrap().as_ref(), &[1, 2, 3]);
+    assert_eq!(v.infer_type().to_string(), "list<u8>");
 }
