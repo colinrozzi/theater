@@ -111,20 +111,11 @@ theater-handler-http-client = { version = "0.3.0", path = "crates/theater-handle
 # graph — the two-Value hazard. `packr` (umbrella, old AsyncRuntime/AsyncCtx API)
 # is kept transitionally for the incremental migration and dropped once
 # pack_bridge + every handler move to packr-core (the clean end state).
-packr = "0.24.2"
-packr-abi = "0.24.2"
-packr-core = "0.24.2"
-packr-wasmtime = "0.24.2"
+packr = "0.25.0"
+packr-abi = "0.25.0"
+packr-core = "0.25.0"
+packr-wasmtime = "0.25.0"
 
 # Metadata for Nix crane builds
 [workspace.metadata.crane]
 name = "theater"
-
-# DRAFT: pack#135 (Value::Bytes), until it is released as packr 0.25; then
-# this section goes and the versions above become 0.25.
-[patch.crates-io]
-packr = { git = "https://github.com/colinrozzi/pack", branch = "value-bytes" }
-packr-abi = { git = "https://github.com/colinrozzi/pack", branch = "value-bytes" }
-packr-core = { git = "https://github.com/colinrozzi/pack", branch = "value-bytes" }
-packr-wasmtime = { git = "https://github.com/colinrozzi/pack", branch = "value-bytes" }
-packr-derive = { git = "https://github.com/colinrozzi/pack", branch = "value-bytes" }
