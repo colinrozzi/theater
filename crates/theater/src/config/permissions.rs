@@ -127,6 +127,11 @@ pub struct FileSystemPermissions {
     pub allowed_commands: Option<Vec<String>>, // ⊇
     pub new_dir: Option<bool>,                 // ≥
     pub allowed_paths: Option<Vec<String>>,    // ⊇
+    /// Where a write may land, within `allowed_paths`; `None` means anywhere
+    /// they allow. Lets an actor read a path (another service's sessions, say)
+    /// that it must not write.
+    #[serde(default)]
+    pub write_paths: Option<Vec<String>>, // ⊇
 }
 
 impl PartialOrd for FileSystemPermissions {
@@ -148,6 +153,9 @@ impl PartialOrd for FileSystemPermissions {
             return None;
         }
         if !option_subset(&self.allowed_paths, &other.allowed_paths, vec_superset) {
+            return None;
+        }
+        if !option_subset(&self.write_paths, &other.write_paths, vec_superset) {
             return None;
         }
         Some(if self == other {
@@ -436,6 +444,7 @@ impl HandlerPermission {
                 allowed_commands: None, // None means all commands allowed
                 new_dir: Some(true),
                 allowed_paths: Some(vec!["/".to_string()]), // Root can access all paths
+                write_paths: None,
             }),
             http_client: Some(HttpClientPermissions {
                 allowed_methods: None, // None means all methods allowed
@@ -569,6 +578,7 @@ impl RestrictWith<FileSystemPermissions> for FileSystemPermissions {
                 .new_dir
                 .and_then(|p| restriction.new_dir.map(|r| p && r)),
             allowed_paths: intersect_path_options(&self.allowed_paths, &restriction.allowed_paths),
+            write_paths: intersect_path_options(&self.write_paths, &restriction.write_paths),
         }
     }
 }
@@ -688,6 +698,48 @@ impl RestrictWith<StorePermissions> for StorePermissions {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn test_write_paths_narrow_and_intersect() {
+        let fs = |write_paths: Option<Vec<&str>>| FileSystemPermissions {
+            read: true,
+            write: true,
+            execute: false,
+            allowed_commands: None,
+            new_dir: None,
+            allowed_paths: Some(vec!["/".to_string()]),
+            write_paths: write_paths.map(|v| v.into_iter().map(String::from).collect()),
+        };
+        let parent = fs(Some(vec!["/data", "/logs"]));
+        // a child may narrow write_paths (compared as sets, like allowed_paths),
+        // never widen or drop them
+        assert!(parent >= fs(Some(vec!["/data"])));
+        assert!(!(parent >= fs(Some(vec!["/private"]))));
+        // restricting intersects them, as allowed_paths, and a child without
+        // write_paths keeps its parent's: this is what narrows a spawn
+        assert_eq!(
+            parent.restrict_with(&fs(None)).write_paths,
+            parent.write_paths
+        );
+        let r = fs(Some(vec!["/data"])).restrict_with(&fs(Some(vec!["/data/sub", "/private"])));
+        assert_eq!(r.write_paths, Some(vec!["/data/sub".to_string()]));
+        assert_eq!(
+            fs(None).restrict_with(&fs(Some(vec!["/data"]))).write_paths,
+            Some(vec!["/data".to_string()])
+        );
+        // the root grant writes anywhere its allowed_paths allow
+        assert_eq!(
+            HandlerPermission::root().file_system.unwrap().write_paths,
+            None
+        );
+        // an older manifest without the key still parses
+        let old: FileSystemPermissions = serde_json::from_str(
+            r#"{"read":true,"write":true,"execute":false,"allowed_commands":null,"new_dir":null,"allowed_paths":["/"]}"#,
+        )
+        .unwrap();
+        assert_eq!(old.write_paths, None);
+    }
+
     use super::*;
 
     #[test]
@@ -758,6 +810,7 @@ mod tests {
                 "/tmp".to_string(),
                 "/data".to_string(),
             ]),
+            write_paths: None,
         }
     }
 
@@ -771,6 +824,7 @@ mod tests {
             allowed_commands: None,
             new_dir: None,
             allowed_paths: None,
+            write_paths: None,
         };
 
         let result = parent.restrict_with(&restriction);
@@ -789,6 +843,7 @@ mod tests {
             allowed_commands: Some(vec!["ls".to_string()]),
             new_dir: Some(false),
             allowed_paths: Some(vec!["/home".to_string()]),
+            write_paths: None,
         };
 
         let greedy_restriction = FileSystemPermissions {
@@ -798,6 +853,7 @@ mod tests {
             allowed_commands: Some(vec!["ls".to_string(), "rm".to_string()]),
             new_dir: Some(true),
             allowed_paths: Some(vec!["/home".to_string(), "/root".to_string()]),
+            write_paths: None,
         };
 
         let result = parent.restrict_with(&greedy_restriction);

@@ -109,6 +109,7 @@ mod tests {
                 allowed_commands: Some(vec!["ls".to_string(), "cat".to_string()]),
                 new_dir: Some(true),
                 allowed_paths: Some(vec!["/home".to_string()]),
+                write_paths: None,
             }),
             ..Default::default()
         };
@@ -121,6 +122,7 @@ mod tests {
                 allowed_commands: Some(vec!["ls".to_string()]),
                 new_dir: Some(false),
                 allowed_paths: None,
+                write_paths: None,
             }),
             ..Default::default()
         };
