@@ -282,7 +282,18 @@ pub struct RuntimeHandler {
     /// `static_package = true` fetch the wasm through this cache instead of
     /// re-resolving every time.
     resource_cache: Option<Arc<ResourceCache>>,
+    /// Optional package name the host serves from its own bytes (see
+    /// [`RuntimeHandler::with_built_in`]).
+    built_in: Option<BuiltIn>,
     permissions: Option<RuntimePermissions>,
+}
+
+/// A package name and the wasm the host serves for it, so a manifest can name
+/// the host's own component instead of a file or URL.
+#[derive(Clone)]
+struct BuiltIn {
+    name: String,
+    wasm: Arc<Vec<u8>>,
 }
 
 impl RuntimeHandler {
@@ -292,6 +303,7 @@ impl RuntimeHandler {
             event_tx,
             event_rx: Arc::new(Mutex::new(Some(event_rx))),
             resource_cache: None,
+            built_in: None,
             permissions,
         }
     }
@@ -303,12 +315,25 @@ impl RuntimeHandler {
         self
     }
 
+    /// Serve `wasm` for any spawn whose manifest has `package = name`, before
+    /// any cache, file or URL lookup and whatever `static_package` says. A host
+    /// uses this to let actors spawn its own embedded component by name, so
+    /// the child always runs the bytes the host was built with.
+    pub fn with_built_in(mut self, name: impl Into<String>, wasm: Arc<Vec<u8>>) -> Self {
+        self.built_in = Some(BuiltIn {
+            name: name.into(),
+            wasm,
+        });
+        self
+    }
+
     fn fresh(&self) -> Self {
         let (event_tx, event_rx) = mpsc::channel(1024);
         Self {
             event_tx,
             event_rx: Arc::new(Mutex::new(Some(event_rx))),
             resource_cache: self.resource_cache.clone(),
+            built_in: self.built_in.clone(),
             permissions: self.permissions.clone(),
         }
     }
@@ -373,6 +398,7 @@ impl Handler for RuntimeHandler {
         let event_tx = self.event_tx.clone();
         let permissions = self.permissions.clone();
         let resource_cache = self.resource_cache.clone();
+        let built_in = self.built_in.clone();
         let id = ctx
             .actor_id
             .ok_or_else(|| anyhow::anyhow!("actor_id not set in HandlerContext"))?;
@@ -388,10 +414,12 @@ impl Handler for RuntimeHandler {
             pact_result_host_fn({
                 let permissions = permissions.clone();
                 let resource_cache = resource_cache.clone();
+                let built_in = built_in.clone();
                 let theater_tx = theater_tx.clone();
                 move |input: Value| {
                     let permissions = permissions.clone();
                     let resource_cache = resource_cache.clone();
+                    let built_in = built_in.clone();
                     let theater_tx = theater_tx.clone();
                     async move {
                         require(&permissions, true)?;
@@ -429,9 +457,13 @@ impl Handler for RuntimeHandler {
                         };
 
                         let manifest = load_manifest(&manifest_path).await?;
-                        let wasm_bytes =
-                            resolve_wasm(&manifest, provided_wasm_bytes, resource_cache.as_deref())
-                                .await?;
+                        let wasm_bytes = resolve_wasm(
+                            &manifest,
+                            provided_wasm_bytes,
+                            built_in.as_ref(),
+                            resource_cache.as_deref(),
+                        )
+                        .await?;
 
                         let name = Some(manifest.name.clone());
                         let init_state = resolve_init_state(init_state_override, &manifest);
@@ -468,10 +500,12 @@ impl Handler for RuntimeHandler {
             pact_result_host_fn({
                 let permissions = permissions.clone();
                 let resource_cache = resource_cache.clone();
+                let built_in = built_in.clone();
                 let theater_tx = theater_tx.clone();
                 move |input: Value| {
                     let permissions = permissions.clone();
                     let resource_cache = resource_cache.clone();
+                    let built_in = built_in.clone();
                     let theater_tx = theater_tx.clone();
                     async move {
                         require(&permissions, true)?;
@@ -494,7 +528,7 @@ impl Handler for RuntimeHandler {
                         };
 
                         let manifest = load_manifest(&manifest_path).await?;
-                        let wasm_bytes = resolve_wasm(&manifest, provided_wasm_bytes, resource_cache.as_deref()).await?;
+                        let wasm_bytes = resolve_wasm(&manifest, provided_wasm_bytes, built_in.as_ref(), resource_cache.as_deref()).await?;
 
                         // Subscribe to the child's chain AT SPAWN (subscription_tx
                         // registers before init, so the terminal event can't be
@@ -945,15 +979,20 @@ async fn load_manifest(manifest_path: &str) -> Result<ManifestConfig, Value> {
     })
 }
 
-/// Resolve the actor's wasm bytes: caller-provided, cached fetch (static_package
-/// + a wired cache), or a plain fetch. Failures map to `spawn-failure.wasm-fetch`.
+/// Resolve the actor's wasm bytes: caller-provided, the host's built-in package
+/// (`package` equal to its name), cached fetch (static_package + a wired cache),
+/// or a plain fetch. Failures map to `spawn-failure.wasm-fetch`.
 async fn resolve_wasm(
     manifest: &ManifestConfig,
     provided: Option<Vec<u8>>,
+    built_in: Option<&BuiltIn>,
     cache: Option<&ResourceCache>,
 ) -> Result<Vec<u8>, Value> {
     if let Some(bytes) = provided {
         return Ok(bytes);
+    }
+    if let Some(b) = built_in.filter(|b| b.name == manifest.package) {
+        return Ok((*b.wasm).clone());
     }
     fn fetch_err(e: impl std::fmt::Display) -> Value {
         Value::from(RuntimeError::SpawnFailed(SpawnFailure::WasmFetch(format!(
@@ -1057,6 +1096,81 @@ mod tests {
             h.exports(),
             Some(vec!["theater:simple/runtime-handlers".to_string()])
         );
+    }
+
+    fn manifest(package: &str) -> ManifestConfig {
+        ManifestConfig::from_toml_str(&format!(
+            "name = \"t\"\nversion = \"0.1.0\"\npackage = {package:?}\n"
+        ))
+        .unwrap()
+    }
+
+    fn built_in(name: &str, wasm: &[u8]) -> BuiltIn {
+        BuiltIn {
+            name: name.to_string(),
+            wasm: Arc::new(wasm.to_vec()),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_built_in_name_wins_over_a_file_of_that_name() {
+        let dir = std::env::temp_dir().join(format!("runtime-built-in-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("built-in");
+        std::fs::write(&file, b"the file").unwrap();
+        let path = file.to_string_lossy().to_string();
+        let m = manifest(&path);
+        // the control: unregistered, the name resolves to the file
+        assert_eq!(
+            resolve_wasm(&m, None, None, None).await.unwrap(),
+            b"the file"
+        );
+        // registered, the host's bytes win and the file is never read
+        let b = built_in(&path, b"the host's");
+        assert_eq!(
+            resolve_wasm(&m, None, Some(&b), None).await.unwrap(),
+            b"the host's"
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn only_the_exact_name_is_built_in() {
+        let b = built_in("built-in", b"the host's");
+        assert_eq!(
+            resolve_wasm(&manifest("built-in"), None, Some(&b), None)
+                .await
+                .unwrap(),
+            b"the host's"
+        );
+        for near in [
+            "built-in ",
+            "./built-in",
+            "Built-in",
+            "built-in.wasm",
+            "store://built-in",
+        ] {
+            let got = resolve_wasm(&manifest(near), None, Some(&b), None).await;
+            assert!(
+                got.map(|w| w != b"the host's").unwrap_or(true),
+                "{near:?} matched"
+            );
+        }
+    }
+
+    #[test]
+    fn a_child_handler_keeps_the_built_in() {
+        let h = RuntimeHandler::new(RuntimeHostConfig {}, None)
+            .with_built_in("built-in", Arc::new(b"wasm".to_vec()));
+        let child = h.fresh();
+        let b = child.built_in.expect("fresh() keeps the built-in");
+        assert_eq!(
+            (b.name.as_str(), b.wasm.as_slice()),
+            ("built-in", &b"wasm"[..])
+        );
+        assert!(RuntimeHandler::new(RuntimeHostConfig {}, None)
+            .built_in
+            .is_none());
     }
 
     #[test]

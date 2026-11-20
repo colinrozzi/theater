@@ -19,3 +19,6 @@ anyhow.workspace = true
 tracing.workspace = true
 tokio = { workspace = true, features = ["sync", "time"] }
 thiserror = "2.0"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt", "macros", "fs"] }
