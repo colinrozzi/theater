@@ -283,6 +283,27 @@ async fn real_location(resolved: &Path, user_path: &str) -> Result<PathBuf, FsEr
     }
 }
 
+/// When `write_paths` is set, require a write's path to fall within one of them
+/// too, matched like `allowed_paths` (root-relative, a bare `"/"` the root), so
+/// an actor may read a path it can't write.
+fn check_write(
+    root: &Path,
+    perms: &FileSystemPermissions,
+    candidate: &Path,
+    user_path: &str,
+) -> Result<(), FsError> {
+    let Some(writable) = &perms.write_paths else {
+        return Ok(());
+    };
+    let as_allowed = FileSystemPermissions {
+        allowed_paths: Some(writable.clone()),
+        ..perms.clone()
+    };
+    check_allowed(root, &as_allowed, candidate, user_path).map_err(|_| {
+        FsError::PermissionDenied(format!("path '{}' is outside the write-paths", user_path))
+    })
+}
+
 /// Gate the capability, resolve the path inside the sandbox, and apply the
 /// allowed-paths restriction — the full pre-flight every op shares. Both the
 /// root and the allowed-paths are checked twice: on the lexical path, and on its
@@ -300,6 +321,9 @@ async fn prepare(
     let p = gate(perms, write)?;
     let resolved = resolve_in_sandbox(root, user_path)?;
     check_allowed(root, p, &resolved, user_path)?;
+    if write {
+        check_write(root, p, &resolved, user_path)?;
+    }
     let real = real_location(&resolved, user_path).await?;
     if !real.starts_with(root) {
         return Err(FsError::InvalidPath(format!(
@@ -308,6 +332,9 @@ async fn prepare(
         )));
     }
     check_allowed(root, p, &real, user_path)?;
+    if write {
+        check_write(root, p, &real, user_path)?;
+    }
     Ok(resolved)
 }
 
@@ -329,6 +356,7 @@ async fn prepare_rename(
     let p = gate(perms, true)?;
     let resolved = resolve_in_sandbox(root, user_path)?;
     check_allowed(root, p, &resolved, user_path)?;
+    check_write(root, p, &resolved, user_path)?;
     let (parent, name) = match (resolved.parent(), resolved.file_name()) {
         (Some(parent), Some(name)) if resolved != root => (parent, name),
         _ => {
@@ -349,6 +377,7 @@ async fn prepare_rename(
         )));
     }
     check_allowed(root, p, &real, user_path)?;
+    check_write(root, p, &real, user_path)?;
     Ok(real)
 }
 
@@ -1333,6 +1362,7 @@ mod tests {
             allowed_commands: None,
             new_dir: None,
             allowed_paths: None,
+            write_paths: None,
         });
         assert!(gate(&read_only, false).is_ok());
         assert!(matches!(
@@ -1351,6 +1381,7 @@ mod tests {
             allowed_commands: None,
             new_dir: None,
             allowed_paths: Some(vec!["public".to_string()]),
+            write_paths: None,
         };
         let inside = resolve_in_sandbox(root, "public/f.txt").unwrap();
         assert!(check_allowed(root, &perms, &inside, "public/f.txt").is_ok());
@@ -1375,6 +1406,7 @@ mod tests {
             allowed_commands: None,
             new_dir: None,
             allowed_paths: Some(vec!["/".to_string()]),
+            write_paths: None,
         };
         let a = resolve_in_sandbox(root, "crasher.jsonl").unwrap();
         assert!(check_allowed(root, &perms, &a, "crasher.jsonl").is_ok());
@@ -1512,6 +1544,7 @@ mod tests {
             allowed_commands: None,
             new_dir: None,
             allowed_paths: allowed_paths.map(|v| v.into_iter().map(String::from).collect()),
+            write_paths: None,
         })
     }
 
@@ -1654,6 +1687,57 @@ mod tests {
     }
 
     #[cfg(unix)]
+    /// Read anywhere in the sandbox, write only in `data/`.
+    fn write_in_data() -> Option<FileSystemPermissions> {
+        let mut p = perms(true, Some(vec!["/"]));
+        p.as_mut().unwrap().write_paths = Some(vec!["/data".to_string()]);
+        p
+    }
+
+    #[tokio::test]
+    async fn test_write_paths_allow_reading_what_cannot_be_written() {
+        let s = linked_sandbox();
+        let p = write_in_data();
+        assert!(prepare(&p, &s.sandbox, "data/new.txt", true).await.is_ok());
+        assert!(prepare(&p, &s.sandbox, "secret/s.txt", false).await.is_ok());
+        for path in ["secret/s.txt", "secret/new", "x.txt"] {
+            assert!(
+                matches!(
+                    prepare(&p, &s.sandbox, path, true).await,
+                    Err(FsError::PermissionDenied(_))
+                ),
+                "{path} should be outside the write-paths"
+            );
+        }
+        // a link in data/ to secret/: readable through, not writable through
+        assert!(prepare(&p, &s.sandbox, "data/link", false).await.is_ok());
+        assert!(matches!(
+            prepare(&p, &s.sandbox, "data/link", true).await,
+            Err(FsError::PermissionDenied(_))
+        ));
+        assert!(matches!(
+            prepare(&p, &s.sandbox, "data/ldir/new", true).await,
+            Err(FsError::PermissionDenied(_))
+        ));
+        // a rename writes both ends
+        std::fs::write(s.sandbox.join("data/mv"), b"x").unwrap();
+        assert!(matches!(
+            rename_op(&p, &s.sandbox, "data/mv", "secret/mv").await,
+            Err(FsError::PermissionDenied(_))
+        ));
+        assert!(matches!(
+            rename_op(&p, &s.sandbox, "secret/s.txt", "data/s.txt").await,
+            Err(FsError::PermissionDenied(_))
+        ));
+        assert!(rename_op(&p, &s.sandbox, "data/mv", "data/mv2")
+            .await
+            .is_ok());
+        assert_eq!(
+            std::fs::read(s.sandbox.join("secret/s.txt")).unwrap(),
+            b"hidden"
+        );
+    }
+
     /// A sandbox with an allowed `data/`, a `secret/` beside it, and links out of
     /// `data/`: every op goes through `prepare`, so these are the ops' checks.
     fn linked_sandbox() -> Scratch {

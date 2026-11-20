@@ -12,6 +12,7 @@ fn test_filesystem_permission_checking() {
         allowed_commands: None,
         new_dir: Some(true),
         allowed_paths: Some(vec!["/tmp/test".to_string()]),
+        write_paths: None,
     });
 
     // Should allow read operation
@@ -43,6 +44,7 @@ fn test_filesystem_permission_denial() {
         allowed_commands: None,
         new_dir: Some(false),
         allowed_paths: Some(vec!["/tmp/test".to_string()]),
+        write_paths: None,
     });
 
     // Should allow read operation
@@ -73,6 +75,7 @@ fn test_filesystem_path_restrictions() {
         allowed_commands: None,
         new_dir: Some(false),
         allowed_paths: Some(vec!["/tmp/allowed".to_string()]),
+        write_paths: None,
     });
 
     // Should allow operations in allowed path
@@ -119,6 +122,7 @@ fn test_filesystem_fail_closed_no_allowed_paths() {
         allowed_commands: None,
         new_dir: Some(false),
         allowed_paths: None, // No paths configured - should deny all
+        write_paths: None,
     });
 
     // Should deny all path operations when no allowed_paths is configured

@@ -18,6 +18,7 @@ async fn test_handler_creation_permission_validation() {
             allowed_commands: None,
             new_dir: Some(false),
             allowed_paths: Some(vec!["/tmp/test".to_string()]),
+            write_paths: None,
         }),
         environment: Some(EnvironmentPermissions {
             allowed_vars: Some(vec!["TEST_VAR".to_string()]),
@@ -90,6 +91,7 @@ async fn test_permission_inheritance() {
             allowed_commands: None,
             new_dir: Some(true),
             allowed_paths: Some(vec!["/tmp".to_string()]),
+            write_paths: None,
         }),
         environment: Some(EnvironmentPermissions {
             allowed_vars: None,
@@ -109,6 +111,7 @@ async fn test_permission_inheritance() {
             allowed_commands: None,
             new_dir: Some(false),
             allowed_paths: Some(vec!["/tmp/child".to_string()]), // More restrictive path
+            write_paths: None,
         }),
         environment: Some(EnvironmentPermissions {
             allowed_vars: Some(vec!["HOME".to_string(), "PATH".to_string()]), // Specific variables only
@@ -139,6 +142,7 @@ async fn test_permission_checker_integration() {
         allowed_commands: None,
         new_dir: Some(false),
         allowed_paths: Some(vec!["/tmp/allowed".to_string()]),
+        write_paths: None,
     });
 
     // Should allow read in allowed path
