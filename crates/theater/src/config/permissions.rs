@@ -290,7 +290,7 @@ impl PartialOrd for ProcessPermissions {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct EnvironmentPermissions {
     pub allowed_vars: Option<Vec<String>>,     // subset
-    pub denied_vars: Option<Vec<String>>,      // subset (parent ⊇ child)
+    pub denied_vars: Option<Vec<String>>,      // ⊆ (a child denies at least the parent's)
     pub allow_list_all: bool,                  // ≥ (true is more permissive)
     pub allowed_prefixes: Option<Vec<String>>, // subset
 }
@@ -300,7 +300,11 @@ impl PartialOrd for EnvironmentPermissions {
         if !option_within(&self.allowed_vars, &other.allowed_vars, vec_superset) {
             return None;
         }
-        if !option_subset(&self.denied_vars, &other.denied_vars, vec_superset) {
+        // a deny list narrows by denying more: within the parent if it denies at
+        // least everything the parent does (unset denies nothing, so is widest)
+        if !option_within(&self.denied_vars, &other.denied_vars, |p, c| {
+            vec_superset(c, p)
+        }) {
             return None;
         }
         if !self.allow_list_all & other.allow_list_all {
@@ -737,6 +741,21 @@ mod tests {
         assert!(with >= without);
         with.http_client = None;
         assert!(with >= without);
+    }
+
+    #[test]
+    fn test_denied_vars_narrow_by_denying_more() {
+        let env = |denied: Option<Vec<&str>>| EnvironmentPermissions {
+            allowed_vars: None,
+            denied_vars: denied.map(|v| v.into_iter().map(String::from).collect()),
+            allow_list_all: false,
+            allowed_prefixes: None,
+        };
+        let parent = env(Some(vec!["SECRET"]));
+        assert!(parent >= env(Some(vec!["SECRET", "TOKEN"])));
+        assert!(!(parent >= env(Some(vec!["TOKEN"]))));
+        assert!(!(parent >= env(None)));
+        assert!(env(None) >= parent);
     }
 
     #[test]
