@@ -23,6 +23,10 @@
 //! - **allowed-paths.** When [`FileSystemPermissions::allowed_paths`] is set, the
 //!   resolved path must fall within one of those subtrees (interpreted relative
 //!   to the sandbox root) or the op is rejected `permission-denied`.
+//! - **symlinks.** The root and the allowed-paths are checked on each path's
+//!   real location too (symlinks followed), so a link inside the sandbox that
+//!   points out of an allowed directory, or out of the sandbox, is refused, and
+//!   so is a link that points nowhere. See [`prepare`].
 //! - **rename.** Both paths pass the checks above, and additionally the real
 //!   location of each path's parent directory (symlinks resolved) must be in
 //!   the sandbox and the allowed-paths, so a rename can't move a file into or
@@ -151,10 +155,10 @@ fn map_io_error(e: std::io::Error, path: &str) -> FsError {
 /// filesystem prefix (windows drive / UNC) is rejected as `invalid-path`. A
 /// defensive `starts_with(root)` check backstops the component walk.
 ///
-/// This is intentionally pure path arithmetic (no disk access) so it is cheap
-/// and unit-testable; the canonicalized root plus the no-`..` rule keeps a
-/// resolved path under the root. (A symlink *inside* the sandbox that points out
-/// is out of scope for v1 — see the pact note.)
+/// This is pure path arithmetic (no disk access); the canonicalized root plus
+/// the no-`..` rule keeps the *lexical* path under the root. A symlink inside the
+/// sandbox can still point out, so [`prepare`] also checks the path's real
+/// location ([`real_location`]).
 fn resolve_in_sandbox(root: &Path, user_path: &str) -> Result<PathBuf, FsError> {
     let mut out = root.to_path_buf();
     for comp in Path::new(user_path).components() {
@@ -243,9 +247,51 @@ fn check_allowed(
     Ok(())
 }
 
+/// The real location of `resolved`: symlinks followed in every component that
+/// exists, and the missing tail (what a write or create-dir is about to make)
+/// appended as is, since a component that doesn't exist can't be a link. A
+/// component that is a symlink to nothing is refused: following it would create
+/// its target, wherever that is.
+async fn real_location(resolved: &Path, user_path: &str) -> Result<PathBuf, FsError> {
+    let mut existing = resolved.to_path_buf();
+    let mut tail = Vec::new();
+    loop {
+        match tokio::fs::canonicalize(&existing).await {
+            Ok(mut real) => {
+                for name in tail.iter().rev() {
+                    real.push(name);
+                }
+                return Ok(real);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                if tokio::fs::symlink_metadata(&existing).await.is_ok() {
+                    return Err(FsError::InvalidPath(format!(
+                        "path '{}' goes through a symlink that points nowhere",
+                        user_path
+                    )));
+                }
+                match (existing.file_name(), existing.parent()) {
+                    (Some(name), Some(parent)) => {
+                        tail.push(name.to_os_string());
+                        existing = parent.to_path_buf();
+                    }
+                    _ => return Err(map_io_error(e, user_path)),
+                }
+            }
+            Err(e) => return Err(map_io_error(e, user_path)),
+        }
+    }
+}
+
 /// Gate the capability, resolve the path inside the sandbox, and apply the
-/// allowed-paths restriction — the full pre-flight every op shares.
-fn prepare(
+/// allowed-paths restriction — the full pre-flight every op shares. Both the
+/// root and the allowed-paths are checked twice: on the lexical path, and on its
+/// real location, so a symlink inside an allowed directory that points outside
+/// it (or outside the sandbox) is refused. The lexical path is returned, so an
+/// op on a symlink that stays inside acts as before (delete-file removes the
+/// link, not its target). Checked, then used: a link swapped in between can
+/// still race.
+async fn prepare(
     perms: &Option<FileSystemPermissions>,
     root: &Path,
     user_path: &str,
@@ -254,6 +300,14 @@ fn prepare(
     let p = gate(perms, write)?;
     let resolved = resolve_in_sandbox(root, user_path)?;
     check_allowed(root, p, &resolved, user_path)?;
+    let real = real_location(&resolved, user_path).await?;
+    if !real.starts_with(root) {
+        return Err(FsError::InvalidPath(format!(
+            "path '{}' escapes the sandbox root via a symlink",
+            user_path
+        )));
+    }
+    check_allowed(root, p, &real, user_path)?;
     Ok(resolved)
 }
 
@@ -322,7 +376,7 @@ async fn sync_file_op(
     root: &Path,
     path: &str,
 ) -> Result<(), FsError> {
-    let resolved = prepare(perms, root, path, true)?;
+    let resolved = prepare(perms, root, path, true).await?;
     sync_path(&resolved, false)
         .await
         .map_err(|e| map_io_error(e, path))
@@ -333,7 +387,7 @@ async fn sync_dir_op(
     root: &Path,
     path: &str,
 ) -> Result<(), FsError> {
-    let resolved = prepare(perms, root, path, true)?;
+    let resolved = prepare(perms, root, path, true).await?;
     sync_path(&resolved, true)
         .await
         .map_err(|e| map_io_error(e, path))
@@ -781,8 +835,9 @@ impl Handler for FileSystemHandler {
                 let (root, perms) = (r_read.clone(), p_read.clone());
                 async move {
                     let path = parse_path(&input).map_err(|e| e.to_value())?;
-                    let resolved =
-                        prepare(&perms, &root, &path, false).map_err(|e| e.to_value())?;
+                    let resolved = prepare(&perms, &root, &path, false)
+                        .await
+                        .map_err(|e| e.to_value())?;
                     match tokio::fs::read(&resolved).await {
                         // one buffer, not a Value per byte: the same list<u8> on the
                         // wire (packr Value::Bytes, wisp ticket 0157)
@@ -801,8 +856,9 @@ impl Handler for FileSystemHandler {
                 let (root, perms) = (r_exists.clone(), p_exists.clone());
                 async move {
                     let path = parse_path(&input).map_err(|e| e.to_value())?;
-                    let resolved =
-                        prepare(&perms, &root, &path, false).map_err(|e| e.to_value())?;
+                    let resolved = prepare(&perms, &root, &path, false)
+                        .await
+                        .map_err(|e| e.to_value())?;
                     match tokio::fs::try_exists(&resolved).await {
                         Ok(b) => Ok(Value::Bool(b)),
                         Err(e) => Err(map_io_error(e, &path).to_value()),
@@ -819,8 +875,9 @@ impl Handler for FileSystemHandler {
                 let (root, perms) = (r_list.clone(), p_list.clone());
                 async move {
                     let path = parse_path(&input).map_err(|e| e.to_value())?;
-                    let resolved =
-                        prepare(&perms, &root, &path, false).map_err(|e| e.to_value())?;
+                    let resolved = prepare(&perms, &root, &path, false)
+                        .await
+                        .map_err(|e| e.to_value())?;
                     let mut rd = match tokio::fs::read_dir(&resolved).await {
                         Ok(rd) => rd,
                         Err(e) => return Err(map_io_error(e, &path).to_value()),
@@ -862,8 +919,9 @@ impl Handler for FileSystemHandler {
                 let (root, perms) = (r_meta.clone(), p_meta.clone());
                 async move {
                     let path = parse_path(&input).map_err(|e| e.to_value())?;
-                    let resolved =
-                        prepare(&perms, &root, &path, false).map_err(|e| e.to_value())?;
+                    let resolved = prepare(&perms, &root, &path, false)
+                        .await
+                        .map_err(|e| e.to_value())?;
                     match tokio::fs::metadata(&resolved).await {
                         Ok(m) => Ok(Value::Record {
                             type_name: "file-metadata".to_string(),
@@ -893,7 +951,9 @@ impl Handler for FileSystemHandler {
                 async move {
                     let (path, content) =
                         parse_path_and_content(&input).map_err(|e| e.to_value())?;
-                    let resolved = prepare(&perms, &root, &path, true).map_err(|e| e.to_value())?;
+                    let resolved = prepare(&perms, &root, &path, true)
+                        .await
+                        .map_err(|e| e.to_value())?;
                     match tokio::fs::write(&resolved, &content).await {
                         Ok(()) => Ok(Value::Tuple(vec![])),
                         Err(e) => Err(map_io_error(e, &path).to_value()),
@@ -912,7 +972,9 @@ impl Handler for FileSystemHandler {
                     use tokio::io::AsyncWriteExt;
                     let (path, content) =
                         parse_path_and_content(&input).map_err(|e| e.to_value())?;
-                    let resolved = prepare(&perms, &root, &path, true).map_err(|e| e.to_value())?;
+                    let resolved = prepare(&perms, &root, &path, true)
+                        .await
+                        .map_err(|e| e.to_value())?;
                     let res = async {
                         let mut f = tokio::fs::OpenOptions::new()
                             .create(true)
@@ -940,7 +1002,9 @@ impl Handler for FileSystemHandler {
                 let (root, perms) = (r_delete.clone(), p_delete.clone());
                 async move {
                     let path = parse_path(&input).map_err(|e| e.to_value())?;
-                    let resolved = prepare(&perms, &root, &path, true).map_err(|e| e.to_value())?;
+                    let resolved = prepare(&perms, &root, &path, true)
+                        .await
+                        .map_err(|e| e.to_value())?;
                     match tokio::fs::remove_file(&resolved).await {
                         Ok(()) => Ok(Value::Tuple(vec![])),
                         Err(e) => Err(map_io_error(e, &path).to_value()),
@@ -957,7 +1021,9 @@ impl Handler for FileSystemHandler {
                 let (root, perms) = (r_cdir.clone(), p_cdir.clone());
                 async move {
                     let path = parse_path(&input).map_err(|e| e.to_value())?;
-                    let resolved = prepare(&perms, &root, &path, true).map_err(|e| e.to_value())?;
+                    let resolved = prepare(&perms, &root, &path, true)
+                        .await
+                        .map_err(|e| e.to_value())?;
                     match tokio::fs::create_dir_all(&resolved).await {
                         Ok(()) => Ok(Value::Tuple(vec![])),
                         Err(e) => Err(map_io_error(e, &path).to_value()),
@@ -974,7 +1040,9 @@ impl Handler for FileSystemHandler {
                 let (root, perms) = (r_rdir.clone(), p_rdir.clone());
                 async move {
                     let path = parse_path(&input).map_err(|e| e.to_value())?;
-                    let resolved = prepare(&perms, &root, &path, true).map_err(|e| e.to_value())?;
+                    let resolved = prepare(&perms, &root, &path, true)
+                        .await
+                        .map_err(|e| e.to_value())?;
                     match tokio::fs::remove_dir_all(&resolved).await {
                         Ok(()) => Ok(Value::Tuple(vec![])),
                         Err(e) => Err(map_io_error(e, &path).to_value()),
@@ -1586,6 +1654,98 @@ mod tests {
     }
 
     #[cfg(unix)]
+    /// A sandbox with an allowed `data/`, a `secret/` beside it, and links out of
+    /// `data/`: every op goes through `prepare`, so these are the ops' checks.
+    fn linked_sandbox() -> Scratch {
+        let s = Scratch::new();
+        std::fs::create_dir_all(s.sandbox.join("data/sub")).unwrap();
+        std::fs::create_dir(s.sandbox.join("secret")).unwrap();
+        std::fs::write(s.sandbox.join("secret/s.txt"), b"hidden").unwrap();
+        std::fs::write(s.sandbox.join("data/sub/f"), b"mine").unwrap();
+        std::fs::write(s.outside.join("o.txt"), b"host").unwrap();
+        let link =
+            |to: &Path, at: &str| std::os::unix::fs::symlink(to, s.sandbox.join(at)).unwrap();
+        link(Path::new("../secret/s.txt"), "data/link");
+        link(Path::new("../secret"), "data/ldir");
+        link(&s.outside, "data/out");
+        link(Path::new("sub/f"), "data/inner");
+        link(&s.outside.join("planted"), "data/dangling");
+        s
+    }
+
+    #[tokio::test]
+    async fn test_a_link_out_of_an_allowed_dir_is_refused() {
+        let s = linked_sandbox();
+        let rw = perms(true, Some(vec!["/data"]));
+        for (path, write) in [
+            ("data/link", false),
+            ("data/link", true),
+            ("data/ldir/s.txt", false),
+            ("data/ldir/new", true),
+            ("data/ldir", false),
+        ] {
+            assert!(
+                matches!(
+                    prepare(&rw, &s.sandbox, path, write).await,
+                    Err(FsError::PermissionDenied(_))
+                ),
+                "{path} (write {write}) should be outside the allowed-paths"
+            );
+        }
+        assert_eq!(
+            std::fs::read(s.sandbox.join("secret/s.txt")).unwrap(),
+            b"hidden"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_a_link_out_of_the_sandbox_is_refused() {
+        let s = linked_sandbox();
+        // With no allowed-paths at all, the root is still the boundary.
+        let rw = perms(true, None);
+        for (path, write) in [
+            ("data/out/o.txt", false),
+            ("data/out/o.txt", true),
+            ("data/out/new", true),
+            ("data/out", false),
+        ] {
+            assert!(
+                matches!(
+                    prepare(&rw, &s.sandbox, path, write).await,
+                    Err(FsError::InvalidPath(_))
+                ),
+                "{path} (write {write}) should escape the sandbox via a symlink"
+            );
+        }
+        assert_eq!(std::fs::read(s.outside.join("o.txt")).unwrap(), b"host");
+    }
+
+    #[tokio::test]
+    async fn test_a_link_to_nothing_is_refused_and_creates_nothing() {
+        let s = linked_sandbox();
+        let rw = perms(true, None);
+        assert!(matches!(
+            prepare(&rw, &s.sandbox, "data/dangling", true).await,
+            Err(FsError::InvalidPath(_))
+        ));
+        assert!(!s.outside.join("planted").exists());
+    }
+
+    #[tokio::test]
+    async fn test_links_and_new_paths_inside_stay_allowed() {
+        let s = linked_sandbox();
+        let rw = perms(true, Some(vec!["/data"]));
+        // a link that stays inside the allowed dir: allowed, and the lexical path comes back
+        assert_eq!(
+            prepare(&rw, &s.sandbox, "data/inner", false).await.unwrap(),
+            s.sandbox.join("data/inner")
+        );
+        // paths that don't exist yet (a new file, a new nested dir) can't be links
+        assert!(prepare(&rw, &s.sandbox, "data/new.txt", true).await.is_ok());
+        assert!(prepare(&rw, &s.sandbox, "data/a/b/c", true).await.is_ok());
+        assert!(prepare(&rw, &s.sandbox, "data/sub/f", false).await.is_ok());
+    }
+
     #[tokio::test]
     async fn test_rename_symlinked_dir_cannot_escape() {
         // `out` is a symlink inside the sandbox to a directory outside it.
