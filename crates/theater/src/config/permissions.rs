@@ -47,6 +47,21 @@ where
     }
 }
 
+/// Like [`option_subset`], for a field where `None` means **unrestricted** (an
+/// allow-list or a limit that is unset): an unrestricted parent admits any
+/// child, and an unrestricted child is wider than any restricted parent.
+/// [`option_subset`] is right where `None` means the capability is absent.
+fn option_within<P, F>(parent: &Option<P>, child: &Option<P>, cmp: F) -> bool
+where
+    F: Fn(&P, &P) -> bool,
+{
+    match (parent, child) {
+        (None, _) => true,
+        (Some(_), None) => false,
+        (Some(p), Some(c)) => cmp(p, c),
+    }
+}
+
 /// Convenience: is `parent` a **superset** of `child` for `Vec`s?
 #[allow(clippy::ptr_arg)]
 fn vec_superset<T: Eq + Hash>(parent: &Vec<T>, child: &Vec<T>) -> bool {
@@ -145,17 +160,17 @@ impl PartialOrd for FileSystemPermissions {
         if !option_subset(&self.new_dir, &other.new_dir, |p, c| p >= c) {
             return None;
         }
-        if !option_subset(
+        if !option_within(
             &self.allowed_commands,
             &other.allowed_commands,
             vec_superset,
         ) {
             return None;
         }
-        if !option_subset(&self.allowed_paths, &other.allowed_paths, vec_superset) {
+        if !option_within(&self.allowed_paths, &other.allowed_paths, vec_superset) {
             return None;
         }
-        if !option_subset(&self.write_paths, &other.write_paths, vec_superset) {
+        if !option_within(&self.write_paths, &other.write_paths, vec_superset) {
             return None;
         }
         Some(if self == other {
@@ -180,16 +195,16 @@ pub struct HttpClientPermissions {
 
 impl PartialOrd for HttpClientPermissions {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        if !option_subset(&self.allowed_methods, &other.allowed_methods, vec_superset) {
+        if !option_within(&self.allowed_methods, &other.allowed_methods, vec_superset) {
             return None;
         }
-        if !option_subset(&self.allowed_hosts, &other.allowed_hosts, vec_superset) {
+        if !option_within(&self.allowed_hosts, &other.allowed_hosts, vec_superset) {
             return None;
         }
-        if !option_subset(&self.max_redirects, &other.max_redirects, le_num) {
+        if !option_within(&self.max_redirects, &other.max_redirects, le_num) {
             return None;
         }
-        if !option_subset(&self.timeout, &other.timeout, le_num) {
+        if !option_within(&self.timeout, &other.timeout, le_num) {
             return None;
         }
         Some(if self == other {
@@ -213,13 +228,13 @@ pub struct HttpFrameworkPermissions {
 
 impl PartialOrd for HttpFrameworkPermissions {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        if !option_subset(&self.allowed_routes, &other.allowed_routes, vec_superset) {
+        if !option_within(&self.allowed_routes, &other.allowed_routes, vec_superset) {
             return None;
         }
-        if !option_subset(&self.allowed_methods, &other.allowed_methods, vec_superset) {
+        if !option_within(&self.allowed_methods, &other.allowed_methods, vec_superset) {
             return None;
         }
-        if !option_subset(&self.max_request_size, &other.max_request_size, le_num) {
+        if !option_within(&self.max_request_size, &other.max_request_size, le_num) {
             return None;
         }
         Some(if self == other {
@@ -250,14 +265,14 @@ impl PartialOrd for ProcessPermissions {
         if self.max_output_buffer < other.max_output_buffer {
             return None;
         }
-        if !option_subset(
+        if !option_within(
             &self.allowed_programs,
             &other.allowed_programs,
             vec_superset,
         ) {
             return None;
         }
-        if !option_subset(&self.allowed_paths, &other.allowed_paths, vec_superset) {
+        if !option_within(&self.allowed_paths, &other.allowed_paths, vec_superset) {
             return None;
         }
         Some(if self == other {
@@ -282,7 +297,7 @@ pub struct EnvironmentPermissions {
 
 impl PartialOrd for EnvironmentPermissions {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        if !option_subset(&self.allowed_vars, &other.allowed_vars, vec_superset) {
+        if !option_within(&self.allowed_vars, &other.allowed_vars, vec_superset) {
             return None;
         }
         if !option_subset(&self.denied_vars, &other.denied_vars, vec_superset) {
@@ -291,7 +306,7 @@ impl PartialOrd for EnvironmentPermissions {
         if !self.allow_list_all & other.allow_list_all {
             return None;
         }
-        if !option_subset(
+        if !option_within(
             &self.allowed_prefixes,
             &other.allowed_prefixes,
             vec_superset,
@@ -700,6 +715,31 @@ impl RestrictWith<StorePermissions> for StorePermissions {
 mod tests {
 
     #[test]
+    fn test_unset_lists_and_limits_mean_unrestricted() {
+        let http = |hosts: Option<Vec<&str>>, redirects: Option<usize>| HttpClientPermissions {
+            allowed_methods: None,
+            allowed_hosts: hosts.map(|v| v.into_iter().map(String::from).collect()),
+            max_redirects: redirects,
+            timeout: None,
+        };
+        // an unrestricted parent admits a restricted child, never the reverse
+        assert!(http(None, None) >= http(Some(vec!["a.example"]), Some(3)));
+        assert!(!(http(Some(vec!["a.example"]), None) >= http(None, None)));
+        assert!(!(http(None, Some(3)) >= http(None, None)));
+        assert!(
+            http(Some(vec!["a.example", "b.example"]), Some(5))
+                >= http(Some(vec!["a.example"]), Some(3))
+        );
+        // a capability that is absent is still narrower than one that is present
+        let mut with = HandlerPermission::root();
+        let mut without = HandlerPermission::root();
+        without.http_client = None;
+        assert!(with >= without);
+        with.http_client = None;
+        assert!(with >= without);
+    }
+
+    #[test]
     fn test_write_paths_narrow_and_intersect() {
         let fs = |write_paths: Option<Vec<&str>>| FileSystemPermissions {
             read: true,
@@ -715,6 +755,9 @@ mod tests {
         // never widen or drop them
         assert!(parent >= fs(Some(vec!["/data"])));
         assert!(!(parent >= fs(Some(vec!["/private"]))));
+        // a child without write_paths may write anywhere: wider, not narrower
+        assert!(!(parent >= fs(None)));
+        assert!(fs(None) >= parent);
         // restricting intersects them, as allowed_paths, and a child without
         // write_paths keeps its parent's: this is what narrows a spawn
         assert_eq!(
