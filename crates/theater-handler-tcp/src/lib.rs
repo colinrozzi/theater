@@ -1988,6 +1988,11 @@ impl Handler for TcpHandler {
                         entry.stream.clone()
                     };
 
+                    // write_all, then flush: a TLS stream (tokio-rustls) can take all
+                    // the plaintext while the socket is full and keep the last
+                    // records buffered until a later write, a flush or a close. A
+                    // large send then stalls until the peer's own timeout. For plain
+                    // TCP the flush does nothing.
                     let mut stream_guard = stream_arc.lock().await;
                     match &mut *stream_guard {
                         StreamState::Full(stream) => {
@@ -1995,10 +2000,18 @@ impl Handler for TcpHandler {
                                 .write_all(&data)
                                 .await
                                 .map_err(|e| Value::String(e.to_string()))?;
+                            stream
+                                .flush()
+                                .await
+                                .map_err(|e| Value::String(e.to_string()))?;
                         }
                         StreamState::WriteOnly(write_half) => {
                             write_half
                                 .write_all(&data)
+                                .await
+                                .map_err(|e| Value::String(e.to_string()))?;
+                            write_half
+                                .flush()
                                 .await
                                 .map_err(|e| Value::String(e.to_string()))?;
                         }
