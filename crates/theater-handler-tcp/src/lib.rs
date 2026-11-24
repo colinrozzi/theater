@@ -448,6 +448,67 @@ fn duration_to_ms(d: Option<std::time::Duration>) -> u64 {
         .unwrap_or(0)
 }
 
+/// One actor's own I/O bounds, set by its `set-read-timeout` and
+/// `set-write-timeout` verbs. Each handler instance (one per actor) gets a
+/// fresh one in `create_instance`, so an actor's bounds never reach another
+/// actor. They used to live on [`SharedTcpState`], which every instance
+/// shares for connection transfer, so one actor's `set-read-timeout` changed
+/// every actor's reads (last writer wins), though tcp.pact says actor-wide.
+/// `0` ms = disabled (block indefinitely, the historic default).
+#[derive(Default)]
+struct InstanceTimeouts {
+    read_ms: AtomicU64,
+    write_ms: AtomicU64,
+}
+
+impl InstanceTimeouts {
+    fn get(v: &AtomicU64) -> Option<std::time::Duration> {
+        match v.load(Ordering::Relaxed) {
+            0 => None,
+            ms => Some(std::time::Duration::from_millis(ms)),
+        }
+    }
+    /// The passive-`receive()` bound, read once per call.
+    fn read(&self) -> Option<std::time::Duration> {
+        Self::get(&self.read_ms)
+    }
+    /// The `send()` bound, read once per call.
+    fn write(&self) -> Option<std::time::Duration> {
+        Self::get(&self.write_ms)
+    }
+    fn set_read(&self, d: Option<std::time::Duration>) {
+        self.read_ms.store(duration_to_ms(d), Ordering::Relaxed);
+    }
+    fn set_write(&self, d: Option<std::time::Duration>) {
+        self.write_ms.store(duration_to_ms(d), Ordering::Relaxed);
+    }
+}
+
+/// `write_all`, bounded: with `Some(d)`, a peer that takes no bytes for `d`
+/// (a client that stopped reading, or a half-open connection whose kernel
+/// buffer is full) gives `Err("timeout: ...")` instead of holding the actor
+/// until the kernel gives up retransmitting (about 15 min on Linux). Some of
+/// the data may have been written, so the caller should close the connection.
+async fn write_all_bounded<W: tokio::io::AsyncWrite + Unpin + ?Sized>(
+    w: &mut W,
+    data: &[u8],
+    bound: Option<std::time::Duration>,
+) -> Result<(), Value> {
+    match bound {
+        None => w
+            .write_all(data)
+            .await
+            .map_err(|e| Value::String(e.to_string())),
+        Some(d) => match tokio::time::timeout(d, w.write_all(data)).await {
+            Ok(r) => r.map_err(|e| Value::String(e.to_string())),
+            Err(_) => Err(Value::String(format!(
+                "timeout: the peer took no data within {}ms",
+                d.as_millis()
+            ))),
+        },
+    }
+}
+
 struct SharedTcpState {
     connections: Mutex<HashMap<u64, ConnectionEntry>>,
     listeners: Mutex<HashMap<u64, ListenerEntry>>,
@@ -460,12 +521,6 @@ struct SharedTcpState {
     /// value is applied here by `create_instance` AFTER the template built the
     /// state — see [`SharedTcpState::set_idle_timeout`].
     idle_timeout_ms: AtomicU64,
-    /// Bound for a PASSIVE `receive()` blocking on data, in milliseconds; `0` =
-    /// disabled (block indefinitely, the historic default). Set via the
-    /// `set-read-timeout` host verb (opt-in, no manifest/construction input), so
-    /// it defaults to 0 and only an actor that calls the verb is affected.
-    /// Atomic for the same shared-across-actors reason as `idle_timeout_ms`.
-    read_timeout_ms: AtomicU64,
     /// Per active-`listen()` accept loop: `listener_id -> (owner, JoinHandle)`.
     /// `listen()` moves the `TcpListener` into a detached accept-loop task, so
     /// the socket fd lives ONLY in that task — it is NOT in `listeners` (that
@@ -495,7 +550,6 @@ impl SharedTcpState {
             next_id: AtomicU64::new(1),
             max_connections,
             idle_timeout_ms: AtomicU64::new(duration_to_ms(idle_timeout)),
-            read_timeout_ms: AtomicU64::new(0),
             accept_tasks: Mutex::new(HashMap::new()),
             tls_upgrades: Mutex::new(HashMap::new()),
             tls_upgrades_changed: tokio::sync::watch::channel(0).0,
@@ -543,25 +597,6 @@ impl SharedTcpState {
             .store(duration_to_ms(idle_timeout), Ordering::Relaxed);
     }
 
-    /// Current passive-`receive()` read timeout, or `None` if disabled. Read
-    /// once per `receive()` call.
-    fn read_timeout(&self) -> Option<std::time::Duration> {
-        match self.read_timeout_ms.load(Ordering::Relaxed) {
-            0 => None,
-            ms => Some(std::time::Duration::from_millis(ms)),
-        }
-    }
-
-    /// Set (or clear) the shared passive-read timeout. Called from the
-    /// `set-read-timeout` host verb. Shared-per-runtime like `idle_timeout`, so
-    /// it is a coarse runtime-wide knob (last writer wins); fine for the known
-    /// consumers (a gateway/SMTP client that wants all its blocking reads
-    /// bounded). `0` ms disables.
-    fn set_read_timeout(&self, read_timeout: Option<std::time::Duration>) {
-        self.read_timeout_ms
-            .store(duration_to_ms(read_timeout), Ordering::Relaxed);
-    }
-
     async fn check_connection_limit(&self) -> Result<(), Value> {
         if let Some(max) = self.max_connections {
             let count = self.connections.lock().await.len();
@@ -594,6 +629,8 @@ pub struct TcpHandler {
     cancellation_token: CancellationToken,
     /// TLS context for encrypted connections (shared across clones)
     tls_context: Arc<Option<TlsContext>>,
+    /// This actor's own read and write bounds (never shared between actors)
+    timeouts: Arc<InstanceTimeouts>,
 }
 
 impl TcpHandler {
@@ -616,6 +653,7 @@ impl TcpHandler {
             actor_handle: Arc::new(std::sync::Mutex::new(None)),
             cancellation_token: CancellationToken::new(),
             tls_context,
+            timeouts: Arc::new(InstanceTimeouts::default()),
         }
     }
 
@@ -1069,6 +1107,7 @@ impl Handler for TcpHandler {
             actor_handle: Arc::new(std::sync::Mutex::new(None)),
             cancellation_token: CancellationToken::new(),
             tls_context,
+            timeouts: Arc::new(InstanceTimeouts::default()), // this actor's own, never shared
         })
     }
 
@@ -1317,7 +1356,10 @@ impl Handler for TcpHandler {
         let aid_receive = actor_id_for_closures;
         let cancel_token_for_receive = self.cancellation_token.clone();
 
-        let st_set_read_timeout = state.clone();
+        let to_receive = self.timeouts.clone();
+        let to_send = self.timeouts.clone();
+        let to_set_read = self.timeouts.clone();
+        let to_set_write = self.timeouts.clone();
 
         let st_close = state.clone();
         let aid_close = actor_id_for_closures;
@@ -1954,6 +1996,7 @@ impl Handler for TcpHandler {
             "send",
             pact_result_host_fn(move |input: Value| {
                 let st = st_send.clone();
+                let to_send = to_send.clone();
                 let actor_id = aid_send;
                 async move {
                     let _ph = PhaseLog::new("tcp.send");
@@ -1988,19 +2031,15 @@ impl Handler for TcpHandler {
                         entry.stream.clone()
                     };
 
+                    // bounded by this actor's write timeout, if it set one
+                    let bound = to_send.write();
                     let mut stream_guard = stream_arc.lock().await;
                     match &mut *stream_guard {
                         StreamState::Full(stream) => {
-                            stream
-                                .write_all(&data)
-                                .await
-                                .map_err(|e| Value::String(e.to_string()))?;
+                            write_all_bounded(stream.as_mut(), &data, bound).await?;
                         }
                         StreamState::WriteOnly(write_half) => {
-                            write_half
-                                .write_all(&data)
-                                .await
-                                .map_err(|e| Value::String(e.to_string()))?;
+                            write_all_bounded(write_half, &data, bound).await?;
                         }
                         StreamState::Closed => {
                             return Err(Value::String(format!(
@@ -2025,6 +2064,7 @@ impl Handler for TcpHandler {
                     let st = st_receive.clone();
                     let actor_id = aid_receive;
                     let cancel_token = cancel_token_for_receive.clone();
+                    let to_receive = to_receive.clone();
                     async move {
                         let _ph = PhaseLog::new("tcp.receive");
                         let (conn_id_str, max_bytes) = parse_string_and_u32(&input)?;
@@ -2085,7 +2125,7 @@ impl Handler for TcpHandler {
 
                         // Interruptible on shutdown and (optionally) bounded by
                         // the actor's read timeout. See `read_once_bounded`.
-                        let read_timeout = st.read_timeout();
+                        let read_timeout = to_receive.read();
                         let n = read_once_bounded(
                             stream,
                             &mut buf,
@@ -2111,24 +2151,50 @@ impl Handler for TcpHandler {
         // set-read-timeout(timeout-ms: u64) -> result<_, string>
         //
         // Bound how long a passive receive() may block. 0 disables (the
-        // historic block-forever default). Opt-in, actor-wide — stored on the
-        // shared state like idle_timeout; a receive() with no data within the
-        // bound returns Err("timeout: ..."). Makes a sequential actor resilient
-        // to a stalled peer instead of permanently wedged.
+        // historic block-forever default). Opt-in, actor-wide — stored on this
+        // actor's own InstanceTimeouts, never another's; a receive() with no
+        // data within the bound returns Err("timeout: ..."). Makes a sequential
+        // actor resilient to a stalled peer instead of permanently wedged.
         // ----------------------------------------------------------------
         imports.define(
             "theater:simple/tcp",
             "set-read-timeout",
             pact_result_host_fn(move |input: Value| {
-                let st = st_set_read_timeout.clone();
+                let to = to_set_read.clone();
                 async move {
                     let _ph = PhaseLog::new("tcp.set-read-timeout");
                     let ms = parse_u64(&input)?;
-                    st.set_read_timeout(match ms {
+                    to.set_read(match ms {
                         0 => None,
                         ms => Some(std::time::Duration::from_millis(ms)),
                     });
                     debug!("tcp set-read-timeout = {}ms (0=disabled)", ms);
+                    Ok::<Value, Value>(Value::Tuple(vec![]))
+                }
+            }),
+        );
+        // ----------------------------------------------------------------
+        // set-write-timeout(timeout-ms: u64) -> result<_, string>
+        //
+        // Bound how long send() may wait for the peer to take the data. 0
+        // disables (the default). Actor-wide, this actor only. A send() whose
+        // peer takes no bytes within the bound (it stopped reading, or the
+        // connection is half-open) returns Err("timeout: ...") instead of
+        // holding the actor until the kernel gives up (about 15 min).
+        // ----------------------------------------------------------------
+        imports.define(
+            "theater:simple/tcp",
+            "set-write-timeout",
+            pact_result_host_fn(move |input: Value| {
+                let to = to_set_write.clone();
+                async move {
+                    let _ph = PhaseLog::new("tcp.set-write-timeout");
+                    let ms = parse_u64(&input)?;
+                    to.set_write(match ms {
+                        0 => None,
+                        ms => Some(std::time::Duration::from_millis(ms)),
+                    });
+                    debug!("tcp set-write-timeout = {}ms (0=disabled)", ms);
                     Ok::<Value, Value>(Value::Tuple(vec![]))
                 }
             }),
@@ -3492,13 +3558,56 @@ mod tests {
     }
 
     #[test]
-    fn test_shared_state_read_timeout_set_get() {
-        let st = SharedTcpState::new(None, None);
-        assert_eq!(st.read_timeout(), None, "disabled by default (opt-in)");
-        st.set_read_timeout(Some(Duration::from_millis(250)));
-        assert_eq!(st.read_timeout(), Some(Duration::from_millis(250)));
-        st.set_read_timeout(None);
-        assert_eq!(st.read_timeout(), None, "0 ms must read back as disabled");
+    fn test_instance_timeouts_set_get() {
+        let to = InstanceTimeouts::default();
+        assert_eq!(to.read(), None, "disabled by default (opt-in)");
+        assert_eq!(to.write(), None, "disabled by default (opt-in)");
+        to.set_read(Some(Duration::from_millis(250)));
+        to.set_write(Some(Duration::from_millis(300)));
+        assert_eq!(to.read(), Some(Duration::from_millis(250)));
+        assert_eq!(to.write(), Some(Duration::from_millis(300)));
+        to.set_read(None);
+        assert_eq!(to.read(), None, "0 ms must read back as disabled");
+    }
+
+    /// Each actor's instance gets its own bounds: one actor setting a read or
+    /// write timeout must not change another's (they used to share one).
+    #[test]
+    fn test_create_instance_timeouts_are_per_actor() {
+        let template = TcpHandler::new(TcpHandlerConfig::default());
+        let a = template.create_instance(None);
+        let b = template.create_instance(None);
+        let a = a.as_any().downcast_ref::<TcpHandler>().expect("a TcpHandler");
+        let b = b.as_any().downcast_ref::<TcpHandler>().expect("a TcpHandler");
+        a.timeouts.set_read(Some(Duration::from_millis(5)));
+        a.timeouts.set_write(Some(Duration::from_millis(7)));
+        assert_eq!(b.timeouts.read(), None, "b's read bound must not follow a's");
+        assert_eq!(b.timeouts.write(), None, "b's write bound must not follow a's");
+        assert!(Arc::ptr_eq(&a.shared_state, &b.shared_state), "connections stay shared, for transfer");
+    }
+
+    /// send()'s bound: a peer that never reads lets the kernel buffers fill,
+    /// and the bounded write then gives up with "timeout:" instead of hanging.
+    #[tokio::test]
+    async fn write_all_bounded_times_out_on_a_peer_that_never_reads() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let _held = tokio::spawn(async move {
+            let (sock, _) = listener.accept().await.unwrap();
+            tokio::time::sleep(Duration::from_secs(30)).await; // accepted, never read
+            drop(sock);
+        });
+        let mut c = tokio::net::TcpStream::connect(addr).await.unwrap();
+        let big = vec![0u8; 64 * 1024 * 1024]; // far more than both socket buffers
+        let t0 = std::time::Instant::now();
+        let r = write_all_bounded(&mut c, &big, Some(Duration::from_millis(300))).await;
+        match r {
+            Err(Value::String(e)) => assert!(e.starts_with("timeout:"), "{e}"),
+            other => panic!("expected a timeout, got {other:?}"),
+        }
+        assert!(t0.elapsed() < Duration::from_secs(10), "took {:?}", t0.elapsed());
+        // and unbounded, a small write to a reading peer still just works
+        assert!(write_all_bounded(&mut c, b"", None).await.is_ok());
     }
 
     /// The bounded read used by `receive()`: a silent peer must trip the
