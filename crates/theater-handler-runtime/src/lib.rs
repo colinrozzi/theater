@@ -230,6 +230,43 @@ fn require(perms: &Option<RuntimePermissions>, mutate: bool) -> Result<(), Runti
     }
 }
 
+/// May this actor spawn? `mutate` or `children`.
+fn require_spawn(perms: &Option<RuntimePermissions>) -> Result<(), RuntimeError> {
+    match perms {
+        Some(p) if p.mutate || p.children => Ok(()),
+        Some(_) => Err(RuntimeError::PermissionDenied(
+            "runtime 'mutate' or 'children' capability not granted".into(),
+        )),
+        None => Err(RuntimeError::PermissionDenied("runtime capability not granted".into())),
+    }
+}
+
+/// May this actor stop or kill `target`? With `mutate`, any actor; with
+/// `children`, only one it spawned itself (not a grandchild, not another's).
+fn require_control(
+    perms: &Option<RuntimePermissions>,
+    children: &Children,
+    target: TheaterId,
+) -> Result<(), RuntimeError> {
+    match perms {
+        Some(p) if p.mutate => Ok(()),
+        Some(p) if p.children => {
+            if children.lock().unwrap().contains(&target) {
+                Ok(())
+            } else {
+                Err(RuntimeError::PermissionDenied(format!(
+                    "actor {} is not one this actor spawned",
+                    target
+                )))
+            }
+        }
+        Some(_) => Err(RuntimeError::PermissionDenied(
+            "runtime 'mutate' or 'children' capability not granted".into(),
+        )),
+        None => Err(RuntimeError::PermissionDenied("runtime capability not granted".into())),
+    }
+}
+
 /// Parse a wire `actor-id` (a string) into a TheaterId.
 fn parse_actor_id(id: &str) -> Result<TheaterId, RuntimeError> {
     id.parse()
@@ -286,7 +323,14 @@ pub struct RuntimeHandler {
     /// [`RuntimeHandler::with_built_in`]).
     built_in: Option<BuiltIn>,
     permissions: Option<RuntimePermissions>,
+    /// The actors this actor itself spawned through this handler (children-only
+    /// control, `RuntimePermissions::children`). Each actor's instance has its
+    /// own (`fresh`), so it is the runtime's record, not anything an actor claims.
+    children: Children,
 }
+
+/// The ids an actor spawned, shared by its host functions.
+type Children = Arc<std::sync::Mutex<std::collections::HashSet<TheaterId>>>;
 
 /// A package name and the wasm the host serves for it, so a manifest can name
 /// the host's own component instead of a file or URL.
@@ -305,6 +349,7 @@ impl RuntimeHandler {
             resource_cache: None,
             built_in: None,
             permissions,
+            children: Children::default(),
         }
     }
 
@@ -335,6 +380,7 @@ impl RuntimeHandler {
             resource_cache: self.resource_cache.clone(),
             built_in: self.built_in.clone(),
             permissions: self.permissions.clone(),
+            children: Children::default(), // this actor's own, never another's
         }
     }
 }
@@ -397,6 +443,7 @@ impl Handler for RuntimeHandler {
 
         let event_tx = self.event_tx.clone();
         let permissions = self.permissions.clone();
+        let children = self.children.clone();
         let resource_cache = self.resource_cache.clone();
         let built_in = self.built_in.clone();
         let id = ctx
@@ -416,13 +463,15 @@ impl Handler for RuntimeHandler {
                 let resource_cache = resource_cache.clone();
                 let built_in = built_in.clone();
                 let theater_tx = theater_tx.clone();
+                let children = children.clone();
                 move |input: Value| {
                     let permissions = permissions.clone();
                     let resource_cache = resource_cache.clone();
                     let built_in = built_in.clone();
                     let theater_tx = theater_tx.clone();
+                    let children = children.clone();
                     async move {
-                        require(&permissions, true)?;
+                        require_spawn(&permissions)?;
                         let (manifest_path, init_state_override, provided_wasm_bytes) = match input
                         {
                             Value::Tuple(mut args) if args.len() == 3 => {
@@ -482,7 +531,10 @@ impl Handler for RuntimeHandler {
                             return Err(Value::from(RuntimeError::RuntimeUnavailable));
                         }
                         match response_rx.await {
-                            Ok(Ok(actor_id)) => Ok(Value::String(actor_id.to_string())),
+                            Ok(Ok(actor_id)) => {
+                                children.lock().unwrap().insert(actor_id);
+                                Ok(Value::String(actor_id.to_string()))
+                            }
                             Ok(Err(e)) => Err(Value::from(RuntimeError::SpawnFailed(
                                 SpawnFailure::from(e),
                             ))),
@@ -502,13 +554,15 @@ impl Handler for RuntimeHandler {
                 let resource_cache = resource_cache.clone();
                 let built_in = built_in.clone();
                 let theater_tx = theater_tx.clone();
+                let children = children.clone();
                 move |input: Value| {
                     let permissions = permissions.clone();
                     let resource_cache = resource_cache.clone();
                     let built_in = built_in.clone();
                     let theater_tx = theater_tx.clone();
+                    let children = children.clone();
                     async move {
-                        require(&permissions, true)?;
+                        require_spawn(&permissions)?;
                         let (manifest_path, init_state_override, provided_wasm_bytes, timeout_ms) = match input {
                             Value::Tuple(mut args) if args.len() == 4 => {
                                 let timeout_ms = parse_optional_u64(&args[3]);
@@ -551,7 +605,10 @@ impl Handler for RuntimeHandler {
                         }
 
                         let actor_id = match response_rx.await {
-                            Ok(Ok(id)) => id,
+                            Ok(Ok(id)) => {
+                                children.lock().unwrap().insert(id);
+                                id
+                            }
                             Ok(Err(e)) => return Err(Value::from(RuntimeError::SpawnFailed(SpawnFailure::from(e)))),
                             Err(_) => return Err(Value::from(RuntimeError::RuntimeUnavailable)),
                         };
@@ -747,12 +804,14 @@ impl Handler for RuntimeHandler {
             pact_result_host_fn({
                 let permissions = permissions.clone();
                 let theater_tx = theater_tx.clone();
+                let children = children.clone();
                 move |input: Value| {
                     let permissions = permissions.clone();
                     let theater_tx = theater_tx.clone();
+                    let children = children.clone();
                     async move {
-                        require(&permissions, true)?;
                         let target = parse_target(input)?;
+                        require_control(&permissions, &children, target)?;
                         ensure_exists(&theater_tx, target).await?;
                         let (rtx, rrx) = oneshot::channel();
                         theater_tx
@@ -762,7 +821,10 @@ impl Handler for RuntimeHandler {
                             })
                             .map_err(|_| RuntimeError::RuntimeUnavailable)?;
                         match rrx.await {
-                            Ok(Ok(())) => Ok(Value::Tuple(vec![])),
+                            Ok(Ok(())) => {
+                                children.lock().unwrap().remove(&target);
+                                Ok(Value::Tuple(vec![]))
+                            }
                             Ok(Err(e)) => Err(Value::from(RuntimeError::Internal(e.to_string()))),
                             Err(_) => Err(Value::from(RuntimeError::RuntimeUnavailable)),
                         }
@@ -778,12 +840,14 @@ impl Handler for RuntimeHandler {
             pact_result_host_fn({
                 let permissions = permissions.clone();
                 let theater_tx = theater_tx.clone();
+                let children = children.clone();
                 move |input: Value| {
                     let permissions = permissions.clone();
                     let theater_tx = theater_tx.clone();
+                    let children = children.clone();
                     async move {
-                        require(&permissions, true)?;
                         let target = parse_target(input)?;
+                        require_control(&permissions, &children, target)?;
                         ensure_exists(&theater_tx, target).await?;
                         let (rtx, rrx) = oneshot::channel();
                         theater_tx
@@ -793,7 +857,10 @@ impl Handler for RuntimeHandler {
                             })
                             .map_err(|_| RuntimeError::RuntimeUnavailable)?;
                         match rrx.await {
-                            Ok(Ok(())) => Ok(Value::Tuple(vec![])),
+                            Ok(Ok(())) => {
+                                children.lock().unwrap().remove(&target);
+                                Ok(Value::Tuple(vec![]))
+                            }
                             Ok(Err(e)) => Err(Value::from(RuntimeError::Internal(e.to_string()))),
                             Err(_) => Err(Value::from(RuntimeError::RuntimeUnavailable)),
                         }
@@ -1173,6 +1240,37 @@ mod tests {
             .is_none());
     }
 
+    /// children-only control (0175): spawn with mutate or children; stop and
+    /// kill any actor with mutate, only a recorded child with children; a
+    /// grandchild or any other actor is refused; each instance has its own set.
+    #[test]
+    fn test_children_gates() {
+        let kids = Some(RuntimePermissions { inspect: false, mutate: false, children: true });
+        let full = Some(RuntimePermissions { inspect: true, mutate: true, children: false });
+        let ro = Some(RuntimePermissions { inspect: true, mutate: false, children: false });
+        assert!(require_spawn(&kids).is_ok());
+        assert!(require_spawn(&full).is_ok());
+        assert!(require_spawn(&ro).is_err());
+        assert!(require_spawn(&None).is_err());
+        // shutdown and the other mutate verbs stay mutate-only
+        assert!(require(&kids, true).is_err());
+
+        let h = RuntimeHandler::new(RuntimeHostConfig {}, kids.clone());
+        let mine = h.fresh();
+        let other = h.fresh();
+        let child = TheaterId::generate();
+        let grandchild = TheaterId::generate();
+        let stranger = TheaterId::generate();
+        mine.children.lock().unwrap().insert(child);
+        assert!(require_control(&kids, &mine.children, child).is_ok());
+        assert!(require_control(&kids, &mine.children, grandchild).is_err(), "a grandchild isn't the grandparent's");
+        assert!(require_control(&kids, &mine.children, stranger).is_err(), "nor any other actor");
+        assert!(require_control(&kids, &other.children, child).is_err(), "another instance's child isn't this one's");
+        assert!(require_control(&full, &mine.children, stranger).is_ok(), "mutate controls any actor");
+        assert!(require_control(&ro, &mine.children, child).is_err());
+        assert!(require_control(&None, &mine.children, child).is_err());
+    }
+
     #[test]
     fn test_require_gate() {
         assert!(require(&None, false).is_err());
@@ -1180,12 +1278,14 @@ mod tests {
         let ro = Some(RuntimePermissions {
             inspect: true,
             mutate: false,
+            children: false,
         });
         assert!(require(&ro, false).is_ok());
         assert!(require(&ro, true).is_err());
         let rw = Some(RuntimePermissions {
             inspect: true,
             mutate: true,
+            children: false,
         });
         assert!(require(&rw, false).is_ok());
         assert!(require(&rw, true).is_ok());

@@ -409,12 +409,21 @@ pub struct RuntimePermissions {
     /// shut the runtime down.
     #[serde(default)]
     pub mutate: bool,
+    /// Children-only control: spawn / spawn-and-wait, and stop / kill only
+    /// the actors this actor itself spawned (recorded by its runtime handler at
+    /// spawn, never a claim); not grandchildren, not any other actor, and no
+    /// shutdown. `mutate` covers all of it.
+    #[serde(default)]
+    pub children: bool,
 }
 impl PartialOrd for RuntimePermissions {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         // parent (self) must grant everything the child (other) requests; the child
         // exceeds the parent if it wants a capability the parent lacks.
-        if (other.inspect && !self.inspect) || (other.mutate && !self.mutate) {
+        if (other.inspect && !self.inspect)
+            || (other.mutate && !self.mutate)
+            || (other.children && !(self.children || self.mutate))
+        {
             return None;
         }
         Some(if self == other {
@@ -479,6 +488,7 @@ impl HandlerPermission {
             runtime: Some(RuntimePermissions {
                 inspect: true,
                 mutate: true,
+                children: true,
             }),
             store: Some(StorePermissions),
             timing: Some(TimingPermissions {
@@ -705,6 +715,9 @@ impl RestrictWith<RuntimePermissions> for RuntimePermissions {
         RuntimePermissions {
             inspect: self.inspect && restriction.inspect,
             mutate: self.mutate && restriction.mutate,
+            // mutate covers children, so a full controller may grant a child
+            // children-only control; a children-only actor can't grant mutate
+            children: (self.children || self.mutate) && restriction.children,
         }
     }
 }
@@ -809,10 +822,12 @@ mod tests {
         let full = RuntimePermissions {
             inspect: true,
             mutate: true,
+            children: false,
         };
         let inspect_only = RuntimePermissions {
             inspect: true,
             mutate: false,
+            children: false,
         };
         let none = RuntimePermissions::default();
 
@@ -832,19 +847,48 @@ mod tests {
         assert_eq!(none.partial_cmp(&inspect_only), None);
     }
 
+    /// children-only control (0175): mutate covers it; a children-only parent
+    /// can grant children (to its own children) but never mutate; inspect-only
+    /// or none can't grant children at all.
+    #[test]
+    fn test_runtime_permissions_children() {
+        let full = RuntimePermissions { inspect: true, mutate: true, children: false };
+        let kids = RuntimePermissions { inspect: false, mutate: false, children: true };
+        let mutate_req = RuntimePermissions { inspect: false, mutate: true, children: false };
+        let inspect_only = RuntimePermissions { inspect: true, mutate: false, children: false };
+        // who may hold a child that wants children-only
+        assert_eq!(full.partial_cmp(&kids), Some(std::cmp::Ordering::Greater));
+        assert_eq!(kids.partial_cmp(&kids), Some(std::cmp::Ordering::Equal));
+        assert_eq!(inspect_only.partial_cmp(&kids), None);
+        assert_eq!(RuntimePermissions::default().partial_cmp(&kids), None);
+        // a children-only actor can't grant mutate
+        assert_eq!(kids.partial_cmp(&mutate_req), None);
+        // narrowing: mutate restricted to children-only gives children-only;
+        // children-only restricted to mutate gives nothing
+        assert_eq!(full.restrict_with(&kids), kids);
+        assert_eq!(kids.restrict_with(&mutate_req), RuntimePermissions::default());
+        assert_eq!(kids.restrict_with(&kids), kids);
+        // an older manifest without the key still parses, with children off
+        let old: RuntimePermissions = serde_json::from_str(r#"{"inspect":true,"mutate":false}"#).unwrap();
+        assert!(!old.children);
+    }
+
     #[test]
     fn test_runtime_permissions_restrict_with_intersects() {
         let full = RuntimePermissions {
             inspect: true,
             mutate: true,
+            children: false,
         };
         let inspect_only = RuntimePermissions {
             inspect: true,
             mutate: false,
+            children: false,
         };
         let mutate_only = RuntimePermissions {
             inspect: false,
             mutate: true,
+            children: false,
         };
         // Restricting full by inspect-only yields inspect-only.
         assert_eq!(full.restrict_with(&inspect_only), inspect_only);
