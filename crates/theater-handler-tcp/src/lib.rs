@@ -511,6 +511,34 @@ async fn write_all_bounded<W: tokio::io::AsyncWrite + Unpin + ?Sized>(
     }
 }
 
+/// One `send`'s I/O: `write_all_bounded` on the connection's stream. A send that
+/// timed out may have written part of the data, so the stream is no longer in
+/// step with the peer: it is closed and removed, never left half-written for
+/// the next send.
+async fn send_bounded(
+    st: &Arc<SharedTcpState>,
+    conn_id: u64,
+    stream_arc: &Arc<Mutex<StreamState>>,
+    data: &[u8],
+    bound: Option<std::time::Duration>,
+) -> Result<(), Value> {
+    let mut stream_guard = stream_arc.lock().await;
+    let written = match &mut *stream_guard {
+        StreamState::Full(stream) => write_all_bounded(stream.as_mut(), data, bound).await,
+        StreamState::WriteOnly(write_half) => write_all_bounded(write_half, data, bound).await,
+        StreamState::Closed => {
+            return Err(Value::String(format!("Connection {} is closed", conn_id)));
+        }
+    };
+    drop(stream_guard);
+    if let Err(Value::String(e)) = &written {
+        if e.starts_with("timeout:") {
+            close_and_remove_connection(st, conn_id).await;
+        }
+    }
+    written
+}
+
 struct SharedTcpState {
     connections: Mutex<HashMap<u64, ConnectionEntry>>,
     listeners: Mutex<HashMap<u64, ListenerEntry>>,
@@ -2044,21 +2072,7 @@ impl Handler for TcpHandler {
                     // write_all and flush (a TLS stream may keep the tail buffered until
                     // flushed, #264), together bounded by this actor's write timeout
                     let bound = to_send.write();
-                    let mut stream_guard = stream_arc.lock().await;
-                    match &mut *stream_guard {
-                        StreamState::Full(stream) => {
-                            write_all_bounded(stream.as_mut(), &data, bound).await?;
-                        }
-                        StreamState::WriteOnly(write_half) => {
-                            write_all_bounded(write_half, &data, bound).await?;
-                        }
-                        StreamState::Closed => {
-                            return Err(Value::String(format!(
-                                "Connection {} is closed",
-                                conn_id_str
-                            )));
-                        }
-                    }
+                    send_bounded(&st, conn_id, &stream_arc, &data, bound).await?;
 
                     debug!("tcp send conn={} {} bytes", conn_id, len);
                     Ok::<Value, Value>(Value::U64(len as u64))
@@ -3593,6 +3607,24 @@ mod tests {
         assert_eq!(b.timeouts.read(), None, "b's read bound must not follow a's");
         assert_eq!(b.timeouts.write(), None, "b's write bound must not follow a's");
         assert!(Arc::ptr_eq(&a.shared_state, &b.shared_state), "connections stay shared, for transfer");
+    }
+
+    /// send()'s bound end to end (lux): to a peer that never reads, a bounded send
+    /// errs with "timeout:" within the bound, and the connection is closed and
+    /// removed, not left half-written for a later send.
+    #[tokio::test]
+    async fn send_bounded_times_out_and_closes_the_connection() {
+        let (st, conn_id, _owner, _client) = pending_conn().await; // the client never reads
+        let stream_arc = st.connections.lock().await.get(&conn_id).unwrap().stream.clone();
+        let big = vec![0u8; 64 * 1024 * 1024];
+        let t0 = std::time::Instant::now();
+        let r = send_bounded(&st, conn_id, &stream_arc, &big, Some(Duration::from_millis(300))).await;
+        match r {
+            Err(Value::String(e)) => assert!(e.starts_with("timeout:"), "{e}"),
+            other => panic!("expected a timeout, got {other:?}"),
+        }
+        assert!(t0.elapsed() < Duration::from_secs(10), "took {:?}", t0.elapsed());
+        assert!(st.connections.lock().await.get(&conn_id).is_none(), "the timed-out connection is still registered");
     }
 
     /// send()'s bound: a peer that never reads lets the kernel buffers fill,
