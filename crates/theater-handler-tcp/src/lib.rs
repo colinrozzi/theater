@@ -494,27 +494,37 @@ async fn write_all_bounded<W: tokio::io::AsyncWrite + Unpin + ?Sized>(
     w: &mut W,
     data: &[u8],
     bound: Option<std::time::Duration>,
-) -> Result<(), Value> {
+) -> Result<(), SendFailure> {
     let send = async {
         w.write_all(data).await?;
         w.flush().await
     };
     match bound {
-        None => send.await.map_err(|e| Value::String(e.to_string())),
+        None => send.await.map_err(|e| SendFailure::Io(e.to_string())),
         Some(d) => match tokio::time::timeout(d, send).await {
-            Ok(r) => r.map_err(|e| Value::String(e.to_string())),
-            Err(_) => Err(Value::String(format!(
-                "timeout: the peer took no data within {}ms",
-                d.as_millis()
-            ))),
+            Ok(r) => r.map_err(|e| SendFailure::Io(e.to_string())),
+            Err(_) => Err(SendFailure::Timeout),
         },
     }
 }
 
-/// One `send`'s I/O: `write_all_bounded` on the connection's stream. A send that
-/// timed out may have written part of the data, so the stream is no longer in
-/// step with the peer: it is closed and removed, never left half-written for
-/// the next send.
+/// Why a bounded write failed: the bound ran out (some data may have gone), or
+/// an I/O error.
+#[derive(Debug, PartialEq)]
+enum SendFailure {
+    Timeout,
+    Io(String),
+}
+
+/// One `send`'s I/O under the actor's write bound, which covers waiting for the
+/// stream's lock as well as the write itself (a passive `receive` with no read
+/// timeout can hold that lock indefinitely).
+/// - Lock not had in time: `Err("timeout: ...")`, nothing written, the
+///   connection left as it was.
+/// - Write timed out: part of the data may have gone, so the stream is set
+///   Closed and dropped at once, with no graceful TLS shutdown (that would wait
+///   to flush the very records the peer isn't reading, #264's hang), and the
+///   connection is removed, never left half-written for a later send.
 async fn send_bounded(
     st: &Arc<SharedTcpState>,
     conn_id: u64,
@@ -522,21 +532,44 @@ async fn send_bounded(
     data: &[u8],
     bound: Option<std::time::Duration>,
 ) -> Result<(), Value> {
-    let mut stream_guard = stream_arc.lock().await;
+    let deadline = bound.map(|d| tokio::time::Instant::now() + d);
+    let mut stream_guard = match deadline {
+        None => stream_arc.lock().await,
+        Some(t) => match tokio::time::timeout_at(t, stream_arc.lock()).await {
+            Ok(g) => g,
+            Err(_) => {
+                return Err(Value::String(format!(
+                    "timeout: connection {} stayed busy for {}ms; nothing was sent",
+                    conn_id,
+                    bound.unwrap_or_default().as_millis()
+                )))
+            }
+        },
+    };
+    let left = deadline.map(|t| t.saturating_duration_since(tokio::time::Instant::now()));
     let written = match &mut *stream_guard {
-        StreamState::Full(stream) => write_all_bounded(stream.as_mut(), data, bound).await,
-        StreamState::WriteOnly(write_half) => write_all_bounded(write_half, data, bound).await,
+        StreamState::Full(stream) => write_all_bounded(stream.as_mut(), data, left).await,
+        StreamState::WriteOnly(write_half) => write_all_bounded(write_half, data, left).await,
         StreamState::Closed => {
             return Err(Value::String(format!("Connection {} is closed", conn_id)));
         }
     };
-    drop(stream_guard);
-    if let Err(Value::String(e)) = &written {
-        if e.starts_with("timeout:") {
-            close_and_remove_connection(st, conn_id).await;
+    match written {
+        Ok(()) => Ok(()),
+        Err(SendFailure::Io(e)) => Err(Value::String(e)),
+        Err(SendFailure::Timeout) => {
+            // drop the stream now (no shutdown), then forget the connection; the
+            // stream lock is released before the map's, as everywhere else
+            *stream_guard = StreamState::Closed;
+            drop(stream_guard);
+            st.connections.lock().await.remove(&conn_id);
+            Err(Value::String(format!(
+                "timeout: the peer took no data within {}ms; connection {} closed",
+                bound.unwrap_or_default().as_millis(),
+                conn_id
+            )))
         }
     }
-    written
 }
 
 struct SharedTcpState {
@@ -3627,6 +3660,75 @@ mod tests {
         assert!(st.connections.lock().await.get(&conn_id).is_none(), "the timed-out connection is still registered");
     }
 
+    /// The same over TLS (tova): with the peer's window shut, rustls holds
+    /// unsent records, so a graceful TLS close would wait to flush them, #264's
+    /// hang again. The timed-out send must return within the bound and drop the
+    /// connection without that shutdown.
+    #[tokio::test]
+    async fn send_bounded_over_tls_to_a_deaf_peer_returns_and_drops() {
+        let (acceptor, connector) = test_tls_pair();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let client = tokio::spawn(async move {
+            let tcp = tokio::net::TcpStream::connect(addr).await.unwrap();
+            let name = rustls::pki_types::ServerName::try_from("localhost").unwrap();
+            let tls = connector.connect(name, tcp).await.unwrap();
+            tokio::time::sleep(Duration::from_secs(30)).await; // handshaken, never reads
+            drop(tls);
+        });
+        let (tcp, peer_addr) = listener.accept().await.unwrap();
+        let server = acceptor.accept(tcp).await.unwrap();
+        let st = Arc::new(SharedTcpState::new(None, None));
+        let conn_id = st.next_id();
+        let stream_arc = Arc::new(Mutex::new(StreamState::Full(Box::new(UnifiedStream::ServerTls(server)))));
+        st.connections.lock().await.insert(
+            conn_id,
+            ConnectionEntry {
+                stream: stream_arc.clone(),
+                peer_addr,
+                origin: ConnOrigin::Accepted("127.0.0.1:0".into()),
+                owner: TheaterId::generate(),
+                state: ConnectionState::Active,
+                data_mode: DataMode::Passive,
+            },
+        );
+        let big = vec![0u8; 64 * 1024 * 1024];
+        let t0 = std::time::Instant::now();
+        let r = tokio::time::timeout(
+            Duration::from_secs(10),
+            send_bounded(&st, conn_id, &stream_arc, &big, Some(Duration::from_millis(300))),
+        )
+        .await
+        .expect("a timed-out TLS send must return, not hang in a graceful close");
+        match r {
+            Err(Value::String(e)) => assert!(e.starts_with("timeout:"), "{e}"),
+            other => panic!("expected a timeout, got {other:?}"),
+        }
+        assert!(t0.elapsed() < Duration::from_secs(5), "took {:?}", t0.elapsed());
+        assert!(st.connections.lock().await.get(&conn_id).is_none(), "still registered");
+        assert!(matches!(*stream_arc.lock().await, StreamState::Closed), "the stream wasn't dropped");
+        client.abort();
+    }
+
+    /// The lock wait is inside the bound too (tova): with the stream's lock
+    /// held elsewhere (a passive receive with no read timeout), a bounded send
+    /// gives up in time, writes nothing, and leaves the connection alone.
+    #[tokio::test]
+    async fn send_bounded_gives_up_on_a_held_lock_and_keeps_the_connection() {
+        let (st, conn_id, _owner, _client) = pending_conn().await;
+        let stream_arc = st.connections.lock().await.get(&conn_id).unwrap().stream.clone();
+        let held = stream_arc.clone().lock_owned().await; // as a blocked receive would
+        let t0 = std::time::Instant::now();
+        let r = send_bounded(&st, conn_id, &stream_arc, b"hi", Some(Duration::from_millis(200))).await;
+        match r {
+            Err(Value::String(e)) => assert!(e.starts_with("timeout:") && e.contains("nothing was sent"), "{e}"),
+            other => panic!("expected a busy timeout, got {other:?}"),
+        }
+        assert!(t0.elapsed() < Duration::from_secs(5), "took {:?}", t0.elapsed());
+        drop(held);
+        assert!(st.connections.lock().await.get(&conn_id).is_some(), "a send that wrote nothing must not close");
+    }
+
     /// send()'s bound: a peer that never reads lets the kernel buffers fill,
     /// and the bounded write then gives up with "timeout:" instead of hanging.
     #[tokio::test]
@@ -3642,13 +3744,8 @@ mod tests {
         let big = vec![0u8; 64 * 1024 * 1024]; // far more than both socket buffers
         let t0 = std::time::Instant::now();
         let r = write_all_bounded(&mut c, &big, Some(Duration::from_millis(300))).await;
-        match r {
-            Err(Value::String(e)) => assert!(e.starts_with("timeout:"), "{e}"),
-            other => panic!("expected a timeout, got {other:?}"),
-        }
+        assert_eq!(r, Err(SendFailure::Timeout));
         assert!(t0.elapsed() < Duration::from_secs(10), "took {:?}", t0.elapsed());
-        // and unbounded, a small write to a reading peer still just works
-        assert!(write_all_bounded(&mut c, b"", None).await.is_ok());
     }
 
     /// The bounded read used by `receive()`: a silent peer must trip the
