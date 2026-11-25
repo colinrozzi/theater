@@ -485,11 +485,12 @@ impl InstanceTimeouts {
 }
 
 /// `write_all` then `flush` (a TLS stream may keep the last records buffered
-/// until flushed), bounded: with `Some(d)`, a peer that takes no bytes for `d`
-/// (a client that stopped reading, or a half-open connection whose kernel
-/// buffer is full) gives `Err("timeout: ...")` instead of holding the actor
-/// until the kernel gives up retransmitting (about 15 min on Linux). Some of
-/// the data may have been written, so the caller should close the connection.
+/// until flushed), bounded: with `Some(d)`, a send not done within `d` gives
+/// `Err(SendFailure::Timeout)` instead of holding the actor while the peer
+/// doesn't read (a zero window, which the kernel never times out). It bounds
+/// the whole send, not a gap between bytes, so a slow reader is cut off too
+/// once one send takes longer than `d`. Some of the data may have gone, so the
+/// connection must not be used again (`send_bounded` drops it).
 async fn write_all_bounded<W: tokio::io::AsyncWrite + Unpin + ?Sized>(
     w: &mut W,
     data: &[u8],
@@ -564,7 +565,7 @@ async fn send_bounded(
             drop(stream_guard);
             st.connections.lock().await.remove(&conn_id);
             Err(Value::String(format!(
-                "timeout: the peer took no data within {}ms; connection {} closed",
+                "timeout: the send wasn't done within {}ms; connection {} closed",
                 bound.unwrap_or_default().as_millis(),
                 conn_id
             )))
@@ -2234,11 +2235,11 @@ impl Handler for TcpHandler {
         // ----------------------------------------------------------------
         // set-write-timeout(timeout-ms: u64) -> result<_, string>
         //
-        // Bound how long send() may wait for the peer to take the data. 0
-        // disables (the default). Actor-wide, this actor only. A send() whose
-        // peer takes no bytes within the bound (it stopped reading, or the
-        // connection is half-open) returns Err("timeout: ...") instead of
-        // holding the actor until the kernel gives up (about 15 min).
+        // Bound how long one send() may take. 0 disables (the default).
+        // Actor-wide, this actor only. A send() not written and flushed in
+        // full within the bound returns Err("timeout: ...") and the connection
+        // is dropped, instead of holding the actor while the peer doesn't read.
+        // It bounds the whole send, not a gap between bytes.
         // ----------------------------------------------------------------
         imports.define(
             "theater:simple/tcp",
