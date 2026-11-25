@@ -81,13 +81,15 @@ interface tcp {
         // Additive: actors that never call it are unchanged.
         set-read-timeout: func(timeout-ms: u64) -> result<_, string>
 
-        // Bound how long send() may wait for the peer to take the data.
-        // timeout-ms = 0 disables (the default: send waits as long as the
-        // kernel does, about 15 min for a dead peer on Linux). With a bound, a
-        // send() whose peer takes no bytes within timeout-ms (it stopped
-        // reading, or the connection is half-open) returns Err("timeout: ...");
-        // part of the data may have gone, so close the connection. Actor-wide,
-        // this actor only. Additive: actors that never call it are unchanged.
+        // Bound how long one send() may take. timeout-ms = 0 disables (the
+        // default: send waits as long as the kernel does, which for a peer
+        // holding a zero window is forever). With a bound, a send() that isn't
+        // written and flushed in full within timeout-ms returns
+        // Err("timeout: ...") and the connection is dropped, since part of the
+        // data may have gone. It bounds the whole send, not a gap between
+        // bytes: a slow reader whose answer takes longer than timeout-ms is cut
+        // off too. Actor-wide, this actor only. Additive: actors that never
+        // call it are unchanged.
         set-write-timeout: func(timeout-ms: u64) -> result<_, string>
 
         // Close a connection
