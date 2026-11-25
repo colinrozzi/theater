@@ -21,4 +21,6 @@ tokio = { workspace = true, features = ["sync", "time"] }
 thiserror = "2.0"
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["rt", "macros", "fs"] }
+tokio = { workspace = true, features = ["rt", "macros", "fs", "rt-multi-thread"] }
+theater-native = { workspace = true }
+theater-handler-self = { workspace = true }

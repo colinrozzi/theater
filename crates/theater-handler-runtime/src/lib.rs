@@ -329,8 +329,98 @@ pub struct RuntimeHandler {
     children: Children,
 }
 
-/// The ids an actor spawned, shared by its host functions.
+/// The ids a children-only actor spawned, shared by its host functions. Only
+/// live children stay: an id goes when this actor stops or kills it, when its
+/// spawn-and-wait returns, or when a later spawn or stop finds it no longer
+/// running (`prune_children`); theater ids are fresh, so a stale id never names
+/// a new actor. It lives with this handler instance, so a parent that is
+/// restarted starts with none: the children it spawned before are no longer
+/// its to stop (fail closed), and an actor with `mutate` keeps no record.
 type Children = Arc<std::sync::Mutex<std::collections::HashSet<TheaterId>>>;
+
+/// Whether this actor's spawns are recorded: children-only, not mutate.
+fn records_children(perms: &Option<RuntimePermissions>) -> bool {
+    matches!(perms, Some(p) if p.children && !p.mutate)
+}
+
+/// Forget recorded children that are no longer running.
+async fn prune_children(
+    theater_tx: &mpsc::UnboundedSender<TheaterCommand>,
+    children: &Children,
+) -> Result<(), RuntimeError> {
+    if children.lock().unwrap().is_empty() {
+        return Ok(());
+    }
+    let live: std::collections::HashSet<TheaterId> =
+        get_actors(theater_tx).await?.into_iter().map(|(id, _, _)| id).collect();
+    children.lock().unwrap().retain(|c| live.contains(c));
+    Ok(())
+}
+
+/// spawn's runtime part: send the spawn with `parent` as the parent, and record
+/// the new id if this actor is children-only.
+async fn spawn_recorded(
+    theater_tx: &mpsc::UnboundedSender<TheaterCommand>,
+    permissions: &Option<RuntimePermissions>,
+    children: &Children,
+    parent: TheaterId,
+    manifest: ManifestConfig,
+    wasm_bytes: Vec<u8>,
+    init_state: Value,
+) -> Result<TheaterId, RuntimeError> {
+    require_spawn(permissions)?;
+    let _ = prune_children(theater_tx, children).await;
+    let (response_tx, response_rx) = oneshot::channel();
+    let cmd = TheaterCommand::SpawnActor {
+        wasm_bytes,
+        name: Some(manifest.name.clone()),
+        manifest: Some(manifest),
+        init_state,
+        response_tx,
+        subscription_tx: None,
+        parent_id: Some(parent),
+    };
+    theater_tx.send(cmd).map_err(|_| RuntimeError::RuntimeUnavailable)?;
+    match response_rx.await {
+        Ok(Ok(actor_id)) => {
+            if records_children(permissions) {
+                children.lock().unwrap().insert(actor_id);
+            }
+            Ok(actor_id)
+        }
+        Ok(Err(e)) => Err(RuntimeError::SpawnFailed(SpawnFailure::from(e))),
+        Err(_) => Err(RuntimeError::RuntimeUnavailable),
+    }
+}
+
+/// stop-actor's and kill-actor's runtime part: the gate (any actor with mutate,
+/// a recorded live child with children), then the stop or kill, then the record.
+async fn control_child(
+    theater_tx: &mpsc::UnboundedSender<TheaterCommand>,
+    permissions: &Option<RuntimePermissions>,
+    children: &Children,
+    target: TheaterId,
+    kill: bool,
+) -> Result<(), RuntimeError> {
+    let _ = prune_children(theater_tx, children).await;
+    require_control(permissions, children, target)?;
+    ensure_exists(theater_tx, target).await?;
+    let (rtx, rrx) = oneshot::channel();
+    let cmd = if kill {
+        TheaterCommand::TerminateActor { actor_id: target, response_tx: rtx }
+    } else {
+        TheaterCommand::StopActor { actor_id: target, response_tx: rtx }
+    };
+    theater_tx.send(cmd).map_err(|_| RuntimeError::RuntimeUnavailable)?;
+    match rrx.await {
+        Ok(Ok(())) => {
+            children.lock().unwrap().remove(&target);
+            Ok(())
+        }
+        Ok(Err(e)) => Err(RuntimeError::Internal(e.to_string())),
+        Err(_) => Err(RuntimeError::RuntimeUnavailable),
+    }
+}
 
 /// A package name and the wasm the host serves for it, so a manifest can name
 /// the host's own component instead of a file or URL.
@@ -514,32 +604,12 @@ impl Handler for RuntimeHandler {
                         )
                         .await?;
 
-                        let name = Some(manifest.name.clone());
                         let init_state = resolve_init_state(init_state_override, &manifest);
-                        let (response_tx, response_rx) = oneshot::channel();
-                        let cmd = TheaterCommand::SpawnActor {
-                            wasm_bytes,
-                            name,
-                            manifest: Some(manifest),
-                            init_state,
-                            response_tx,
-                            subscription_tx: None,
-                            // This actor is spawned by the calling actor.
-                            parent_id: Some(id),
-                        };
-                        if theater_tx.send(cmd).is_err() {
-                            return Err(Value::from(RuntimeError::RuntimeUnavailable));
-                        }
-                        match response_rx.await {
-                            Ok(Ok(actor_id)) => {
-                                children.lock().unwrap().insert(actor_id);
-                                Ok(Value::String(actor_id.to_string()))
-                            }
-                            Ok(Err(e)) => Err(Value::from(RuntimeError::SpawnFailed(
-                                SpawnFailure::from(e),
-                            ))),
-                            Err(_) => Err(Value::from(RuntimeError::RuntimeUnavailable)),
-                        }
+                        // This actor is spawned by the calling actor.
+                        spawn_recorded(&theater_tx, &permissions, &children, id, manifest, wasm_bytes, init_state)
+                            .await
+                            .map(|actor_id| Value::String(actor_id.to_string()))
+                            .map_err(Value::from)
                     }
                 }
             }),
@@ -606,7 +676,9 @@ impl Handler for RuntimeHandler {
 
                         let actor_id = match response_rx.await {
                             Ok(Ok(id)) => {
-                                children.lock().unwrap().insert(id);
+                                if records_children(&permissions) {
+                                    children.lock().unwrap().insert(id);
+                                }
                                 id
                             }
                             Ok(Err(e)) => return Err(Value::from(RuntimeError::SpawnFailed(SpawnFailure::from(e)))),
@@ -632,6 +704,12 @@ impl Handler for RuntimeHandler {
                             Ok(await_terminal.await)
                         };
 
+                        // the wait is over (done, failed, stopped or timed out): a child
+                        // that ended is no longer recorded; one still running after a
+                        // timeout stays this actor's to stop (pruned once it ends)
+                        if !matches!(wait_result, Err(_)) {
+                            children.lock().unwrap().remove(&actor_id);
+                        }
                         match wait_result {
                             Ok(Some(TerminationCause::Completed { final_state })) => {
                                 Ok(option_bytes_to_value(final_state))
@@ -811,23 +889,10 @@ impl Handler for RuntimeHandler {
                     let children = children.clone();
                     async move {
                         let target = parse_target(input)?;
-                        require_control(&permissions, &children, target)?;
-                        ensure_exists(&theater_tx, target).await?;
-                        let (rtx, rrx) = oneshot::channel();
-                        theater_tx
-                            .send(TheaterCommand::StopActor {
-                                actor_id: target,
-                                response_tx: rtx,
-                            })
-                            .map_err(|_| RuntimeError::RuntimeUnavailable)?;
-                        match rrx.await {
-                            Ok(Ok(())) => {
-                                children.lock().unwrap().remove(&target);
-                                Ok(Value::Tuple(vec![]))
-                            }
-                            Ok(Err(e)) => Err(Value::from(RuntimeError::Internal(e.to_string()))),
-                            Err(_) => Err(Value::from(RuntimeError::RuntimeUnavailable)),
-                        }
+                        control_child(&theater_tx, &permissions, &children, target, false)
+                            .await
+                            .map(|_| Value::Tuple(vec![]))
+                            .map_err(Value::from)
                     }
                 }
             }),
@@ -847,23 +912,10 @@ impl Handler for RuntimeHandler {
                     let children = children.clone();
                     async move {
                         let target = parse_target(input)?;
-                        require_control(&permissions, &children, target)?;
-                        ensure_exists(&theater_tx, target).await?;
-                        let (rtx, rrx) = oneshot::channel();
-                        theater_tx
-                            .send(TheaterCommand::TerminateActor {
-                                actor_id: target,
-                                response_tx: rtx,
-                            })
-                            .map_err(|_| RuntimeError::RuntimeUnavailable)?;
-                        match rrx.await {
-                            Ok(Ok(())) => {
-                                children.lock().unwrap().remove(&target);
-                                Ok(Value::Tuple(vec![]))
-                            }
-                            Ok(Err(e)) => Err(Value::from(RuntimeError::Internal(e.to_string()))),
-                            Err(_) => Err(Value::from(RuntimeError::RuntimeUnavailable)),
-                        }
+                        control_child(&theater_tx, &permissions, &children, target, true)
+                            .await
+                            .map(|_| Value::Tuple(vec![]))
+                            .map_err(Value::from)
                     }
                 }
             }),
@@ -1269,6 +1321,111 @@ mod tests {
         assert!(require_control(&full, &mine.children, stranger).is_ok(), "mutate controls any actor");
         assert!(require_control(&ro, &mine.children, child).is_err());
         assert!(require_control(&None, &mine.children, child).is_err());
+    }
+
+    /// children-only control end to end (tova): through spawn_recorded and
+    /// control_child against a real runtime with a real actor. A children-only
+    /// spawn is recorded at spawn (delete that and this fails), a stranger is
+    /// refused, a recorded child can be stopped and is then forgotten, a child
+    /// that ended elsewhere is pruned, and a mutate actor records nothing.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn children_scope_through_spawn_and_stop() {
+        use theater::config::actor_manifest::HandlerConfig;
+        use theater::config::inheritance::HandlerPermissionPolicy;
+        let wasm_path = format!(
+            "{}/../../test-actors/state-test/target/wasm32-unknown-unknown/release/state_test_actor.wasm",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        let wasm = std::fs::read(&wasm_path).unwrap_or_else(|e| {
+            panic!("{wasm_path}: {e}. Build it: cd test-actors/state-test && cargo build --release --target wasm32-unknown-unknown")
+        });
+        let temp = std::env::temp_dir().join(format!("theater-children-{}", TheaterId::generate()));
+        std::env::set_var("THEATER_HOME", &temp);
+
+        let (theater_tx, theater_rx) = mpsc::unbounded_channel::<TheaterCommand>();
+        let mut registry = theater::handler::HandlerRegistry::new();
+        registry.register(theater_handler_self::SelfHandler::new(
+            theater_handler_self::SelfHostConfig {},
+            theater_tx.clone(),
+            None,
+        ));
+        let tx_rt = theater_tx.clone();
+        tokio::spawn(async move {
+            let mut rt = theater::theater_runtime::TheaterRuntime::new(
+                tx_rt,
+                theater_rx,
+                registry,
+                Arc::new(ResourceCache::new()),
+                theater_native::TokioSpawn,
+            )
+            .await
+            .expect("runtime");
+            rt.run().await
+        });
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let manifest = ManifestConfig {
+            name: "state-test".to_string(),
+            version: "0.1.0".to_string(),
+            package: String::new(),
+            description: None,
+            long_description: None,
+            initial_state: None,
+            static_package: false,
+            permission_policy: HandlerPermissionPolicy::default(),
+            handlers: vec![HandlerConfig::unit("self")],
+        };
+        let kids = Some(RuntimePermissions { inspect: false, mutate: false, children: true });
+        let full = Some(RuntimePermissions { inspect: true, mutate: true, children: false });
+        let parent = TheaterId::generate();
+        let children = Children::default();
+        let spawn = |perms: Option<RuntimePermissions>, children: Children| {
+            let (tx, m, w) = (theater_tx.clone(), manifest.clone(), wasm.clone());
+            async move { spawn_recorded(&tx, &perms, &children, parent, m, w, default_init_state()).await }
+        };
+
+        // a children-only spawn is recorded
+        let child = spawn(kids.clone(), children.clone()).await.expect("spawn a child");
+        assert!(children.lock().unwrap().contains(&child), "the child wasn't recorded at spawn");
+
+        // a stranger (spawned by someone else) is refused, and keeps running
+        let (stx, srx) = oneshot::channel();
+        theater_tx
+            .send(TheaterCommand::SpawnActor {
+                wasm_bytes: wasm.clone(),
+                name: Some("stranger".into()),
+                manifest: Some(manifest.clone()),
+                init_state: default_init_state(),
+                response_tx: stx,
+                subscription_tx: None,
+                parent_id: None,
+            })
+            .unwrap();
+        let stranger = srx.await.unwrap().expect("spawn a stranger");
+        let r = control_child(&theater_tx, &kids, &children, stranger, true).await;
+        assert!(matches!(r, Err(RuntimeError::PermissionDenied(_))), "a stranger was killable: {r:?}");
+        assert!(ensure_exists(&theater_tx, stranger).await.is_ok(), "the stranger was killed anyway");
+
+        // its own child it may stop, and then forgets it
+        control_child(&theater_tx, &kids, &children, child, false).await.expect("stop its child");
+        assert!(!children.lock().unwrap().contains(&child), "a stopped child is still recorded");
+
+        // a child that ends elsewhere is pruned on the next spawn
+        let gone = spawn(kids.clone(), children.clone()).await.expect("spawn");
+        let (ktx, krx) = oneshot::channel();
+        theater_tx.send(TheaterCommand::StopActor { actor_id: gone, response_tx: ktx }).unwrap();
+        let _ = krx.await;
+        let next = spawn(kids.clone(), children.clone()).await.expect("spawn");
+        let now: Vec<TheaterId> = children.lock().unwrap().iter().copied().collect();
+        assert_eq!(now, vec![next], "a child that ended elsewhere wasn't pruned");
+
+        // mutate controls anyone and keeps no record
+        let theirs = Children::default();
+        let m = spawn(full.clone(), theirs.clone()).await.expect("spawn with mutate");
+        assert!(theirs.lock().unwrap().is_empty(), "a mutate actor recorded a child");
+        control_child(&theater_tx, &full, &theirs, m, true).await.expect("mutate kills");
+        control_child(&theater_tx, &full, &theirs, stranger, true).await.expect("mutate kills a stranger");
+        let _ = control_child(&theater_tx, &full, &theirs, next, true).await;
     }
 
     #[test]
