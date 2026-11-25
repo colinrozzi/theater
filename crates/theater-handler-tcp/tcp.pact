@@ -77,9 +77,18 @@ interface tcp {
         // no data within timeout-ms returns Err("timeout: ...") instead of
         // blocking forever — so a sequential actor cannot be permanently wedged
         // by a stalled peer; it errors that one read and stays alive. Actor-wide
-        // (applies to all of this actor's passive reads), same shape as the
-        // idle-timeout knob. Additive: actors that never call it are unchanged.
+        // (applies to all of this actor's passive reads, and no other actor's).
+        // Additive: actors that never call it are unchanged.
         set-read-timeout: func(timeout-ms: u64) -> result<_, string>
+
+        // Bound how long send() may wait for the peer to take the data.
+        // timeout-ms = 0 disables (the default: send waits as long as the
+        // kernel does, about 15 min for a dead peer on Linux). With a bound, a
+        // send() whose peer takes no bytes within timeout-ms (it stopped
+        // reading, or the connection is half-open) returns Err("timeout: ...");
+        // part of the data may have gone, so close the connection. Actor-wide,
+        // this actor only. Additive: actors that never call it are unchanged.
+        set-write-timeout: func(timeout-ms: u64) -> result<_, string>
 
         // Close a connection
         close: func(connection-id: string) -> result<_, string>
