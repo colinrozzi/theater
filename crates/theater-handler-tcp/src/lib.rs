@@ -3637,9 +3637,20 @@ mod tests {
         let b = template.new_instance(None);
         a.timeouts.set_read(Some(Duration::from_millis(5)));
         a.timeouts.set_write(Some(Duration::from_millis(7)));
-        assert_eq!(b.timeouts.read(), None, "b's read bound must not follow a's");
-        assert_eq!(b.timeouts.write(), None, "b's write bound must not follow a's");
-        assert!(Arc::ptr_eq(&a.shared_state, &b.shared_state), "connections stay shared, for transfer");
+        assert_eq!(
+            b.timeouts.read(),
+            None,
+            "b's read bound must not follow a's"
+        );
+        assert_eq!(
+            b.timeouts.write(),
+            None,
+            "b's write bound must not follow a's"
+        );
+        assert!(
+            Arc::ptr_eq(&a.shared_state, &b.shared_state),
+            "connections stay shared, for transfer"
+        );
     }
 
     /// send()'s bound end to end (lux): to a peer that never reads, a bounded send
@@ -3648,16 +3659,37 @@ mod tests {
     #[tokio::test]
     async fn send_bounded_times_out_and_closes_the_connection() {
         let (st, conn_id, _owner, _client) = pending_conn().await; // the client never reads
-        let stream_arc = st.connections.lock().await.get(&conn_id).unwrap().stream.clone();
+        let stream_arc = st
+            .connections
+            .lock()
+            .await
+            .get(&conn_id)
+            .unwrap()
+            .stream
+            .clone();
         let big = vec![0u8; 64 * 1024 * 1024];
         let t0 = std::time::Instant::now();
-        let r = send_bounded(&st, conn_id, &stream_arc, &big, Some(Duration::from_millis(300))).await;
+        let r = send_bounded(
+            &st,
+            conn_id,
+            &stream_arc,
+            &big,
+            Some(Duration::from_millis(300)),
+        )
+        .await;
         match r {
             Err(Value::String(e)) => assert!(e.starts_with("timeout:"), "{e}"),
             other => panic!("expected a timeout, got {other:?}"),
         }
-        assert!(t0.elapsed() < Duration::from_secs(10), "took {:?}", t0.elapsed());
-        assert!(st.connections.lock().await.get(&conn_id).is_none(), "the timed-out connection is still registered");
+        assert!(
+            t0.elapsed() < Duration::from_secs(10),
+            "took {:?}",
+            t0.elapsed()
+        );
+        assert!(
+            st.connections.lock().await.get(&conn_id).is_none(),
+            "the timed-out connection is still registered"
+        );
     }
 
     /// The same over TLS (tova): with the peer's window shut, rustls holds
@@ -3680,7 +3712,9 @@ mod tests {
         let server = acceptor.accept(tcp).await.unwrap();
         let st = Arc::new(SharedTcpState::new(None, None));
         let conn_id = st.next_id();
-        let stream_arc = Arc::new(Mutex::new(StreamState::Full(Box::new(UnifiedStream::ServerTls(server)))));
+        let stream_arc = Arc::new(Mutex::new(StreamState::Full(Box::new(
+            UnifiedStream::ServerTls(server),
+        ))));
         st.connections.lock().await.insert(
             conn_id,
             ConnectionEntry {
@@ -3696,7 +3730,13 @@ mod tests {
         let t0 = std::time::Instant::now();
         let r = tokio::time::timeout(
             Duration::from_secs(10),
-            send_bounded(&st, conn_id, &stream_arc, &big, Some(Duration::from_millis(300))),
+            send_bounded(
+                &st,
+                conn_id,
+                &stream_arc,
+                &big,
+                Some(Duration::from_millis(300)),
+            ),
         )
         .await
         .expect("a timed-out TLS send must return, not hang in a graceful close");
@@ -3704,9 +3744,19 @@ mod tests {
             Err(Value::String(e)) => assert!(e.starts_with("timeout:"), "{e}"),
             other => panic!("expected a timeout, got {other:?}"),
         }
-        assert!(t0.elapsed() < Duration::from_secs(5), "took {:?}", t0.elapsed());
-        assert!(st.connections.lock().await.get(&conn_id).is_none(), "still registered");
-        assert!(matches!(*stream_arc.lock().await, StreamState::Closed), "the stream wasn't dropped");
+        assert!(
+            t0.elapsed() < Duration::from_secs(5),
+            "took {:?}",
+            t0.elapsed()
+        );
+        assert!(
+            st.connections.lock().await.get(&conn_id).is_none(),
+            "still registered"
+        );
+        assert!(
+            matches!(*stream_arc.lock().await, StreamState::Closed),
+            "the stream wasn't dropped"
+        );
         client.abort();
     }
 
@@ -3716,17 +3766,41 @@ mod tests {
     #[tokio::test]
     async fn send_bounded_gives_up_on_a_held_lock_and_keeps_the_connection() {
         let (st, conn_id, _owner, _client) = pending_conn().await;
-        let stream_arc = st.connections.lock().await.get(&conn_id).unwrap().stream.clone();
+        let stream_arc = st
+            .connections
+            .lock()
+            .await
+            .get(&conn_id)
+            .unwrap()
+            .stream
+            .clone();
         let held = stream_arc.clone().lock_owned().await; // as a blocked receive would
         let t0 = std::time::Instant::now();
-        let r = send_bounded(&st, conn_id, &stream_arc, b"hi", Some(Duration::from_millis(200))).await;
+        let r = send_bounded(
+            &st,
+            conn_id,
+            &stream_arc,
+            b"hi",
+            Some(Duration::from_millis(200)),
+        )
+        .await;
         match r {
-            Err(Value::String(e)) => assert!(e.starts_with("timeout:") && e.contains("nothing was sent"), "{e}"),
+            Err(Value::String(e)) => assert!(
+                e.starts_with("timeout:") && e.contains("nothing was sent"),
+                "{e}"
+            ),
             other => panic!("expected a busy timeout, got {other:?}"),
         }
-        assert!(t0.elapsed() < Duration::from_secs(5), "took {:?}", t0.elapsed());
+        assert!(
+            t0.elapsed() < Duration::from_secs(5),
+            "took {:?}",
+            t0.elapsed()
+        );
         drop(held);
-        assert!(st.connections.lock().await.get(&conn_id).is_some(), "a send that wrote nothing must not close");
+        assert!(
+            st.connections.lock().await.get(&conn_id).is_some(),
+            "a send that wrote nothing must not close"
+        );
     }
 
     /// send()'s bound: a peer that never reads lets the kernel buffers fill,
@@ -3745,7 +3819,11 @@ mod tests {
         let t0 = std::time::Instant::now();
         let r = write_all_bounded(&mut c, &big, Some(Duration::from_millis(300))).await;
         assert_eq!(r, Err(SendFailure::Timeout));
-        assert!(t0.elapsed() < Duration::from_secs(10), "took {:?}", t0.elapsed());
+        assert!(
+            t0.elapsed() < Duration::from_secs(10),
+            "took {:?}",
+            t0.elapsed()
+        );
     }
 
     /// The bounded read used by `receive()`: a silent peer must trip the
